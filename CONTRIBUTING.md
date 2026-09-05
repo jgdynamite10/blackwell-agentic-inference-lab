@@ -1,7 +1,15 @@
 # Contributing
 
-Thank you for your interest. This is a research repository with strict safety
-and integrity rules; please read [AGENTS.md](AGENTS.md) before contributing.
+**External contributions are not currently being accepted.** Licensing,
+intellectual-property, publication, and contribution policies for this project
+are under review. Until those policies are approved and announced by the
+project owner, only the project owner and explicitly authorized collaborators
+may contribute, and no contribution implies any grant of license in either
+direction.
+
+This is a private research repository with strict safety and integrity rules;
+read [AGENTS.md](AGENTS.md) before making any change. The guidelines below
+apply to authorized collaborators.
 
 ## Ground rules
 

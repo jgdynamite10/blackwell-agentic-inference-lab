@@ -1,30 +1,33 @@
 # Results
 
 This directory is an intentional placeholder. **It contains no genuine
-benchmark results, and it never will until results are explicitly approved for
-publication.**
+benchmark results, and none may be added without the project owner's explicit
+approval after validation and review.**
 
 ## Why is this directory empty?
 
-The repository is public, but all genuine benchmark results — raw, normalized,
-intermediate, or unpublished — remain private until they have been validated,
-reviewed, sanitized, and intentionally released through the process described
-in [docs/publication-governance.md](../docs/publication-governance.md).
+All genuine benchmark results — raw, normalized, intermediate, or processed —
+live **outside the Git working tree entirely** and remain private. Any release
+would happen only after validation, review, sanitization, and the owner's
+explicit approval, through the process described in
+[docs/publication-governance.md](../docs/publication-governance.md). This
+repository itself is private; merging something here is not a release.
 
-Benchmark tooling writes genuine results to a private location **outside**
-this repository, configured via the `LAB_RESULTS_DIR` environment variable
-(see `.env.example`). The runner refuses to start if that location resolves
-inside the repository. `.gitignore` additionally excludes this directory's
-contents, but the design — not `.gitignore` — is the real boundary.
+Benchmark tooling writes genuine results to an external location configured
+via the `LAB_RESULTS_DIR` environment variable (see `.env.example`). The
+runner fails closed if that variable is unset for a real run and refuses to
+start if the location resolves inside the repository (including via symlinks).
+`.gitignore` additionally excludes this directory's contents, but it is a
+defense-in-depth control only — the design, not `.gitignore`, is the boundary.
 
-## What will eventually appear here
+## What could eventually appear here
 
-Only deliberately released artifacts, merged through a dedicated, separately
-reviewed pull request containing exclusively approved and sanitized data:
+Only owner-approved artifacts, merged through a dedicated, separately reviewed
+pull request containing exclusively approved and sanitized data:
 
 - Sanitized, validated result sets accompanying the Phase 7 technical report.
-- Their run manifests (which are designed to be publishable: no account
-  identifiers, no instance identifiers, no secrets).
+- Their run manifests (which are designed to be sanitization-friendly: no
+  account identifiers, no instance identifiers, no secrets).
 
 ## Where to look meanwhile
 

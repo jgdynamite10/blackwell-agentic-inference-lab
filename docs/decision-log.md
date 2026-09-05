@@ -4,7 +4,7 @@ Append-only record of project decisions, methodology revisions, and incidents.
 Every entry states the date, the decision, the rationale, and — for
 methodology changes — which results (if any) predate the change.
 Methodology may not be revised after examining results without an entry here
-([../AGENTS.md](../AGENTS.md), section 4).
+([../AGENTS.md](../AGENTS.md), section 6).
 
 ---
 
@@ -60,3 +60,21 @@ require it. Final selection happens during the AWS phase preflight.
 runtime overhead, and 16 vCPUs matches Akamai's 1-GPU plan, strengthening the
 controlled-resource design. See
 [feasibility-report.md](feasibility-report.md), section 4.1.
+
+## 2026-09-05 — D-0006: Governance update — private repository, execution boundary, licensing under review
+
+**Decision.** Per the owner's governance update: (a) the repository is private
+and remains private indefinitely; no material is published or mirrored
+externally without explicit owner authorization; (b) licensing and publication
+rights are under review — no license is granted and no LICENSE file is added
+without explicit authorization; external contributions are not accepted
+pending policy review; (c) the hosted Cloud Agent never requests, receives, or
+uses provider credentials and performs cloud-independent work only; all
+credentialed operations run in the owner's authenticated local environment;
+(d) genuine benchmark data is never written inside the Git working tree — the
+`LAB_RESULTS_DIR` guard distinguishes real-run mode (fail closed) from
+explicit synthetic/test mode.
+
+**Rationale.** Owner instruction (governance update memo, 2026-09-05). This
+supersedes earlier statements describing the repository or methodology as
+public; the methodology is described as documented and reproducible.

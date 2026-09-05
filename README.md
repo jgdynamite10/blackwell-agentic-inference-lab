@@ -1,12 +1,17 @@
 # Blackwell Agentic Inference Lab
 
-A reproducible research lab for measuring how inference software, numerical
-precision, and cloud environment affect the ability of an NVIDIA RTX PRO 6000
-Blackwell Server Edition system to satisfy production-like agentic-AI
-service-level objectives (SLOs).
+A research lab with a documented and reproducible methodology for measuring
+how inference software, numerical precision, and cloud environment affect the
+ability of an NVIDIA RTX PRO 6000 Blackwell Server Edition system to satisfy
+production-like agentic-AI service-level objectives (SLOs).
 
-**Status:** Phase 1 — repository foundation and feasibility. No benchmarks have
-been run and no results have been published.
+**This repository is private and must remain private.** Do not change its
+visibility, mirror it, or publish any branch, pull request, artifact, result,
+or document from it without the project owner's explicit authorization.
+
+**Status:** Phase 1 — repository foundation and feasibility. No benchmarks
+have been run. No results exist, and any future genuine results are stored
+outside this Git repository entirely (see below).
 
 ## Research questions
 
@@ -57,18 +62,20 @@ schemas/                     JSON Schemas for run manifests and benchmark result
 examples/                    Synthetic example manifest and result files (NOT real data)
 src/blackwell_lab/           Minimal Python package (schema validation, results-path guard)
 tests/                       Automated tests
-scripts/preflight/           Read-only cloud feasibility checks
+scripts/preflight/           Read-only cloud feasibility checks (run locally by the operator)
 results/                     Placeholder only — genuine results are never committed here
 ```
 
 ## Results privacy
 
-This repository is public, but **all genuine benchmark results remain private
-until explicitly approved for publication**. The repository contains only
-schemas, synthetic examples, and documentation of the result format. Benchmark
-tooling writes genuine results to a location outside the repository
-(`LAB_RESULTS_DIR`) and refuses to run if that location resolves inside the
-repository. See [docs/results-privacy.md](docs/results-privacy.md) and
+**All genuine benchmark results remain external to Git and private.** The
+repository contains only schemas, synthetic examples clearly labeled as such,
+and documentation of the result format. Benchmark tooling writes genuine
+results to a location outside the repository (`LAB_RESULTS_DIR`), fails closed
+if that variable is unset for a real run, and refuses to run if the location
+resolves inside the repository — including through symlinks. Nothing is
+published without the project owner's explicit approval. See
+[docs/results-privacy.md](docs/results-privacy.md) and
 [docs/publication-governance.md](docs/publication-governance.md).
 
 ## Getting started (development)
@@ -89,8 +96,15 @@ pytest
 - [SECURITY.md](SECURITY.md) — reporting and secret-handling policy.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute.
 
-## License and disclaimer
+## Licensing
 
-No benchmark findings have been published. Nothing in this repository should
-be interpreted as a performance or superiority claim about any cloud provider,
-GPU, model, or serving stack.
+Copyright ownership, publication authorization, and licensing for this project
+are under review. No open-source software or documentation license is granted
+at this time. An approved license may be added only after the required review
+and explicit authorization.
+
+## Disclaimer
+
+No benchmark findings exist or have been released. Nothing in this repository
+should be interpreted as a performance or superiority claim about any cloud
+provider, GPU, model, or serving stack.

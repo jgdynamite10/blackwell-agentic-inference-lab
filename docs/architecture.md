@@ -53,7 +53,8 @@ supported, and include repeated measurements (see
 ### Serving stack (Phases 3–4)
 
 One serving container per configuration, pinned by digest. Proposed paths:
-vLLM (open-source baseline), then TensorRT-LLM and NVIDIA NIM. Precision:
+vLLM (the openly developed baseline engine), then TensorRT-LLM and NVIDIA
+NIM. Precision:
 BF16 and NVFP4, subject to the compatibility findings in
 [feasibility-report.md](feasibility-report.md).
 
@@ -73,8 +74,9 @@ privately with the run results.
   [../schemas/run-manifest.schema.json](../schemas/run-manifest.schema.json)
   and results conforming to
   [../schemas/benchmark-result.schema.json](../schemas/benchmark-result.schema.json).
-- The public repository carries only schemas, synthetic examples, and
-  sanitized, approved publications (Phase 7).
+- The repository carries only schemas, synthetic examples, test fixtures,
+  methodology, documentation, and code; sanitized results may be added only
+  with explicit owner approval (Phase 7).
 
 ## Comparison modes
 

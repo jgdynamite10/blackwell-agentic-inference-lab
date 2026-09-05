@@ -32,7 +32,7 @@
     },
     "is_synthetic_example": {
       "type": "boolean",
-      "description": "True only for synthetic example files committed to the public repository. Genuine runs must set false and must never be committed."
+      "description": "True only for synthetic example files committed to the repository. Genuine runs must set false; genuine manifests live outside the Git working tree and must never be committed."
     },
     "created_at_utc": {
       "type": "string",
@@ -51,11 +51,11 @@
         },
         "repository": {
           "type": "string",
-          "description": "Public repository URL for the benchmark code."
+          "description": "Repository URL for the benchmark code."
         },
         "dirty": {
           "type": "boolean",
-          "description": "True if the working tree had uncommitted changes (invalidates the run for publication)."
+          "description": "True if the working tree had uncommitted changes (invalidates the run)."
         }
       }
     },

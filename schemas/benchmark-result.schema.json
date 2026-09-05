@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/schemas/benchmark-result.schema.json",
   "title": "Benchmark Result",
-  "description": "Aggregated results for one run (one repetition of one experimental cell), linked to its run manifest. Genuine results are private and are never committed to the public repository; only synthetic examples (is_synthetic_example=true) may be committed.",
+  "description": "Aggregated results for one run (one repetition of one experimental cell), linked to its run manifest. Genuine results live outside the Git working tree and are never committed to the repository; only synthetic examples (is_synthetic_example=true) may be committed.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -30,7 +30,7 @@
     },
     "is_synthetic_example": {
       "type": "boolean",
-      "description": "True only for synthetic example files committed to the public repository."
+      "description": "True only for synthetic example files committed to the repository."
     },
     "manifest_ref": {
       "type": "string",

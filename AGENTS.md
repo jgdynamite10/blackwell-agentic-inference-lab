@@ -21,7 +21,47 @@ explicitly revises them in writing.
    the dedicated AWS replication phase (Phase 6) is explicitly authorized.
 6. Follow the spend controls in [docs/cost-guardrails.md](docs/cost-guardrails.md).
 
-## 2. Credential handling
+## 2. Repository privacy
+
+1. **This repository is private and must remain private indefinitely.** Never
+   change its visibility, create a public repository or mirror of it, or
+   publish branches, pull requests, releases, packages, artifacts, benchmark
+   results, reports, documentation, or source code outside this private
+   repository without the project owner's explicit authorization.
+2. Do not describe the project as public, open source, or intended for
+   automatic publication. Describe the methodology as **documented and
+   reproducible**.
+3. Licensing and publication rights are under review. No software,
+   documentation, patent, content, or data license is granted at this time.
+   Do not add a LICENSE file unless the owner explicitly authorizes a specific
+   license.
+4. Do not upload project materials to any external service without the
+   owner's explicit authorization.
+
+## 3. Execution boundary (hosted Cloud Agent vs local operator)
+
+1. The hosted Cloud Agent must **not** request, receive, discover, store,
+   print, or use credentials for Akamai Cloud, AWS, Google Cloud, NVIDIA
+   NGC/NIM, Hugging Face, or any other infrastructure or external service —
+   and must not use GitHub credentials beyond the repository access already
+   provided.
+2. Never ask the owner to paste tokens, keys, passwords, credential files,
+   cookies, or temporary credentials into chat, the repository, pull requests,
+   issues, CI configuration, or the Cloud Agent environment.
+3. The Cloud Agent performs **cloud-independent** work only: application and
+   benchmark code, provider-neutral interfaces and adapters, schemas and
+   validation, synthetic fixtures, mocked tests, deployment templates,
+   dry-run/planning commands, documentation, CI, cost and safety controls, and
+   scripts intended for later local execution. Credential-dependent preflight
+   scripts are not executed from the Cloud Agent.
+4. All credentialed operations — account and quota discovery, capacity and
+   pricing checks, provisioning, authenticated model downloads, benchmark
+   execution, result collection, teardown, and teardown verification — are
+   performed separately by the owner through their authenticated local
+   environment. Code must support this separation cleanly and must not assume
+   the Cloud Agent will ever hold provider credentials.
+
+## 4. Credential handling
 
 1. **Never print, save, commit, or expose credentials.** This includes API
    keys, tokens, service-account files, SSH keys, kubeconfigs, and `.tfvars`
@@ -33,20 +73,21 @@ explicitly revises them in writing.
    documents variable names only, never values.
 4. Treat `.gitignore` as a convenience, not a security boundary.
 
-## 3. Data and results integrity
+## 5. Data and results integrity
 
 1. **Use only synthetic workload data.** The benchmark must never connect to
    production Akamai systems or use customer information.
 2. **Treat genuine raw benchmark results as private and immutable.** Never
-   commit genuine raw, normalized, intermediate, or unpublished results to
-   this public repository. See [docs/results-privacy.md](docs/results-privacy.md).
+   commit genuine raw, normalized, intermediate, or unreleased results to
+   this repository. Genuine results live outside the Git working tree
+   entirely. See [docs/results-privacy.md](docs/results-privacy.md).
 3. Genuine results are written only to the private location configured via
    `LAB_RESULTS_DIR`, which must resolve outside this repository. The runner
    must refuse to start otherwise.
 4. Publication of genuine results happens only through the process in
    [docs/publication-governance.md](docs/publication-governance.md).
 
-## 4. Research integrity
+## 6. Research integrity
 
 1. **Record a manifest for every experiment.** Every run manifest must
    identify the Git commit, model artifact and hash, container digest,
@@ -65,14 +106,14 @@ explicitly revises them in writing.
    separated in analysis and reporting (see
    [methodology/experiment-matrix.md](methodology/experiment-matrix.md)).
 
-## 5. Phase discipline
+## 7. Phase discipline
 
 1. **Stop at the end of the currently authorized phase.** The roadmap is in
    [docs/roadmap.md](docs/roadmap.md). Work on a later phase begins only after
    the project owner explicitly authorizes it.
 2. Currently authorized: **Phase 1 only.**
 
-## 6. Repository hygiene
+## 8. Repository hygiene
 
 1. Never commit: cloud account identifiers, internal hostnames or IP
    addresses, instance identifiers, customer or production data, credentials

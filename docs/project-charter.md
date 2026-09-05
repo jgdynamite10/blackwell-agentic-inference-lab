@@ -40,8 +40,9 @@ GPU across three public clouds.
 
 1. **Safety first.** No cloud resource is created, resized, modified, or
    deleted without explicit owner approval. See [AGENTS.md](../AGENTS.md).
-2. **Results privacy.** Genuine results stay outside the public repository
-   until deliberately published. See [results-privacy.md](results-privacy.md).
+2. **Privacy.** The repository is private and remains private. Genuine results
+   stay outside the Git working tree entirely, and nothing is released without
+   explicit owner authorization. See [results-privacy.md](results-privacy.md).
 3. **Phase discipline.** Work proceeds through the phases in
    [roadmap.md](roadmap.md) and stops at the end of the authorized phase.
 4. **Evidence discipline.** Feasibility and analysis documents must
@@ -51,14 +52,16 @@ GPU across three public clouds.
 
 ## Success criteria (project level)
 
-- A benchmark whose full methodology, schemas, workload definitions, and
-  tooling are public and reproducible by a third party with their own cloud
-  accounts.
+- A benchmark whose methodology, schemas, workload definitions, and tooling
+  are documented and reproducible — such that an authorized party with their
+  own cloud accounts could rerun the study and check the findings.
 - Cross-cloud findings that clearly separate controlled-resource comparisons
   from provider-native comparisons, and that document every material
   environmental difference.
-- A published technical report (Phase 7) containing only validated, reviewed,
-  sanitized results.
+- A technical report (Phase 7) containing only validated, reviewed, sanitized
+  results. Whether, where, and under what license any of it is ever released
+  is a separate owner decision; licensing and publication rights are under
+  review and no release is scheduled or automatic.
 
 ## Key documents
 

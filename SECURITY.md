@@ -2,7 +2,8 @@
 
 ## Scope
 
-This is a public research repository. It intentionally contains **no
+This is a **private** research repository, and it must remain private. Even
+so, it is treated as if it could be exposed: it intentionally contains **no
 credentials, no cloud account identifiers, no internal hostnames or IP
 addresses, no instance identifiers, no Terraform state, and no genuine
 benchmark results**. If you find any of these in the repository history,
@@ -15,7 +16,7 @@ please report it immediately (see below).
   describes only the *category* of the problem (for example, "possible
   committed secret in file X") without quoting the sensitive value.
 - Do not post secret values, account identifiers, or infrastructure metadata
-  in public issues or pull requests.
+  in issues or pull requests, even though the repository is private.
 
 ## Secret handling rules
 

@@ -2,7 +2,7 @@
 
 Work proceeds phase by phase. **Each phase begins only after the project owner
 explicitly authorizes it, and work stops at the end of the currently
-authorized phase** ([AGENTS.md](../AGENTS.md), section 5).
+authorized phase** ([AGENTS.md](../AGENTS.md), section 7).
 
 Currently authorized: **Phase 1 only.**
 
@@ -68,8 +68,10 @@ for the other providers.
 
 Calculate outcome-level performance and economic measures across Akamai Cloud,
 Google Cloud, and AWS; document limitations; sanitize approved results per
-[publication-governance.md](publication-governance.md); and prepare the public
-technical report.
+[publication-governance.md](publication-governance.md); and prepare the
+technical report. Any release of the report or results beyond this private
+repository requires the owner's separate, explicit authorization; none is
+scheduled or automatic.
 
 ## Phase 8 — Optional Dynamo extension
 

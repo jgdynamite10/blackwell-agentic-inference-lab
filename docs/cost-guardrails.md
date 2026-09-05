@@ -54,6 +54,29 @@ for Phases 3–6:
 4. **Billing alerts.** Where the account permits, billing alerts are set at
    the phase budget and at 150% of it.
 
+## Required local-operator workflow (design contract for Phases 3+)
+
+Future provider execution code must **default to dry-run or plan mode** and
+require explicit local confirmation before any billable change. All
+credentialed steps run in the owner's authenticated local environment — never
+in the hosted Cloud Agent (AGENTS.md, section 3). Tooling must let a local
+operator:
+
+1. verify identity, account/project, region, quota, and estimated price;
+2. generate a deployment plan;
+3. review a maximum-cost estimate;
+4. explicitly approve provisioning;
+5. apply unique project/run tags or labels;
+6. execute the benchmark;
+7. export results to `LAB_RESULTS_DIR`;
+8. tear down **only** resources created for the recorded run (matched by the
+   run's unique tags — never by broad filters);
+9. verify that no project-created billable resources remain.
+
+**Never implement a broad cleanup command** that could delete resources not
+created by this project. Teardown operates strictly on the recorded run's
+tagged resources.
+
 ## Cost recording
 
 Every run manifest records the instance type, region, and list price basis in

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   lint:
-    name: Lint and format
+    name: Ruff lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,11 +21,22 @@ jobs:
         run: pip install "ruff>=0.6"
       - name: Ruff lint
         run: ruff check .
+
+  format:
+    name: Ruff format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install "ruff>=0.6"
       - name: Ruff format check
         run: ruff format --check .
 
   test:
-    name: Tests
+    name: pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -37,11 +48,37 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install package with dev extras
         run: pip install -e ".[dev]"
-      - name: Run tests
+      - name: Run full test suite
         run: pytest
 
+  schema-validation:
+    name: Schema validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package with dev extras
+        run: pip install -e ".[dev]"
+      - name: Validate schemas and synthetic examples
+        run: pytest tests/test_schemas.py -v
+
+  privacy-guard:
+    name: LAB_RESULTS_DIR privacy guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package with dev extras
+        run: pip install -e ".[dev]"
+      - name: Test results-privacy path guard
+        run: pytest tests/test_paths.py -v
+
   secret-detection:
-    name: Secret detection
+    name: Secret detection (gitleaks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

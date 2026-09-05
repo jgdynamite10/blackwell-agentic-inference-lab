@@ -1,18 +1,41 @@
 """Results-privacy path guard.
 
-Genuine benchmark results must be written outside the public repository, to a
-private location supplied via the ``LAB_RESULTS_DIR`` environment variable.
-The benchmark runner (Phase 2+) must call :func:`resolve_results_dir` at
-startup and refuse to run if the configured location is missing or resolves
-inside the repository (including through symlinks or relative paths).
+Genuine benchmark results must never be written inside the Git working tree.
+They go to an external private location supplied via the ``LAB_RESULTS_DIR``
+environment variable. The benchmark runner (Phase 2+) must call
+:func:`resolve_results_dir` at startup, declare its run mode explicitly, and
+refuse to run when this module raises.
+
+Expected behavior (documented in ``docs/results-privacy.md``):
+
+- **Real-run mode** (:attr:`RunMode.REAL`, the default): fails closed when the
+  location is unset or blank; fails when the value — after resolving ``~``,
+  relative segments, and symlinks — is the repository root or any directory
+  beneath it. There is never a fallback to ``results/`` or any other
+  repository directory.
+- **Synthetic/test mode** (:attr:`RunMode.SYNTHETIC`): must be requested
+  explicitly by the caller and is used only for synthetic examples and tests.
+  An unset location yields ``None`` ("no persistence") rather than a silent
+  fallback; a provided path is still rejected if it resolves inside the
+  repository.
+- The guard never creates the directory. A nonexistent *external* path is
+  accepted; creating it is the runner's explicit, logged action.
 """
 
 from __future__ import annotations
 
+import enum
 import os
 from pathlib import Path
 
 RESULTS_DIR_ENV_VAR = "LAB_RESULTS_DIR"
+
+
+class RunMode(enum.Enum):
+    """Explicit run mode; callers must never infer one from context."""
+
+    REAL = "real"
+    SYNTHETIC = "synthetic"
 
 
 class ResultsLocationError(RuntimeError):
@@ -36,26 +59,39 @@ def resolve_results_dir(
     value: str | None = None,
     *,
     repo_root: Path | None = None,
-) -> Path:
-    """Validate and return the private results directory.
+    mode: RunMode = RunMode.REAL,
+) -> Path | None:
+    """Validate and return the private results directory for the given mode.
 
-    Raises :class:`ResultsLocationError` if the variable is unset/empty or the
-    path resolves inside the repository. Does not create the directory.
+    ``value`` defaults to the ``LAB_RESULTS_DIR`` environment variable.
+
+    Returns the canonical (symlink-resolved) external path, or ``None`` in
+    :attr:`RunMode.SYNTHETIC` when no location is configured (meaning "persist
+    nothing" — never a repository fallback).
+
+    Raises :class:`ResultsLocationError` when the location is unset in
+    :attr:`RunMode.REAL`, or when any provided location resolves to the
+    repository root or a directory beneath it (in either mode).
     """
     raw = value if value is not None else os.environ.get(RESULTS_DIR_ENV_VAR, "")
     if not raw.strip():
+        if mode is RunMode.SYNTHETIC:
+            return None
         raise ResultsLocationError(
-            f"{RESULTS_DIR_ENV_VAR} is not set. Genuine results must be written to a "
-            "private location outside the public repository (see docs/results-privacy.md)."
+            f"{RESULTS_DIR_ENV_VAR} is not set. Real runs fail closed: genuine results "
+            "must be written to a private location outside the repository "
+            "(see docs/results-privacy.md). There is no fallback directory."
         )
 
+    # Path.resolve() canonicalizes: expands relative segments and follows
+    # symlinks, so a symlink pointing into the repository is caught.
     results_dir = Path(raw).expanduser().resolve()
     root = (repo_root or repository_root()).resolve()
 
     if results_dir == root or root in results_dir.parents:
         raise ResultsLocationError(
-            f"{RESULTS_DIR_ENV_VAR}={raw!r} resolves inside the public repository "
-            f"({root}). Refusing to run: genuine results must never be written into "
-            "the repository (see docs/results-privacy.md)."
+            f"{RESULTS_DIR_ENV_VAR}={raw!r} resolves inside the repository ({root}). "
+            "Refusing to run: genuine results must never be written into the Git "
+            "working tree (see docs/results-privacy.md)."
         )
     return results_dir
