@@ -57,7 +57,10 @@ override.tf.json
 
 # --- Benchmark artifacts and experimental results ---
 # Results stay private until validated, reviewed, and intentionally released.
-results/
+# Only the placeholder README is tracked; genuine results are written outside
+# the repository entirely (LAB_RESULTS_DIR) — .gitignore is not the boundary.
+results/*
+!results/README.md
 runs/
 artifacts/
 outputs/
