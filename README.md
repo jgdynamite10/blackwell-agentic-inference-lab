@@ -10,8 +10,7 @@ No benchmark findings have been published. Experimental results will remain priv
 
 ## Licensing
 
-No license is granted at this time. Licensing remains pending employer policy and ownership review.
-
-Until a license is added, all rights are reserved. Publication of this repository is for visibility and documentation purposes only and does not grant permission to use, copy, modify, or redistribute its contents.
-
-This section is temporary and will be replaced once the licensing and ownership review is complete.
+Copyright ownership, publication authorization, and licensing for this
+project are under review. No open-source software or documentation license
+is granted at this time. An approved license will be added before the
+project's substantive materials are released.
