@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/schemas/run-manifest.schema.json",
+  "title": "Run Manifest",
+  "description": "Complete provenance record for one benchmark run. Written before measurement begins; timing-condition fields are finalized at run end. Must contain no secrets, account identifiers, or instance identifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "is_synthetic_example",
+    "created_at_utc",
+    "git",
+    "model",
+    "serving",
+    "host",
+    "cloud",
+    "generation",
+    "workload",
+    "timing_conditions"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this manifest schema.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Unique, non-sensitive identifier for this run (e.g. UUID).",
+      "minLength": 8
+    },
+    "is_synthetic_example": {
+      "type": "boolean",
+      "description": "True only for synthetic example files committed to the public repository. Genuine runs must set false and must never be committed."
+    },
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Manifest creation time, UTC ISO 8601."
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "repository"],
+      "properties": {
+        "commit": {
+          "type": "string",
+          "description": "Full Git commit SHA of the benchmark code used.",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "repository": {
+          "type": "string",
+          "description": "Public repository URL for the benchmark code."
+        },
+        "dirty": {
+          "type": "boolean",
+          "description": "True if the working tree had uncommitted changes (invalidates the run for publication)."
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "revision", "artifact_hash", "precision"],
+      "properties": {
+        "artifact": {
+          "type": "string",
+          "description": "Model artifact identifier (e.g. Hugging Face repo id)."
+        },
+        "revision": {
+          "type": "string",
+          "description": "Artifact repository revision (commit) the weights were fetched at."
+        },
+        "artifact_hash": {
+          "type": "string",
+          "description": "Aggregate content hash of the model files (algorithm:hex).",
+          "pattern": "^(sha256|sha512|blake3):[0-9a-f]+$"
+        },
+        "precision": {
+          "type": "string",
+          "enum": ["bf16", "nvfp4", "fp8", "w4a16", "other"],
+          "description": "Numerical precision / quantization of the served weights."
+        },
+        "license": {
+          "type": "string",
+          "description": "License identifier of the model artifact (e.g. OpenMDW-1.1)."
+        }
+      }
+    },
+    "serving": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "engine_version", "container_digest"],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "enum": ["vllm", "tensorrt-llm", "nim", "other"],
+          "description": "Serving path."
+        },
+        "engine_version": {
+          "type": "string",
+          "description": "Exact serving-engine version (and commit for non-release builds)."
+        },
+        "container_digest": {
+          "type": "string",
+          "description": "Immutable container image digest (repo@sha256:...).",
+          "pattern": "^.+@sha256:[0-9a-f]{64}$"
+        },
+        "launch_flags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Complete engine launch flags (no secrets)."
+        },
+        "environment_overrides": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Non-secret environment variables affecting engine behavior (e.g. backend selections)."
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gpu_model",
+        "gpu_count",
+        "gpu_memory_gb",
+        "driver_version",
+        "cuda_version",
+        "operating_system",
+        "cpu_model",
+        "vcpu_count",
+        "system_memory_gib"
+      ],
+      "properties": {
+        "gpu_model": { "type": "string", "description": "e.g. NVIDIA RTX PRO 6000 Blackwell Server Edition" },
+        "gpu_count": { "type": "integer", "minimum": 1 },
+        "gpu_memory_gb": { "type": "number", "exclusiveMinimum": 0 },
+        "driver_version": { "type": "string", "description": "NVIDIA driver version." },
+        "cuda_version": { "type": "string", "description": "CUDA toolkit/runtime version." },
+        "operating_system": { "type": "string", "description": "OS distribution and version." },
+        "cpu_model": { "type": "string", "description": "Host CPU model as reported by the instance." },
+        "vcpu_count": { "type": "integer", "minimum": 1 },
+        "system_memory_gib": { "type": "number", "exclusiveMinimum": 0 },
+        "storage_description": { "type": "string", "description": "Storage type/layout (no volume identifiers)." },
+        "virtualization": { "type": "string", "description": "Hypervisor / virtualization notes if known." }
+      }
+    },
+    "cloud": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "instance_type", "region", "comparison_mode"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["akamai", "gcp", "aws", "other"],
+          "description": "Cloud provider."
+        },
+        "instance_type": {
+          "type": "string",
+          "description": "Purchasable instance type / plan name (NOT an instance identifier)."
+        },
+        "region": { "type": "string", "description": "Provider region name (zone allowed where applicable)." },
+        "comparison_mode": {
+          "type": "string",
+          "enum": ["controlled-resource", "provider-native"],
+          "description": "Which comparison mode this run belongs to. Modes are never mixed in analysis."
+        },
+        "resource_limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Container resource caps applied in controlled-resource mode.",
+          "properties": {
+            "vcpu_limit": { "type": "number", "exclusiveMinimum": 0 },
+            "memory_limit_gib": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "list_price_usd_per_hour": {
+          "type": "number",
+          "minimum": 0,
+          "description": "On-demand list price basis used for cost measures."
+        },
+        "price_source_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Date the list price was sourced."
+        }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["temperature", "top_p", "max_tokens"],
+      "properties": {
+        "temperature": { "type": "number", "minimum": 0 },
+        "top_p": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "max_tokens": { "type": "integer", "minimum": 1 },
+        "seed": {
+          "type": ["integer", "null"],
+          "description": "Seed used, or null if the engine does not support seeding."
+        },
+        "reasoning_mode": {
+          "type": ["boolean", "null"],
+          "description": "Chat-template reasoning/thinking toggle if the model supports one."
+        }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "profile", "concurrency"],
+      "properties": {
+        "name": { "type": "string", "description": "Workload identifier (e.g. cloud-ops-agent)." },
+        "version": { "type": "string", "description": "Workload/scenario fixture version (Git commit or semver)." },
+        "profile": {
+          "type": "string",
+          "enum": ["interactive", "batch-heavy"],
+          "description": "Workload profile."
+        },
+        "concurrency": { "type": "integer", "enum": [1, 4, 8], "description": "Simultaneous in-flight agent tasks." },
+        "scenario_count": { "type": "integer", "minimum": 1 },
+        "evaluator_version": { "type": "string", "description": "Version of the task-success evaluator." }
+      }
+    },
+    "timing_conditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at_utc", "warmup_description", "repetition_index", "repetitions_planned"],
+      "properties": {
+        "started_at_utc": { "type": "string", "format": "date-time" },
+        "ended_at_utc": { "type": "string", "format": "date-time" },
+        "warmup_description": {
+          "type": "string",
+          "description": "Warm-up procedure applied before measurement (excluded from results)."
+        },
+        "repetition_index": { "type": "integer", "minimum": 1, "description": "1-based index of this repetition within the cell." },
+        "repetitions_planned": { "type": "integer", "minimum": 1, "description": "Planned repetitions for the cell (5 per the measurement contract)." },
+        "clock_source": { "type": "string", "description": "Clock/timing methodology notes (e.g. monotonic client-side)." },
+        "notes": { "type": "string", "description": "Any other timing-relevant conditions (must contain no sensitive metadata)." }
+      }
+    }
+  }
+}
