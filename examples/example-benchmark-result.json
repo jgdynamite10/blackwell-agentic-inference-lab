@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "EXAMPLE-0000-0000-0000-000000000000",
+  "is_synthetic_example": true,
+  "manifest_ref": "example-run-manifest.json",
+  "tasks": {
+    "attempted": 10,
+    "succeeded": 9,
+    "failed": 1,
+    "timed_out": 0,
+    "success_rate": 0.9,
+    "mean_quality_score": 0.87
+  },
+  "latency_ms": {
+    "task_completion": { "mean": 42000, "p50": 40000, "p90": 55000, "p95": 60000, "p99": 66000, "min": 30000, "max": 67000, "count": 10 },
+    "time_to_first_token": { "mean": 350, "p50": 320, "p90": 480, "p95": 520, "p99": 600, "min": 250, "max": 610, "count": 42 },
+    "inter_token": { "mean": 12, "p50": 11, "p90": 16, "p95": 18, "p99": 25, "min": 8, "max": 30, "count": 39000 },
+    "queue_time": { "mean": 15, "p50": 10, "p90": 30, "p95": 40, "p99": 55, "min": 2, "max": 60, "count": 42 },
+    "model_serving_time": { "mean": 9800, "p50": 9200, "p90": 13000, "p95": 14500, "p99": 16000, "min": 6800, "max": 16200, "count": 42 },
+    "tool_execution_time": { "mean": 120, "p50": 120, "p90": 130, "p95": 132, "p99": 140, "min": 100, "max": 141, "count": 63 }
+  },
+  "throughput": {
+    "output_tokens_per_second": 85.3,
+    "total_output_tokens": 312000,
+    "successful_tasks_per_gpu_hour": 8.8
+  },
+  "gpu": {
+    "utilization_mean_pct": 71.5,
+    "utilization_p95_pct": 96.0,
+    "memory_peak_gib": 78.2,
+    "power_mean_watts": 310.0,
+    "energy_joules": 1116000,
+    "energy_per_successful_task_joules": 124000
+  },
+  "errors": {
+    "error_rate": 0.1,
+    "timeout_rate": 0.0,
+    "taxonomy": {
+      "malformed_tool_call": 1
+    }
+  },
+  "slo": {
+    "latency_target_ms": 60000,
+    "ttft_target_ms": 1000,
+    "quality_threshold": 0.8,
+    "slo_attaining_tasks": 8,
+    "slo_attaining_throughput_per_gpu_hour": 7.8
+  },
+  "economics": {
+    "gpu_hours": 1.02,
+    "list_price_usd_per_hour": 0.0,
+    "cost_per_successful_task_usd": 0.0,
+    "cost_basis_note": "SYNTHETIC EXAMPLE — fabricated numbers for schema documentation only; excludes taxes/discounts; storage reported separately."
+  },
+  "notes": "SYNTHETIC EXAMPLE FILE — every value on this page is fabricated to document the result format. This is not a genuine benchmark record."
+}

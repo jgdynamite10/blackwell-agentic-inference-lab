@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "EXAMPLE-0000-0000-0000-000000000000",
+  "is_synthetic_example": true,
+  "created_at_utc": "2026-01-01T00:00:00Z",
+  "git": {
+    "commit": "0000000000000000000000000000000000000000",
+    "repository": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab",
+    "dirty": false
+  },
+  "model": {
+    "artifact": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    "revision": "EXAMPLE-REVISION",
+    "artifact_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "precision": "bf16",
+    "license": "OpenMDW-1.1"
+  },
+  "serving": {
+    "engine": "vllm",
+    "engine_version": "0.0.0-EXAMPLE",
+    "container_digest": "docker.io/example/vllm@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "launch_flags": ["--example-flag"],
+    "environment_overrides": {
+      "EXAMPLE_BACKEND_SELECTION": "example"
+    }
+  },
+  "host": {
+    "gpu_model": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "gpu_count": 1,
+    "gpu_memory_gb": 96,
+    "driver_version": "580.00.EXAMPLE",
+    "cuda_version": "13.0-EXAMPLE",
+    "operating_system": "Ubuntu 24.04 LTS (EXAMPLE)",
+    "cpu_model": "EXAMPLE CPU MODEL",
+    "vcpu_count": 16,
+    "system_memory_gib": 176,
+    "storage_description": "EXAMPLE: local NVMe SSD",
+    "virtualization": "EXAMPLE hypervisor"
+  },
+  "cloud": {
+    "provider": "akamai",
+    "instance_type": "EXAMPLE-1-gpu-plan",
+    "region": "us-example-1",
+    "comparison_mode": "provider-native",
+    "list_price_usd_per_hour": 0.0,
+    "price_source_date": "2026-01-01"
+  },
+  "generation": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "max_tokens": 4096,
+    "seed": 12345,
+    "reasoning_mode": false
+  },
+  "workload": {
+    "name": "cloud-ops-agent",
+    "version": "0.0.0-EXAMPLE",
+    "profile": "interactive",
+    "concurrency": 1,
+    "scenario_count": 10,
+    "evaluator_version": "0.0.0-EXAMPLE"
+  },
+  "timing_conditions": {
+    "started_at_utc": "2026-01-01T00:00:00Z",
+    "ended_at_utc": "2026-01-01T01:00:00Z",
+    "warmup_description": "EXAMPLE: one full workload pass excluded from measurement",
+    "repetition_index": 1,
+    "repetitions_planned": 5,
+    "clock_source": "client-side monotonic clock",
+    "notes": "SYNTHETIC EXAMPLE FILE — every value on this page is fabricated for schema documentation. This is not a genuine benchmark record."
+  }
+}
