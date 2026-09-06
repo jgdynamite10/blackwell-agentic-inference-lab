@@ -82,11 +82,13 @@ privately with the run results.
 
 Two strictly separated modes (never mixed in analysis or reporting):
 
-1. **Controlled-resource mode.** The benchmark and serving containers run
-   under a documented common CPU and system-memory limit applied identically
-   on all three providers (proposed envelope in
-   [feasibility-report.md](feasibility-report.md); finalized only after
-   Phase 3 validates headroom).
+1. **Controlled-resource mode.** The serving and benchmark workload run
+   under a documented common CPU and system-memory envelope that is the same
+   on all three providers, defined as a **joint total across both containers
+   combined** (provisional: 14 vCPUs / 100 GiB joint total, see
+   [feasibility-report.md](feasibility-report.md) §7). The exact per-container
+   allocation and the cgroup enforcement mechanism are frozen only after
+   Phase 3 headroom validation.
 2. **Provider-native mode.** Each provider's normal purchasable instance
    configuration, no artificial caps; evaluates what a customer actually
    receives, including economics.
@@ -103,6 +105,13 @@ differences are recorded rather than hidden.
 
 Provisioning will use Terraform with per-provider modules; state and `.tfvars`
 stay outside the repository. `terraform apply`/`destroy` require explicit
-owner approval per [../AGENTS.md](../AGENTS.md). Automatic-shutdown and
-orphan-detection controls are described in
-[cost-guardrails.md](cost-guardrails.md).
+owner approval per [../AGENTS.md](../AGENTS.md).
+
+Billing-safety design constraint: on Akamai, powering off a Linode does not
+stop billing — compute billing stops only when the service is deleted from
+the account — and on AWS/GCP, disks, addresses, and snapshots may continue
+billing while an instance is stopped. Run tooling therefore treats "export
+and verify results, then owner-approved deletion of exactly the run's tagged
+resources, then verify nothing billable remains" as the normal end-of-session
+sequence. Automatic-shutdown, teardown, and orphan-detection controls are
+described in [cost-guardrails.md](cost-guardrails.md).

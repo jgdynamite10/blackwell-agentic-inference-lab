@@ -54,34 +54,58 @@ committed or pasted into chat, issues, PRs, or CI; see
 
 ## 2. Akamai Cloud — RTX PRO 6000 Blackwell plan
 
-- **[VERIFIED]** Akamai offers NVIDIA RTX PRO 6000 Blackwell Server Edition
-  GPU Linodes in **limited availability**; access must be requested (support
-  ticket onboarding). Source: [Akamai onboarding doc](https://techdocs.akamai.com/cloud-computing/docs/nvidia-rtx-pro-6000-blackwell-gpu-onboarding).
-- **[VERIFIED]** Plans range 1–8 GPUs, 16–128 dedicated vCPUs, 176–1408 GB
-  RAM, 96–768 GB VRAM. Regions (limited availability): Amsterdam, Chennai,
-  Chicago, Frankfurt, Jakarta, London, Los Angeles, Madrid, Miami, Mumbai,
-  Milan, Newark, Osaka, Paris, Seattle, Singapore, Stockholm, Tokyo, Toronto,
-  Washington DC. Source: [GPU Linodes doc](https://techdocs.akamai.com/cloud-computing/docs/gpu-compute-instances).
-- **[VERIFIED]** Since 2026-07-01 GPU Linodes bill hourly with **no monthly
-  cap**; European data centers, Singapore, and Jakarta carry higher RTX PRO
-  6000 rates. Source: [billing changelog](https://techdocs.akamai.com/cloud-computing/changelog/jul-1-2026-new-billing-model).
-- **[ASSUMPTION — preliminary, non-authoritative planning estimate]** The
-  1-GPU plan is approximately 16 vCPU / 176 GB RAM at roughly **$3.00 per
-  GPU-hour** in US/APAC regions (third-party tracker
-  [ComputePrices](https://computeprices.com/providers/akamai-cloud/gpus/rtx-pro-6000),
-  tracker data dated 2026-08-05, retrieved 2026-09-05). Requires account-level
-  verification against Akamai's official pricing in the owner's local
-  environment.
-- **[VERIFIED — live read-only check, 2026-09-05]** The unauthenticated public
-  Linode types catalog (`GET /v4/linode/types`) lists 13 GPU plans — Quadro
-  RTX 6000 (`g1-gpu-rtx6000-*`) and RTX 4000 Ada (`g2-gpu-rtx4000a*`) — but
-  **no RTX PRO 6000 Blackwell plans**. This is consistent with the
-  limited-availability gating: the Blackwell plans appear to be exposed only
-  to onboarded accounts. Account onboarding is therefore a hard prerequisite
-  for Phase 3.
+- **[VERIFIED — official docs, retrieved 2026-09-06]** Akamai offers NVIDIA
+  RTX PRO 6000 Blackwell Server Edition GPU Linodes in **limited
+  availability**; access must be requested (support/onboarding), and a $100
+  deposit may be required for newer accounts. Sources:
+  [onboarding doc](https://techdocs.akamai.com/cloud-computing/docs/nvidia-rtx-pro-6000-blackwell-gpu-onboarding),
+  [GPU Linodes doc](https://techdocs.akamai.com/cloud-computing/docs/gpu-compute-instances).
+- **[VERIFIED — current official documentation (audit of 2026-09-06)]**
+  RTX PRO 6000 Blackwell plans currently cover **1–4 GPUs**, **16–64
+  dedicated vCPUs**, **176–736 GB RAM**, and **96–384 GB GPU memory**, with an
+  officially stated **starting price of $2.50/hour** for the one-GPU /
+  16-vCPU / 176-GB-RAM / 96-GB-GPU configuration. Source:
+  [GPU Linodes doc](https://techdocs.akamai.com/cloud-computing/docs/gpu-compute-instances)
+  (Plans and pricing). *Transparency note:* cached copies of the
+  documentation and pricing pages fetched from the hosted working environment
+  on 2026-09-06 still showed an older table (1–8 GPUs, up to 128 vCPU /
+  1408 GB RAM, $3.00–$3.50/hr starting price); the figures above reflect the
+  current official page per the owner's audit. Because of this churn, the
+  exact billed rate is treated as **unresolved pending an account-level
+  quote** obtained in the owner's local environment.
+- **[VERIFIED — official page, retrieved 2026-09-06; list subject to change]**
+  Limited-availability regions for the RTX PRO 6000 plan (19 data centers):
+  Amsterdam, Chennai, Chicago, Frankfurt, Jakarta, London, Los Angeles,
+  Madrid, Miami, Milan, Mumbai, Newark, Osaka, Paris, Seattle, Singapore,
+  Stockholm, Tokyo, Toronto. Washington, DC appeared in older cached copies
+  but is not included here because current official documentation does not
+  support it. Verify the live
+  [Product Availability](https://techdocs.akamai.com/cloud-computing/docs/how-to-choose-a-data-center#product-availability)
+  list at deployment time.
+- **[VERIFIED — official changelog, retrieved 2026-09-06]** Since 2026-07-01
+  GPU Linodes bill hourly with **no monthly cap**; European data centers,
+  Singapore, and Jakarta carry higher RTX PRO 6000 rates. Source:
+  [billing changelog](https://techdocs.akamai.com/cloud-computing/changelog/jul-1-2026-new-billing-model).
+- **[VERIFIED — billing safety, official docs, retrieved 2026-09-06]**
+  **Powering off a Linode does not stop billing.** Akamai bills for services
+  present on the account regardless of power state; compute billing stops
+  only when the service is deleted/removed from the account. Sources:
+  [Understanding how billing works](https://techdocs.akamai.com/cloud-computing/docs/understanding-how-billing-works),
+  [Stop further billing](https://techdocs.akamai.com/cloud-computing/docs/stop-further-billing).
+  See [cost-guardrails.md](cost-guardrails.md) for the teardown rules this
+  implies.
+- **[OBSERVED FACT — live read-only check, 2026-09-05]** The unauthenticated
+  Linode types catalog (`GET /v4/linode/types`) listed 13 GPU plans — Quadro
+  RTX 6000 (`g1-gpu-rtx6000-*`) and RTX 4000 Ada (`g2-gpu-rtx4000a*`) — and
+  **no RTX PRO 6000 Blackwell plans**. That absence is the observed fact.
+- **[INFERENCE — not yet locally verified]** The Blackwell plans being
+  visible only to onboarded accounts is an inference from the catalog absence
+  plus the documented limited-availability gating; it is confirmed only when
+  an onboarded account's catalog shows the plan. Either way, onboarding
+  (support request) is a documented prerequisite for Phase 3.
 - **[UNRESOLVED — owner action]** Whether the authorized account is already
-  onboarded for the limited-availability plan, and which specific regions are
-  deployable for it. Requires the owner to run
+  onboarded for the limited-availability plan, which regions are deployable
+  for it, and the account-level quoted rate. Requires the owner to run
   `scripts/preflight/check_akamai.py` with a read-only `LINODE_TOKEN` in
   their local environment, or to confirm directly.
 
@@ -123,8 +147,9 @@ committed or pasted into chat, issues, PRs, or CI; see
   [aws-pricing.com](https://aws-pricing.com/g7e.4xlarge.html), retrieved
   2026-09-05; US regions): `g7e.4xlarge` ≈ **$4.00/hr**, `g7e.8xlarge` ≈
   **$5.27/hr**; availability reported in roughly 11 regions. Requires
-  account-level verification via the AWS Pricing API / console in the owner's
-  local environment.
+  account-level verification via the AWS console or Pricing API in the owner's
+  local environment (note: `scripts/preflight/check_aws.py` does **not**
+  query the Pricing API and makes no pricing claims).
 - **[UNRESOLVED — owner action]** The account's "Running On-Demand G and VT
   instances" vCPU quota (new accounts frequently need an increase to run even
   one 16-vCPU GPU instance), and live regional capacity.
@@ -256,18 +281,21 @@ Host inventory across the three single-GPU candidates:
 | Google | `g4-standard-48` | 48 | 180 GB | AMD EPYC Turin |
 | AWS | `g7e.4xlarge` | 16 | 128 GiB | Intel Emerald Rapids |
 
-**Proposed envelope:** benchmark + serving containers jointly limited to
-**14 vCPUs and 100 GiB RAM** (cgroup limits via container runtime), leaving
-≥2 vCPUs and ≥24 GiB on the smallest host (`g7e.4xlarge`) for OS, telemetry,
-and the driver stack. Rationale: 16 vCPU is the binding CPU constraint
-(Akamai and AWS), 128 GiB the binding memory constraint (AWS); ~60 GB BF16
-weights + serving runtime fit within 100 GiB with margin.
+**Provisional envelope (single definition used project-wide):** the
+14-vCPU/100-GiB value is a provisional **joint total across the serving and
+benchmark workload combined** — not 14 vCPUs / 100 GiB independently for each
+container. It leaves ≥2 vCPUs and ≥24 GiB on the smallest host
+(`g7e.4xlarge`) for OS, telemetry, and the driver stack. Rationale: 16 vCPU
+is the binding CPU constraint (Akamai and AWS), 128 GiB the binding memory
+constraint (AWS); ~60 GB BF16 weights + serving runtime fit within 100 GiB
+with margin.
 
-**Not final:** per the exit criteria, this envelope is finalized only after
-Phase 3 empirically confirms adequate headroom for model loading, serving,
-telemetry, and benchmark execution. CPU **architecture** differences (AMD
-Turin vs Intel Emerald Rapids vs Akamai's host CPU) cannot be equalized —
-they are recorded, not hidden.
+**Not final:** per the exit criteria, the exact allocation between the two
+containers and the cgroup enforcement mechanism will be frozen **only after
+Phase 3 headroom validation** empirically confirms adequate headroom for
+model loading, serving, telemetry, and benchmark execution. CPU
+**architecture** differences (AMD Turin vs Intel Emerald Rapids vs Akamai's
+host CPU) cannot be equalized — they are recorded, not hidden.
 
 ## 8. Approximate costs
 
@@ -279,33 +307,69 @@ verification** in the owner's local environment before budgeting decisions.
 | Phase | Basis | Estimate |
 | --- | --- | --- |
 | Phase 2 (synthetic workload) | No GPU; local dev + GitHub Actions CI (private-repo minutes; small usage) | **≈ $0 cloud** |
-| Phase 3 (Akamai baseline) | ~40–60 GPU-h × ~$3.00/h + storage/egress | **≈ $130–$200** |
-| Phase 4 (optimization) | ~60–100 GPU-h × ~$3.00/h (more cells: precisions × serving paths) | **≈ $180–$300** |
+| Phase 3 (Akamai baseline) | ~40–60 GPU-h × $2.50/h officially stated starting price (rate **unresolved pending account-level quote**; higher in EU/Singapore/Jakarta) + storage/egress | **≈ $110–$170** |
+| Phase 4 (optimization) | ~60–100 GPU-h × $2.50/h (same pricing caveat; more cells: precisions × serving paths) | **≈ $160–$270** |
 | Phase 5 (Google Cloud) | ~40–60 GPU-h × ~$4.50/h + Hyperdisk/local SSD | **≈ $190–$290** |
 | Phase 6 (AWS) | ~40–60 GPU-h × ~$4.00/h (4xlarge) or ~$5.27/h (8xlarge) + EBS | **≈ $170–$330** |
 | Storage/network (all) | model artifact downloads (~80 GB/provider), result egress | **≈ $10–$50 total** |
 
 Run-hour estimates assume: setup/validation ≈ 15–25 h, measured cells
 (2 profiles × 3 concurrency × 5 repetitions plus warm-ups) ≈ 15–30 h, and
-retry margin. Instances are stopped/destroyed between sessions (hourly
-billing on all three providers makes idle time the main cost risk).
+retry margin. Akamai figures use the officially stated $2.50/h starting price
+(retrieved 2026-09-06) and remain **unresolved pending an account-level
+quote**, given documented regional surcharges and recent pricing-page churn.
 
-## 9. Automatic shutdown and orphan detection (options)
+**Billing-duration caveat (all providers):** GPU-hour cost accrues for the
+entire life of the *service*, not just active benchmarking. On Akamai,
+powering off a Linode does **not** stop billing — the instance must be
+deleted/removed from the account to stop charges. On AWS and GCP,
+stopped-instance compute treatment differs from Akamai's, but disks,
+addresses, snapshots, and other attached resources may continue billing while
+the instance is stopped. Estimates above therefore assume prompt deletion of
+the compute service (after verified result export to `LAB_RESULTS_DIR`) at
+the end of each session, with teardown following the rules in
+[cost-guardrails.md](cost-guardrails.md).
 
-- **Akamai:** no native instance auto-stop scheduler; use in-instance idle
-  watchdog (systemd timer that shuts down after N idle minutes) plus a
-  read-only sweep script listing GPU Linodes older than a TTL tag. [VERIFIED
-  that no first-party scheduler is documented; watchdog approach ASSUMPTION.]
-- **Google Cloud:** native support for instance schedules and
-  `max-run-duration` / auto-delete on Spot and Flex-start; budget alerts via
-  Cloud Billing. [VERIFIED — documented Compute Engine features.]
-- **AWS:** EC2 instance auto-stop via CloudWatch alarm on low utilization,
-  AWS Budgets actions, and instance `InstanceInitiatedShutdownBehavior`;
-  orphan sweep via read-only `describe-instances` filtered by project tag.
-  [VERIFIED — documented AWS features.]
-- All phases: every resource carries a project tag/label; a read-only orphan
-  report runs at the end of each session and anything unexpected is reported
-  to the owner before any deletion (deletion itself requires approval).
+## 9. Automatic shutdown, teardown, and orphan detection (options)
+
+**Critical billing-safety facts (official Akamai docs, retrieved 2026-09-06;
+sources: [Understanding how billing works](https://techdocs.akamai.com/cloud-computing/docs/understanding-how-billing-works),
+[Stop further billing](https://techdocs.akamai.com/cloud-computing/docs/stop-further-billing)):**
+
+1. **Powering off an Akamai Linode does not stop billing.** Billing continues
+   while the service exists on the account, powered on or off.
+2. After authorized benchmark completion and verified result export to
+   `LAB_RESULTS_DIR`, Akamai compute billing stops **only when the applicable
+   service is deleted/removed from the account**.
+3. An in-instance shutdown watchdog **limits active workload but is not an
+   Akamai spending backstop** — a powered-off Linode keeps billing.
+4. On AWS and GCP, stopped-instance compute treatment differs from Akamai's,
+   while disks, addresses, snapshots, and other resources may continue
+   billing while an instance is stopped.
+
+Per-provider options:
+
+- **Akamai:** no native instance auto-stop scheduler is documented. An
+  in-instance idle watchdog (systemd timer) limits runaway *workload* only;
+  the actual spending control is prompt, owner-approved **deletion** of the
+  Linode after verified result export, plus a read-only sweep listing GPU
+  Linodes older than their TTL tag. [Watchdog approach: ASSUMPTION.]
+- **Google Cloud:** native instance schedules and
+  `max-run-duration`/auto-delete options (Spot and Flex-start); budget alerts
+  via Cloud Billing. Stopped instances still bill for attached Hyperdisk/SSD
+  and reserved addresses. [VERIFIED — documented Compute Engine features.]
+- **AWS:** CloudWatch low-utilization auto-stop, AWS Budgets actions,
+  `InstanceInitiatedShutdownBehavior`; stopped instances still bill for EBS
+  volumes, Elastic IPs, and snapshots; orphan sweep via read-only
+  `describe-instances` filtered by project tag. [VERIFIED — documented AWS
+  features.]
+
+Teardown rules (binding; see [cost-guardrails.md](cost-guardrails.md)):
+teardown deletes **only** resources recorded as created for the exact run
+(matched by the run's unique tags); destructive teardown always requires
+explicit local owner approval; and post-teardown verification must confirm
+that **no project-created billable resources remain** on the account. No
+teardown tooling is implemented or executed in Phase 1.
 
 ## 10. Organizational approvals
 
