@@ -8,15 +8,23 @@ that inject fake fetchers.
 Safe by construction:
 
 - Issues only HTTP GET requests; contains no create/update/delete calls.
-- The plan-type catalog check works unauthenticated; the **plan entitlement**
-  (exact Blackwell plan visible to this account, with the account-visible
-  hourly price) and **eligible regions** checks require a ``LINODE_TOKEN``
-  with read-only scope.
+- The plan-type catalog check works unauthenticated; the authenticated
+  readiness workflow requires a ``LINODE_TOKEN`` with read-only scope and a
+  ``--region`` selection.
 - Sanitized output only: never prints token values, account identifiers,
   raw API responses, or raw exception text. Failures produce generic,
   actionable messages.
 
-Exit codes (``main``): 0 only when every requested check completed.
+Truthful readiness (decision D-0013): the authenticated workflow exits
+nonzero unless ALL of the following are confirmed for the selected region —
+the exact one-GPU Blackwell plan is visible to the account, the region
+supports GPU Linodes and is not account-restricted, the region reports the
+exact plan as deployable, and the applicable regional hourly price is
+observed. Generic GPU-capable regions are never described as confirmed
+Blackwell deployability, and a successful public-catalog check never makes
+the authenticated workflow succeed. Each authenticated run writes a
+sanitized receipt (exact plan, region, observed price, retrieval time, and
+readiness decisions) to the external private ``LAB_RESULTS_DIR``.
 """
 
 from __future__ import annotations
@@ -27,6 +35,7 @@ import os
 import sys
 import urllib.request
 from collections.abc import Callable
+from datetime import datetime, timezone
 
 API = "https://api.linode.com/v4"
 GPU_PLAN_KEYWORDS = ("rtxpro6000", "rtx-pro-6000", "blackwell")
@@ -84,7 +93,11 @@ def _describe_plan(plan: dict) -> str:
 
 
 def report_gpu_catalog(fetch: Fetch | None = None) -> bool:
-    """Prints Blackwell plans from the unauthenticated catalog; True on success."""
+    """Prints Blackwell plans from the unauthenticated catalog; True on success.
+
+    Informational only: a successful catalog check NEVER makes the complete
+    authenticated readiness workflow succeed.
+    """
     fetch = fetch or get_json
     try:
         types = _paginated(fetch, "/linode/types")
@@ -108,14 +121,17 @@ def report_gpu_catalog(fetch: Fetch | None = None) -> bool:
     return True
 
 
-def report_plan_entitlement(token: str, fetch: Fetch | None = None) -> bool:
+# -- authenticated readiness decisions ------------------------------------------
+
+
+def check_plan_entitlement(token: str, fetch: Fetch | None = None) -> dict:
     """Authenticated, read-only check for exact Blackwell plan entitlement.
 
-    Confirms whether the **account-visible** plan catalog contains the exact
-    single-GPU RTX PRO 6000 Blackwell plan (limited-availability plans appear
-    only for onboarded accounts) and prints the account-visible hourly price
-    for each visible Blackwell plan. Prints plan facts only — never account
-    identifiers. Returns True when the check itself completed.
+    Decision semantics (truthful): the check PASSES only when the
+    account-visible catalog contains the exact single-GPU RTX PRO 6000
+    Blackwell plan. Visibility of larger multi-GPU plans does not pass.
+    Returns a sanitized decision dict; prints plan facts only — never
+    account identifiers.
     """
     fetch = fetch or get_json
     try:
@@ -127,7 +143,7 @@ def report_plan_entitlement(token: str, fetch: Fetch | None = None) -> bool:
             "API was unreachable. Fix the token locally and retry. (No error "
             "payload is printed to avoid echoing account details.)"
         )
-        return False
+        return {"completed": False, "plan_visible": False, "plan": None}
 
     plans = _blackwell_plans(types)
     if not plans:
@@ -136,63 +152,190 @@ def report_plan_entitlement(token: str, fetch: Fetch | None = None) -> bool:
             "in this account's catalog. The plan is limited-availability: "
             "request onboarding via Akamai support before Phase 3B."
         )
-        return True
+        return {"completed": True, "plan_visible": False, "plan": None}
 
     print(f"ENTITLEMENT: {len(plans)} RTX PRO 6000 Blackwell plan(s) visible to this account:")
     for plan in plans:
         print(f"{_describe_plan(plan)} (account-visible price)")
     single_gpu = [p for p in plans if p.get("gpus") == TARGET_GPU_COUNT]
-    if single_gpu:
-        target = single_gpu[0]
-        hourly = target.get("price", {}).get("hourly")
-        print(
-            f"TARGET PLAN OK: {target['id']} (exactly {TARGET_GPU_COUNT} GPU) is "
-            f"available to this account at ${hourly}/hr (account-visible price; "
-            "regional surcharges may apply — verify the per-region price before "
-            "approval)."
-        )
-    else:
+    if not single_gpu:
         print(
             f"TARGET PLAN MISSING: no visible Blackwell plan has exactly "
             f"{TARGET_GPU_COUNT} GPU. Do not substitute a larger plan without "
             "an owner decision."
         )
-    return True
+        return {"completed": True, "plan_visible": False, "plan": None}
+    target = single_gpu[0]
+    print(
+        f"TARGET PLAN VISIBLE: {target['id']} (exactly {TARGET_GPU_COUNT} GPU) "
+        "is visible to this account. Region deployability and the applicable "
+        "regional price are verified separately — plan visibility alone is "
+        "not readiness."
+    )
+    return {"completed": True, "plan_visible": True, "plan": target}
 
 
-def report_eligible_regions(token: str, fetch: Fetch | None = None) -> bool:
-    """Authenticated, read-only region eligibility for GPU Linodes.
+def _regional_price(plan: dict, region: str) -> float | None:
+    """The applicable account-visible hourly price for one region, if observed."""
+    for entry in plan.get("region_prices") or []:
+        if entry.get("id") == region:
+            hourly = entry.get("hourly")
+            return float(hourly) if hourly is not None else None
+    hourly = (plan.get("price") or {}).get("hourly")
+    return float(hourly) if hourly is not None else None
 
-    Cross-references the public region list (GPU Linodes capability) with the
-    account's availability restrictions. Prints region identifiers only.
+
+def check_region_deployability(
+    token: str,
+    region: str,
+    plan: dict,
+    fetch: Fetch | None = None,
+) -> dict:
+    """Authenticated, read-only deployability decision for ONE exact region.
+
+    Truthful semantics: a region passes only when (a) it exists and carries
+    the "GPU Linodes" capability, (b) the account is not restricted from GPU
+    Linodes there, and (c) the region's availability listing reports the
+    EXACT selected plan as available. A generic GPU-capable region is never
+    described as confirmed Blackwell deployability.
     """
     fetch = fetch or get_json
+    plan_id = plan.get("id", "")
     try:
         regions = _paginated(fetch, "/regions")
         availability = _paginated(fetch, "/account/availability", token)
+        region_plans = _paginated(fetch, f"/regions/{region}/availability", token)
     except Exception:
         print(
-            "BLOCKED: the region eligibility lookup failed. Likely causes: the "
-            "token lacks account:read_only scope, the token is expired, or the "
-            "API was unreachable. Fix the token locally and retry. (No error "
+            "BLOCKED: the region deployability lookup failed. Likely causes: "
+            "the token lacks account:read_only scope, the token is expired, "
+            "the region id is invalid, or the API was unreachable. (No error "
             "payload is printed to avoid echoing account details.)"
         )
-        return False
+        return {
+            "completed": False,
+            "region_exists": False,
+            "capability_ok": False,
+            "account_allowed": False,
+            "plan_deployable": False,
+            "regional_price_usd_per_hour": None,
+        }
 
-    gpu_capable = {r["id"] for r in regions if "GPU Linodes" in (r.get("capabilities") or [])}
-    unavailable = {
+    region_record = next((r for r in regions if r.get("id") == region), None)
+    region_exists = region_record is not None
+    capability_ok = bool(
+        region_record and "GPU Linodes" in (region_record.get("capabilities") or [])
+    )
+    restricted = {
         r["region"] for r in availability if "GPU Linodes" in (r.get("unavailable") or [])
     }
-    eligible = sorted(gpu_capable - unavailable)
-    print(f"Regions eligible for GPU Linodes on this account: {len(eligible)}")
-    for region in eligible:
-        print(f"  - {region}")
-    if unavailable:
-        print(f"Regions where GPU Linodes are UNAVAILABLE to this account: {len(unavailable)}")
-        for region in sorted(unavailable):
-            print(f"  - {region} (unavailable)")
-    print("(Region identifiers only; no account identifiers are printed.)")
-    return True
+    account_allowed = region_exists and region not in restricted
+    plan_deployable = any(
+        entry.get("plan") == plan_id and entry.get("available") is True for entry in region_plans
+    )
+    price = _regional_price(plan, region)
+
+    print(f"REGION {region}:")
+    print(f"  - region exists: {'yes' if region_exists else 'NO'}")
+    print(f"  - GPU Linodes capability: {'yes' if capability_ok else 'NO'}")
+    print(f"  - account allowed for GPU Linodes here: {'yes' if account_allowed else 'NO'}")
+    deployable_text = (
+        "yes" if plan_deployable else "NO (a GPU-capable region is not Blackwell deployability)"
+    )
+    print(f"  - EXACT plan {plan_id} deployable here: {deployable_text}")
+    if price is not None:
+        print(f"  - applicable regional price: ${price}/hr (account-visible)")
+    else:
+        print("  - applicable regional price: UNCONFIRMED")
+    return {
+        "completed": True,
+        "region_exists": region_exists,
+        "capability_ok": capability_ok,
+        "account_allowed": account_allowed,
+        "plan_deployable": plan_deployable,
+        "regional_price_usd_per_hour": price,
+    }
+
+
+def authenticated_readiness(
+    token: str,
+    region: str,
+    fetch: Fetch | None = None,
+) -> dict:
+    """The complete authenticated readiness decision (sanitized receipt).
+
+    ``ready`` is true ONLY when every decision passed: exact one-GPU plan
+    visible, selected region confirmed for that exact plan and account, GPU
+    deployment capability present, and the applicable regional price
+    observed. The public catalog plays no part in this decision.
+    """
+    entitlement = check_plan_entitlement(token, fetch)
+    plan = entitlement.get("plan")
+    if entitlement["completed"] and entitlement["plan_visible"] and plan is not None:
+        region_decision = check_region_deployability(token, region, plan, fetch)
+    else:
+        region_decision = {
+            "completed": False,
+            "region_exists": False,
+            "capability_ok": False,
+            "account_allowed": False,
+            "plan_deployable": False,
+            "regional_price_usd_per_hour": None,
+        }
+        print(
+            "REGION CHECK SKIPPED: without the exact one-GPU plan there is "
+            "nothing to confirm deployability for."
+        )
+
+    price = region_decision["regional_price_usd_per_hour"]
+    ready = bool(
+        entitlement["completed"]
+        and entitlement["plan_visible"]
+        and region_decision["completed"]
+        and region_decision["region_exists"]
+        and region_decision["capability_ok"]
+        and region_decision["account_allowed"]
+        and region_decision["plan_deployable"]
+        and price is not None
+    )
+    receipt = {
+        "workflow": "akamai-authenticated-preflight",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "selected_plan_id": (plan or {}).get("id"),
+        "selected_region": region,
+        "observed_hourly_price_usd": price,
+        "decisions": {
+            "entitlement_check_completed": entitlement["completed"],
+            "exact_single_gpu_plan_visible": entitlement["plan_visible"],
+            "region_check_completed": region_decision["completed"],
+            "region_exists": region_decision["region_exists"],
+            "gpu_capability_in_region": region_decision["capability_ok"],
+            "account_allowed_in_region": region_decision["account_allowed"],
+            "exact_plan_deployable_in_region": region_decision["plan_deployable"],
+            "regional_price_observed": price is not None,
+        },
+        "ready": ready,
+        "note": (
+            "Sanitized receipt: no account identifiers or tokens. 'ready' is "
+            "true only when every decision passed; the public catalog check "
+            "never substitutes for these account-level decisions."
+        ),
+    }
+    return receipt
+
+
+def _write_receipt(receipt: dict) -> str | None:
+    """Writes the sanitized receipt to the external private results dir."""
+    from blackwell_lab.cloud.artifacts import write_private_json
+    from blackwell_lab.paths import RunMode, resolve_results_dir
+
+    resolved = resolve_results_dir(mode=RunMode.REAL)
+    if resolved is None:  # pragma: no cover - REAL mode never returns None
+        return None
+    stamp = receipt["generated_at_utc"].replace(":", "").replace("+", "Z")
+    name = f"preflight-receipt-{stamp}.json"
+    write_private_json(resolved / "preflight-receipts" / name, receipt)
+    return name
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -202,45 +345,78 @@ def main(argv: list[str] | None = None) -> int:
             "READ-ONLY Akamai Cloud feasibility preflight. Lists RTX PRO 6000 "
             "Blackwell GPU plans from the public catalog and, unless "
             "--public-only is given, requires a read-only LINODE_TOKEN in the "
-            "environment to report exact plan entitlement, the account-visible "
-            "hourly price, and eligible regions. Performs no "
-            "create/update/delete operations and never prints secrets or raw "
-            "error payloads. Run locally; not from the hosted Cloud Agent."
+            "environment plus --region to decide account-level readiness: "
+            "exact one-GPU plan entitlement, confirmed deployability of that "
+            "exact plan in the selected region, and the applicable regional "
+            "price. Exit 0 ONLY when every readiness decision passed. Writes "
+            "a sanitized receipt to the external private LAB_RESULTS_DIR. "
+            "Performs no create/update/delete operations and never prints "
+            "secrets or raw error payloads. Run locally; not from the hosted "
+            "Cloud Agent."
         ),
     )
     parser.add_argument(
         "--public-only",
         action="store_true",
         help=(
-            "Run only the unauthenticated public-catalog check and treat it as "
-            "the complete requested scope. Without this flag, the "
-            "account-level entitlement and region checks are required and a "
-            "missing LINODE_TOKEN fails."
+            "Run only the unauthenticated public-catalog check. Informational "
+            "only: it never constitutes authenticated readiness."
         ),
+    )
+    parser.add_argument(
+        "--region",
+        help="Exact region id (e.g. us-ord) to confirm deployability for.",
     )
     args = parser.parse_args(argv)
     print(READ_ONLY_BANNER)
 
-    if not report_gpu_catalog():
-        return 1
+    catalog_ok = report_gpu_catalog()
 
     if args.public_only:
-        print("--public-only: account-level checks intentionally skipped.")
-        return 0
+        print(
+            "--public-only: account-level checks intentionally skipped. This "
+            "output is informational and does NOT constitute readiness."
+        )
+        return 0 if catalog_ok else 1
 
     token = os.environ.get("LINODE_TOKEN")
     if not token:
         print(
             "BLOCKED: LINODE_TOKEN is not set, so the required account-level "
-            "entitlement and region checks cannot run. Set a read-only token "
-            "locally and retry, or pass --public-only to request the catalog "
+            "readiness decisions cannot run. Set a read-only token locally "
+            "and retry, or pass --public-only for the informational catalog "
             "check alone."
         )
-        print("Missing capability: cannot verify this account's onboarding/eligible regions.")
         return 1
-    entitlement_ok = report_plan_entitlement(token)
-    regions_ok = report_eligible_regions(token)
-    return 0 if (entitlement_ok and regions_ok) else 1
+    if not args.region:
+        print(
+            "BLOCKED: --region is required for authenticated readiness: "
+            "deployability is confirmed for one exact region, never assumed "
+            "from generic GPU capability."
+        )
+        return 1
+
+    receipt = authenticated_readiness(token, args.region)
+    try:
+        receipt_name = _write_receipt(receipt)
+    except Exception:
+        receipt_name = None
+    if receipt_name is None:
+        print(
+            "BLOCKED: the sanitized receipt could not be written externally. "
+            "Set LAB_RESULTS_DIR to an absolute private path outside the "
+            "repository and retry (the receipt is required)."
+        )
+        return 1
+    print(f"RECEIPT: written externally as {receipt_name} (path not printed).")
+    if receipt["ready"]:
+        print("READY: every authenticated readiness decision passed.")
+        return 0
+    print(
+        "NOT READY: one or more readiness decisions failed (see the decisions "
+        "above and the external receipt). The exit status is nonzero."
+    )
+    return 1
 
 
 if __name__ == "__main__":

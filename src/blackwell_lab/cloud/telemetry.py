@@ -12,9 +12,20 @@ Collected facts:
 - **Host**: operating system, CPU model, vCPU count, system memory,
   storage/network descriptions (free-text, no volume identifiers or
   addresses).
-- **GPU**: model name, memory, driver version, CUDA runtime version (from
-  ``nvidia-smi``), plus sampled utilization / memory / power / temperature
-  series summarized into the result schema's ``gpu`` block.
+- **GPU**: model name, memory, host driver version, and the **maximum CUDA
+  version supported by the driver** (the ``nvidia-smi`` banner value — this
+  is deliberately NOT called the runtime CUDA version; the container's
+  actual CUDA runtime is observed separately via
+  :func:`observe_container_cuda_version`), plus sampled utilization /
+  memory / power / temperature series summarized into the result schema's
+  ``gpu`` block.
+- **Sampling accuracy**: every GPU sample carries a monotonic-clock
+  timestamp; energy is integrated over the actual elapsed intervals
+  (trapezoidal rule between consecutive samples, no extrapolation beyond
+  the first/last sample); the summary records sampling start/end, actual
+  duration, sample count, coverage, interval statistics, peak temperature,
+  and the integration method, and fails visibly when coverage is
+  insufficient.
 - **Provenance digests**: the immutable serving-container digest
   (``repo@sha256:...``) from ``docker inspect``, and the model-artifact
   aggregate hash verified file-by-file against a pinned digest manifest.
@@ -27,6 +38,7 @@ fully offline and hosts without the tools produce explicit
 from __future__ import annotations
 
 import hashlib
+import itertools
 import os
 import platform
 import re
@@ -38,11 +50,24 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from blackwell_lab.workload.clock import SYSTEM_CLOCK, Clock
+
 #: Injectable command runner: (argv) -> stdout text. Raises on failure.
 CommandRunner = Callable[[list[str]], str]
 
 #: Default sampling interval for the GPU sampler (seconds).
 DEFAULT_GPU_SAMPLE_INTERVAL_S = 1.0
+
+#: Minimum fraction of the sampling window the samples must cover for the
+#: summary to be usable in an approved measurement.
+MIN_SAMPLING_COVERAGE = 0.8
+
+#: The documented integration method recorded in every summary.
+ENERGY_INTEGRATION_METHOD = (
+    "trapezoidal over actual monotonic sample intervals; no extrapolation "
+    "beyond the first/last sample (boundary intervals outside the sampled "
+    "span are excluded from the integral and reported via coverage)"
+)
 
 
 class TelemetryUnavailable(RuntimeError):
@@ -133,6 +158,11 @@ def collect_gpu_facts(runner: CommandRunner = run_command) -> dict:
 
     Raises :class:`TelemetryUnavailable` when ``nvidia-smi`` is missing or
     reports anything unparseable — GPU facts are never guessed.
+
+    The banner's "CUDA Version" is recorded as ``driver_max_cuda_version``:
+    it is the **maximum CUDA version the installed driver supports**, not
+    the CUDA runtime any container actually uses. The container runtime is
+    observed separately (:func:`observe_container_cuda_version`).
     """
     output = runner(
         ["nvidia-smi", f"--query-gpu={_NVIDIA_SMI_FACT_QUERY}", "--format=csv,noheader,nounits"]
@@ -155,32 +185,69 @@ def collect_gpu_facts(runner: CommandRunner = run_command) -> dict:
     banner = runner(["nvidia-smi"])
     match = _CUDA_VERSION_RE.search(banner)
     if match is None:
-        raise TelemetryUnavailable("CUDA version not reported by nvidia-smi")
+        raise TelemetryUnavailable(
+            "the driver's max supported CUDA version was not reported by nvidia-smi"
+        )
 
     return {
         "gpu_model": name,
         "gpu_count": 1,
         "gpu_memory_gb": memory_gb,
         "driver_version": driver_version,
-        "cuda_version": match.group(1),
+        "driver_max_cuda_version": match.group(1),
     }
+
+
+def observe_container_cuda_version(container_name: str, runner: CommandRunner = run_command) -> str:
+    """The ACTUAL CUDA runtime version inside the running serving container.
+
+    Observed via ``torch.version.cuda`` inside the container — never taken
+    from the ``nvidia-smi`` banner, which reports the driver's maximum
+    supported CUDA version, a different fact.
+    """
+    output = runner(
+        [
+            "docker",
+            "exec",
+            container_name,
+            "python3",
+            "-c",
+            "import torch; print(torch.version.cuda)",
+        ]
+    ).strip()
+    version = output.splitlines()[-1].strip() if output else ""
+    if not re.fullmatch(r"[0-9]+\.[0-9]+", version):
+        raise TelemetryUnavailable(
+            "the container's CUDA runtime version could not be observed "
+            "(torch.version.cuda did not return a plain version)"
+        )
+    return version
 
 
 @dataclass(frozen=True)
 class GpuSample:
-    """One genuine GPU telemetry sample."""
+    """One genuine GPU telemetry sample, timestamped on the monotonic clock."""
 
+    monotonic_s: float
     utilization_pct: float
     memory_used_gib: float
     power_watts: float
     temperature_c: float
 
 
-def read_gpu_sample(runner: CommandRunner = run_command) -> GpuSample:
-    """Reads one utilization/memory/power/temperature sample via nvidia-smi."""
+def read_gpu_sample(
+    runner: CommandRunner = run_command, *, clock: Clock = SYSTEM_CLOCK
+) -> GpuSample:
+    """Reads one utilization/memory/power/temperature sample via nvidia-smi.
+
+    The sample is stamped with the injectable monotonic clock so energy can
+    be integrated over the ACTUAL elapsed intervals rather than a nominal
+    sampling interval.
+    """
     output = runner(
         ["nvidia-smi", f"--query-gpu={_NVIDIA_SMI_SAMPLE_QUERY}", "--format=csv,noheader,nounits"]
     )
+    stamped_at = clock.monotonic()
     rows = [line.strip() for line in output.splitlines() if line.strip()]
     if not rows:
         raise TelemetryUnavailable("nvidia-smi returned no telemetry sample")
@@ -189,6 +256,7 @@ def read_gpu_sample(runner: CommandRunner = run_command) -> GpuSample:
         raise TelemetryUnavailable("nvidia-smi returned an unparseable telemetry sample")
     try:
         return GpuSample(
+            monotonic_s=stamped_at,
             utilization_pct=float(parts[0]),
             memory_used_gib=round(float(parts[1]) / 1024.0, 3),
             power_watts=float(parts[2]),
@@ -201,44 +269,87 @@ def read_gpu_sample(runner: CommandRunner = run_command) -> GpuSample:
 def summarize_gpu_samples(
     samples: list[GpuSample],
     *,
-    sample_interval_s: float,
+    window_started_monotonic_s: float,
+    window_ended_monotonic_s: float,
     successful_tasks: int,
+    min_coverage: float = MIN_SAMPLING_COVERAGE,
 ) -> dict:
     """Builds the result schema's available ``gpu`` block from genuine samples.
 
-    Energy is integrated as mean power x sampled wall time (rectangle rule at
-    the sampling interval) — an estimate derived from genuine samples, with
-    the method recorded by the caller in the result notes.
+    Energy is integrated with the trapezoidal rule over the ACTUAL elapsed
+    monotonic intervals between consecutive samples. Boundary handling is
+    documented and conservative: nothing is extrapolated beyond the first or
+    last sample, so the integral covers only the sampled span; the gap
+    between the sampling window boundaries and the sampled span is exposed
+    through ``coverage_fraction`` and never silently filled in.
+
+    Fails visibly (:class:`TelemetryUnavailable`) when fewer than two samples
+    exist, timestamps are not strictly increasing, or coverage is below
+    ``min_coverage`` — an approved measurement never proceeds on
+    insufficient telemetry.
     """
-    if not samples:
-        raise TelemetryUnavailable("no GPU telemetry samples were collected during the run")
-    if sample_interval_s <= 0:
-        raise ValueError("sample_interval_s must be > 0")
+    if len(samples) < 2:
+        raise TelemetryUnavailable(
+            "insufficient GPU telemetry: at least two timestamped samples are "
+            "required to integrate energy over actual intervals"
+        )
+    if window_ended_monotonic_s <= window_started_monotonic_s:
+        raise TelemetryUnavailable("the GPU sampling window has a non-positive duration")
+    timestamps = [s.monotonic_s for s in samples]
+    if any(b <= a for a, b in itertools.pairwise(timestamps)):
+        raise TelemetryUnavailable(
+            "GPU telemetry timestamps are not strictly increasing; the sample "
+            "series cannot be integrated"
+        )
+
+    window_s = window_ended_monotonic_s - window_started_monotonic_s
+    covered_s = timestamps[-1] - timestamps[0]
+    coverage = covered_s / window_s
+    if coverage < min_coverage:
+        raise TelemetryUnavailable(
+            f"GPU telemetry coverage {coverage:.2f} is below the required "
+            f"minimum {min_coverage:.2f} for an approved measurement; the "
+            "sampled span does not adequately cover the measurement window"
+        )
+
+    intervals = [b - a for a, b in itertools.pairwise(timestamps)]
+    energy_joules = sum(
+        (samples[i].power_watts + samples[i + 1].power_watts) / 2.0 * intervals[i]
+        for i in range(len(intervals))
+    )
     utilizations = sorted(s.utilization_pct for s in samples)
-    powers = [s.power_watts for s in samples]
     p95_rank = max(1, -(-len(utilizations) * 95 // 100))  # ceil without math import
-    energy_joules = sum(p * sample_interval_s for p in powers)
-    block = {
+    return {
         "telemetry_available": True,
         "utilization_mean_pct": round(sum(utilizations) / len(utilizations), 2),
         "utilization_p95_pct": round(utilizations[p95_rank - 1], 2),
         "memory_peak_gib": round(max(s.memory_used_gib for s in samples), 3),
-        "power_mean_watts": round(sum(powers) / len(powers), 2),
+        "power_mean_watts": round(energy_joules / covered_s, 2),
         "energy_joules": round(energy_joules, 1),
         "energy_per_successful_task_joules": (
             round(energy_joules / successful_tasks, 1) if successful_tasks > 0 else None
         ),
+        "sampling": {
+            "sample_count": len(samples),
+            "window_duration_s": round(window_s, 3),
+            "covered_duration_s": round(covered_s, 3),
+            "coverage_fraction": round(coverage, 4),
+            "interval_mean_s": round(sum(intervals) / len(intervals), 4),
+            "interval_max_s": round(max(intervals), 4),
+            "peak_temperature_c": round(max(s.temperature_c for s in samples), 1),
+            "integration_method": ENERGY_INTEGRATION_METHOD,
+        },
     }
-    return block
 
 
 class GpuSamplerThread:
     """Background sampler collecting genuine GPU telemetry during a pass.
 
-    ``start()``/``stop()`` bracket one repetition. Sampling failures are
-    recorded (first reason wins) and surface as :class:`TelemetryUnavailable`
-    from :meth:`summary` — a run with broken telemetry fails visibly instead
-    of producing a partial or fabricated summary.
+    ``start()``/``stop()`` bracket one repetition and record the sampling
+    window boundaries on the monotonic clock. Sampling failures are recorded
+    (first reason wins) and surface as :class:`TelemetryUnavailable` from
+    :meth:`summary` — a run with broken telemetry fails visibly instead of
+    producing a partial or fabricated summary.
     """
 
     def __init__(
@@ -246,13 +357,17 @@ class GpuSamplerThread:
         runner: CommandRunner = run_command,
         *,
         interval_s: float = DEFAULT_GPU_SAMPLE_INTERVAL_S,
+        clock: Clock = SYSTEM_CLOCK,
     ) -> None:
         if interval_s <= 0:
             raise ValueError("interval_s must be > 0")
         self._runner = runner
         self._interval_s = interval_s
+        self._clock = clock
         self._samples: list[GpuSample] = []
         self._failure_reason: str | None = None
+        self._window_started: float | None = None
+        self._window_ended: float | None = None
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -260,6 +375,7 @@ class GpuSamplerThread:
         if self._thread is not None:
             raise RuntimeError("sampler already started")
         self._stop_event.clear()
+        self._window_started = self._clock.monotonic()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -268,11 +384,12 @@ class GpuSamplerThread:
         if self._thread is not None:
             self._thread.join(timeout=30)
             self._thread = None
+        self._window_ended = self._clock.monotonic()
 
     def _loop(self) -> None:
         while not self._stop_event.is_set():
             try:
-                self._samples.append(read_gpu_sample(self._runner))
+                self._samples.append(read_gpu_sample(self._runner, clock=self._clock))
             except TelemetryUnavailable as exc:
                 if self._failure_reason is None:
                     self._failure_reason = str(exc)
@@ -282,9 +399,12 @@ class GpuSamplerThread:
     def summary(self, *, successful_tasks: int) -> dict:
         if self._failure_reason is not None:
             raise TelemetryUnavailable(f"GPU sampling failed mid-run: {self._failure_reason}")
+        if self._window_started is None or self._window_ended is None:
+            raise TelemetryUnavailable("the GPU sampling window was never started and stopped")
         return summarize_gpu_samples(
             self._samples,
-            sample_interval_s=self._interval_s,
+            window_started_monotonic_s=self._window_started,
+            window_ended_monotonic_s=self._window_ended,
             successful_tasks=successful_tasks,
         )
 

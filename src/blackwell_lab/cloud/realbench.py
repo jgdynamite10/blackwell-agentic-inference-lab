@@ -31,6 +31,8 @@ Truthfulness rules for genuine runs:
 
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 import uuid
 from collections.abc import Callable
@@ -97,6 +99,16 @@ class RequiredMeasurementError(RuntimeError):
     """A measurement required for genuine runs is unavailable (fail visibly)."""
 
 
+#: Controlled-resource mode requires the joint 14-vCPU/100-GiB
+#: serving-plus-benchmark cgroup envelope to be genuinely implemented,
+#: enforced, and observed. Until that exists, any run labeled
+#: "controlled-resource" would be labeled by configuration alone — a
+#: fabrication — so the mode is rejected outright. Enabling it is a reviewed
+#: code change gated on verified enforcement, never a runtime flag
+#: (decision D-0013).
+CONTROLLED_RESOURCE_ENFORCEMENT_IMPLEMENTED = False
+
+
 #: A sampler factory returns an object with start()/stop()/summary(...) —
 #: production uses telemetry.GpuSamplerThread; tests inject fakes.
 SamplerFactory = Callable[[], object]
@@ -122,6 +134,7 @@ class RealRunSpec:
     tasks_per_repetition: int = DEFAULT_TASKS_PER_REPETITION
     seed: int = 20260906
     resource_limits: dict | None = None  # required for controlled-resource
+    container_cuda_runtime_version: str | None = None  # observed, never configured
     run_label: str = "real"
     generation: GenerationSettings = field(
         # Model-card recommended sampling (feasibility report §5); frozen
@@ -148,11 +161,20 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
             "comparison_mode must be 'controlled-resource' or 'provider-native' "
             "for genuine runs (never 'not-applicable')"
         )
-    if spec.comparison_mode == "controlled-resource" and not spec.resource_limits:
-        raise ConfigError(
-            "controlled-resource runs must declare the enforced joint "
-            "resource_limits (vcpu_limit, memory_limit_gib)"
-        )
+    if spec.comparison_mode == "controlled-resource":
+        if not CONTROLLED_RESOURCE_ENFORCEMENT_IMPLEMENTED:
+            raise ConfigError(
+                "controlled-resource runs are rejected: the joint "
+                "14-vCPU/100-GiB serving-plus-benchmark cgroup envelope is not "
+                "yet implemented and verified, and a comparison-mode label "
+                "supplied merely in configuration is a fabrication. Run "
+                "provider-native (decision D-0013)."
+            )
+        if not spec.resource_limits:  # pragma: no cover - unreachable while gated
+            raise ConfigError(
+                "controlled-resource runs must declare the enforced joint "
+                "resource_limits (vcpu_limit, memory_limit_gib)"
+            )
     for key in ("artifact", "revision", "artifact_hash", "precision"):
         if not spec.model.get(key):
             raise ConfigError(f"model.{key} is required for genuine runs")
@@ -199,6 +221,13 @@ def build_real_manifest(
     }
     if spec.comparison_mode == "controlled-resource":
         cloud["resource_limits"] = spec.resource_limits
+    serving: dict = {
+        "engine": spec.engine,
+        "engine_version": spec.engine_version,
+        "container_digest": spec.container_digest,
+    }
+    if spec.container_cuda_runtime_version:
+        serving["container_cuda_runtime_version"] = spec.container_cuda_runtime_version
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "run_id": run_id,
@@ -207,11 +236,7 @@ def build_real_manifest(
         "created_at_utc": started_at_utc,
         "git": _git_provenance(),
         "model": dict(spec.model),
-        "serving": {
-            "engine": spec.engine,
-            "engine_version": spec.engine_version,
-            "container_digest": spec.container_digest,
-        },
+        "serving": serving,
         "host": host,
         "cloud": cloud,
         "generation": {
@@ -472,18 +497,28 @@ def run_real_cell(
 
     ``host`` is the complete gpu-mode host block (telemetry facts, never
     fabricated). ``sampler_factory`` produces one GPU sampler per pass
-    (``telemetry.GpuSamplerThread`` in production). ``results_dir`` defaults
-    to the ``LAB_RESULTS_DIR`` guard in **RunMode.REAL** — unset fails
-    closed, and genuine results are always persisted externally.
+    (``telemetry.GpuSamplerThread`` in production). The ``LAB_RESULTS_DIR``
+    guard is enforced **independently by this entry point**: with no
+    ``results_dir`` it resolves the guard in **RunMode.REAL** (unset fails
+    closed), and an explicitly passed ``results_dir`` is re-validated
+    through the same guard so no caller can steer genuine output into the
+    repository.
     """
     profile = _validate_spec(spec)
     if results_dir is None:
         resolved = resolve_results_dir(mode=RunMode.REAL)
-        if resolved is None:  # pragma: no cover - RunMode.REAL never returns None
-            raise RequiredMeasurementError("no external results directory was resolved")
-        results_dir = resolved
+    else:
+        # Independent enforcement: an explicitly supplied directory passes
+        # through the same REAL-mode guard (absolute, external, symlink-safe).
+        resolved = resolve_results_dir(str(results_dir), mode=RunMode.REAL)
+    if resolved is None:  # pragma: no cover - RunMode.REAL never returns None
+        raise RequiredMeasurementError("no external results directory was resolved")
+    results_dir = resolved
     target_dir = results_dir / "real-runs" / spec.run_label
     target_dir.mkdir(parents=True, exist_ok=True)
+    for directory in (results_dir / "real-runs", target_dir):
+        with contextlib.suppress(OSError):
+            os.chmod(directory, 0o700)
 
     full_catalog = catalog()
     template_ids = list(full_catalog)
@@ -542,67 +577,92 @@ def run_real_cell(
         succeeded = sum(
             1 for o in data.outcomes if o.execution.status == "completed" and o.evaluation.success
         )
-        gpu_block = sampler.summary(successful_tasks=succeeded)  # type: ignore[attr-defined]
 
-        measured_document = _observation_document(
-            run_id=run_id,
-            repetition_index=repetition_index,
-            phase="measured",
-            outcomes=data.outcomes,
-        )
-        validate_task_observations(measured_document)
+        try:
+            gpu_block = sampler.summary(successful_tasks=succeeded)  # type: ignore[attr-defined]
 
-        is_first = repetition_index == 1
-        repetition_warmup_doc = warmup_document if is_first else None
-        warmup_count = len(warmup_outcomes) if is_first else 0
+            measured_document = _observation_document(
+                run_id=run_id,
+                repetition_index=repetition_index,
+                phase="measured",
+                outcomes=data.outcomes,
+            )
+            validate_task_observations(measured_document)
 
-        # Prompt, atomic, private persistence of raw observations.
-        written: list[str] = []
-        measured_name = f"{run_id}.observations.json"
-        measured_sha = _write_private_json(target_dir, measured_name, measured_document)
-        written.append(measured_name)
-        observations_block: dict = {
-            "persisted": True,
-            "measured_count": len(data.outcomes),
-            "warmup_count": warmup_count,
-            "measured_file": measured_name,
-            "measured_sha256": measured_sha,
-        }
-        if repetition_warmup_doc is not None:
-            warmup_name = f"{run_id}.warmup-observations.json"
-            warmup_sha = _write_private_json(target_dir, warmup_name, repetition_warmup_doc)
-            observations_block["warmup_file"] = warmup_name
-            observations_block["warmup_sha256"] = warmup_sha
-            written.append(warmup_name)
+            is_first = repetition_index == 1
+            repetition_warmup_doc = warmup_document if is_first else None
+            warmup_count = len(warmup_outcomes) if is_first else 0
 
-        manifest = build_real_manifest(
-            spec=spec,
-            profile=profile,
-            run_id=run_id,
-            host=host,
-            scenario_count=len(template_ids),
-            repetition_index=repetition_index,
-            started_at_utc=started_at_utc,
-            ended_at_utc=ended_at_utc,
-        )
-        result = build_real_result(
-            spec=spec,
-            profile=profile,
-            run_id=run_id,
-            manifest_ref=f"{run_id}.manifest.json",
-            data=data,
-            sample_design=sample_design_summary(instances, repetition_seed),
-            observations_block=observations_block,
-            gpu_block=gpu_block,
-        )
-        validate_run_manifest(manifest)
-        validate_benchmark_result(result)
-        validate_result_semantics(
-            manifest,
-            result,
-            measured_observations=measured_document,
-            warmup_observations=repetition_warmup_doc,
-        )
+            # Prompt, atomic, private persistence of raw observations.
+            written: list[str] = []
+            measured_name = f"{run_id}.observations.json"
+            measured_sha = _write_private_json(target_dir, measured_name, measured_document)
+            written.append(measured_name)
+            observations_block: dict = {
+                "persisted": True,
+                "measured_count": len(data.outcomes),
+                "warmup_count": warmup_count,
+                "measured_file": measured_name,
+                "measured_sha256": measured_sha,
+            }
+            if repetition_warmup_doc is not None:
+                warmup_name = f"{run_id}.warmup-observations.json"
+                warmup_sha = _write_private_json(target_dir, warmup_name, repetition_warmup_doc)
+                observations_block["warmup_file"] = warmup_name
+                observations_block["warmup_sha256"] = warmup_sha
+                written.append(warmup_name)
+
+            manifest = build_real_manifest(
+                spec=spec,
+                profile=profile,
+                run_id=run_id,
+                host=host,
+                scenario_count=len(template_ids),
+                repetition_index=repetition_index,
+                started_at_utc=started_at_utc,
+                ended_at_utc=ended_at_utc,
+            )
+            result = build_real_result(
+                spec=spec,
+                profile=profile,
+                run_id=run_id,
+                manifest_ref=f"{run_id}.manifest.json",
+                data=data,
+                sample_design=sample_design_summary(instances, repetition_seed),
+                observations_block=observations_block,
+                gpu_block=gpu_block,
+            )
+            validate_run_manifest(manifest)
+            validate_benchmark_result(result)
+            validate_result_semantics(
+                manifest,
+                result,
+                measured_observations=measured_document,
+                warmup_observations=repetition_warmup_doc,
+            )
+        except Exception as exc:
+            # An incomplete attempt is retained externally as an explicitly
+            # marked failure record — never presented as a valid result — and
+            # the run still fails visibly.
+            _write_private_json(
+                target_dir,
+                f"{run_id}.failure.json",
+                {
+                    "failure_record": True,
+                    "is_valid_result": False,
+                    "run_id": run_id,
+                    "repetition_index": repetition_index,
+                    "failed_at_utc": _utc_now(),
+                    "error_type": type(exc).__name__,
+                    "note": (
+                        "This repetition did not produce a valid, complete "
+                        "result. This record exists only for auditability; it "
+                        "must never be analyzed or published as a result."
+                    ),
+                },
+            )
+            raise
+
         manifest_name = f"{run_id}.manifest.json"
         result_name = f"{run_id}.result.json"
         _write_private_json(target_dir, manifest_name, manifest)

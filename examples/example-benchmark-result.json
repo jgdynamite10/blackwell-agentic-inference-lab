@@ -1,5 +1,5 @@
 {
-  "schema_version": "2.0.0",
+  "schema_version": "3.0.0",
   "run_id": "EXAMPLE-0000-0000-0000-000000000000",
   "is_synthetic_example": true,
   "execution_mode": "gpu",
@@ -27,18 +27,88 @@
     "mean_in_flight": 0.97
   },
   "latency_ms": {
-    "task_completion": { "available": true, "mean": 42000, "p50": 40000, "p90": 55000, "p95": 58000, "p99": null, "min": 30000, "max": 67000, "count": 200 },
-    "time_to_first_token": { "available": true, "mean": 350, "p50": 320, "p90": 480, "p95": 540, "p99": null, "min": 250, "max": 610, "count": 840 },
-    "inter_token": { "available": true, "mean": 12, "p50": 11, "p90": 16, "p95": 18, "p99": 25, "min": 8, "max": 30, "count": 39000 },
-    "queue_time": { "available": true, "mean": 15, "p50": 10, "p90": 30, "p95": 41, "p99": null, "min": 2, "max": 60, "count": 840 },
-    "model_serving_time": { "available": true, "mean": 9800, "p50": 9200, "p90": 13000, "p95": 14400, "p99": null, "min": 6800, "max": 16200, "count": 840 },
-    "tool_execution_time": { "available": true, "mean": 120, "p50": 120, "p90": 130, "p95": 135, "p99": 140, "min": 100, "max": 141, "count": 1200 }
+    "task_completion": {
+      "available": true,
+      "mean": 42000,
+      "p50": 40000,
+      "p90": 55000,
+      "p95": 58000,
+      "p99": null,
+      "min": 30000,
+      "max": 67000,
+      "count": 200
+    },
+    "time_to_first_token": {
+      "available": true,
+      "mean": 350,
+      "p50": 320,
+      "p90": 480,
+      "p95": 540,
+      "p99": null,
+      "min": 250,
+      "max": 610,
+      "count": 840
+    },
+    "inter_token": {
+      "available": true,
+      "mean": 12,
+      "p50": 11,
+      "p90": 16,
+      "p95": 18,
+      "p99": 25,
+      "min": 8,
+      "max": 30,
+      "count": 39000
+    },
+    "queue_time": {
+      "available": true,
+      "mean": 15,
+      "p50": 10,
+      "p90": 30,
+      "p95": 41,
+      "p99": null,
+      "min": 2,
+      "max": 60,
+      "count": 840
+    },
+    "model_serving_time": {
+      "available": true,
+      "mean": 9800,
+      "p50": 9200,
+      "p90": 13000,
+      "p95": 14400,
+      "p99": null,
+      "min": 6800,
+      "max": 16200,
+      "count": 840
+    },
+    "tool_execution_time": {
+      "available": true,
+      "mean": 120,
+      "p50": 120,
+      "p90": 130,
+      "p95": 135,
+      "p99": 140,
+      "min": 100,
+      "max": 141,
+      "count": 1200
+    }
   },
   "throughput": {
     "available": true,
     "output_tokens_per_second": 85.3,
     "total_output_tokens": 312000,
-    "per_turn_output_tokens_per_second": { "available": true, "mean": 84.1, "p50": 85.0, "p90": 92.4, "p95": 94.8, "p99": null, "min": 61.0, "max": 99.2, "count": 840 },
+    "per_turn_output_tokens_per_second": {
+      "available": true,
+      "mean": 84.1,
+      "p50": 85.0,
+      "p90": 92.4,
+      "p95": 94.8,
+      "p99": null,
+      "min": 61.0,
+      "max": 99.2,
+      "count": 840
+    },
     "successful_tasks_per_gpu_hour": 8.8
   },
   "gpu": {
@@ -48,7 +118,17 @@
     "memory_peak_gib": 78.2,
     "power_mean_watts": 310.0,
     "energy_joules": 1116000,
-    "energy_per_successful_task_joules": 124000
+    "energy_per_successful_task_joules": 124000,
+    "sampling": {
+      "sample_count": 3600,
+      "window_duration_s": 3612.5,
+      "covered_duration_s": 3598.7,
+      "coverage_fraction": 0.9962,
+      "interval_mean_s": 1.0,
+      "interval_max_s": 1.2,
+      "peak_temperature_c": 74.0,
+      "integration_method": "trapezoidal over actual monotonic sample intervals; no extrapolation beyond the first/last sample (boundary intervals outside the sampled span are excluded from the integral and reported via coverage)"
+    }
   },
   "errors": {
     "error_rate": 0.03,
@@ -80,7 +160,7 @@
     "gpu_hours": 1.02,
     "list_price_usd_per_hour": 0.0,
     "cost_per_successful_task_usd": 0.0,
-    "cost_basis_note": "SYNTHETIC EXAMPLE — fabricated numbers for schema documentation only; excludes taxes/discounts; storage reported separately."
+    "cost_basis_note": "SYNTHETIC EXAMPLE \u2014 fabricated numbers for schema documentation only; excludes taxes/discounts; storage reported separately."
   },
-  "notes": "SYNTHETIC EXAMPLE FILE — every value on this page is fabricated to document the result format. This is not a genuine benchmark record."
+  "notes": "SYNTHETIC EXAMPLE FILE \u2014 every value on this page is fabricated to document the result format. This is not a genuine benchmark record."
 }

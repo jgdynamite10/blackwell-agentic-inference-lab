@@ -99,8 +99,8 @@ from blackwell_lab.workload.validation import (
     validate_runner_config,
 )
 
-MANIFEST_SCHEMA_VERSION = "2.1.0"
-RESULT_SCHEMA_VERSION = "2.0.0"
+MANIFEST_SCHEMA_VERSION = "3.0.0"
+RESULT_SCHEMA_VERSION = "3.0.0"
 OBSERVATION_SCHEMA_VERSION = "1.0.0"
 
 #: Measurement defaults (measurement contract §5; decision D-0010).

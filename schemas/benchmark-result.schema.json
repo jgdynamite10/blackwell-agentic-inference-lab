@@ -38,7 +38,10 @@
     },
     "execution_mode": {
       "type": "string",
-      "enum": ["gpu", "mock"],
+      "enum": [
+        "gpu",
+        "mock"
+      ],
       "description": "Must match the manifest's execution_mode. Drives the mock-validity conditionals below."
     },
     "manifest_ref": {
@@ -49,41 +52,114 @@
     "tasks": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["attempted", "succeeded", "quality_failed", "errored", "timed_out", "success_rate"],
-      "description": "Unambiguous task accounting: attempted = succeeded + quality_failed + errored + timed_out (semantic validation enforces the sum). quality_failed means the task completed but failed evaluator gates — it is never mixed into the execution-error taxonomy.",
+      "required": [
+        "attempted",
+        "succeeded",
+        "quality_failed",
+        "errored",
+        "timed_out",
+        "success_rate"
+      ],
+      "description": "Unambiguous task accounting: attempted = succeeded + quality_failed + errored + timed_out (semantic validation enforces the sum). quality_failed means the task completed but failed evaluator gates \u2014 it is never mixed into the execution-error taxonomy.",
       "properties": {
-        "attempted": { "type": "integer", "minimum": 0 },
-        "succeeded": { "type": "integer", "minimum": 0, "description": "Completed AND passed every mandatory evaluator gate (score 1.0)." },
-        "quality_failed": { "type": "integer", "minimum": 0, "description": "Completed but failed at least one mandatory evaluator gate." },
-        "errored": { "type": "integer", "minimum": 0, "description": "Execution error (see errors.taxonomy); disjoint from quality failure." },
-        "timed_out": { "type": "integer", "minimum": 0 },
-        "success_rate": { "type": "number", "minimum": 0, "maximum": 1, "description": "succeeded / attempted." },
-        "mean_quality_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Diagnostic only: mean of binary gate scores; success is gate-based, never threshold-on-mean." }
+        "attempted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "succeeded": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Completed AND passed every mandatory evaluator gate (score 1.0)."
+        },
+        "quality_failed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Completed but failed at least one mandatory evaluator gate."
+        },
+        "errored": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Execution error (see errors.taxonomy); disjoint from quality failure."
+        },
+        "timed_out": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "success_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "succeeded / attempted."
+        },
+        "mean_quality_score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Diagnostic only: mean of binary gate scores; success is gate-based, never threshold-on-mean."
+        }
       }
     },
     "sample_design": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tasks_per_repetition", "seed", "unique_template_count", "unique_instance_count", "total_attempts"],
+      "required": [
+        "tasks_per_repetition",
+        "seed",
+        "unique_template_count",
+        "unique_instance_count",
+        "total_attempts"
+      ],
       "description": "The seeded, balanced sample plan for this repetition (decision D-0010). Independent quality cases are bounded by unique_template_count: prompt-surface variants of one template are never presented as independent quality samples.",
       "properties": {
-        "tasks_per_repetition": { "type": "integer", "minimum": 1 },
-        "seed": { "type": "integer" },
-        "unique_template_count": { "type": "integer", "minimum": 1 },
-        "unique_instance_count": { "type": "integer", "minimum": 1 },
-        "total_attempts": { "type": "integer", "minimum": 1 },
-        "quality_independence_note": { "type": "string" }
+        "tasks_per_repetition": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "unique_template_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "unique_instance_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "total_attempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "quality_independence_note": {
+          "type": "string"
+        }
       }
     },
     "concurrency": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["requested", "achieved_max", "mean_in_flight"],
+      "required": [
+        "requested",
+        "achieved_max",
+        "mean_in_flight"
+      ],
       "description": "Truthful concurrency accounting for the bounded closed-loop scheduler: requested slots, the maximum in-flight tasks actually observed, and the time-averaged in-flight work (busy time / wall time). Concurrency is bounded above by 'requested' but is NOT claimed to be exactly enforced during ramp-up and drain.",
       "properties": {
-        "requested": { "type": "integer", "minimum": 1 },
-        "achieved_max": { "type": "integer", "minimum": 0 },
-        "mean_in_flight": { "type": "number", "minimum": 0 }
+        "requested": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "achieved_max": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mean_in_flight": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "latency_ms": {
@@ -99,12 +175,24 @@
       ],
       "description": "Each measure is either an available summary or explicitly unavailable with a reason. inter_token requires true per-token timing (never transport chunks); queue_time requires serving-engine queue telemetry; mock host-clock latencies are not benchmark performance and are therefore unavailable here (see mock_diagnostics).",
       "properties": {
-        "task_completion": { "$ref": "#/$defs/latency_measure" },
-        "time_to_first_token": { "$ref": "#/$defs/latency_measure" },
-        "inter_token": { "$ref": "#/$defs/latency_measure" },
-        "queue_time": { "$ref": "#/$defs/latency_measure" },
-        "model_serving_time": { "$ref": "#/$defs/latency_measure" },
-        "tool_execution_time": { "$ref": "#/$defs/latency_measure" }
+        "task_completion": {
+          "$ref": "#/$defs/latency_measure"
+        },
+        "time_to_first_token": {
+          "$ref": "#/$defs/latency_measure"
+        },
+        "inter_token": {
+          "$ref": "#/$defs/latency_measure"
+        },
+        "queue_time": {
+          "$ref": "#/$defs/latency_measure"
+        },
+        "model_serving_time": {
+          "$ref": "#/$defs/latency_measure"
+        },
+        "tool_execution_time": {
+          "$ref": "#/$defs/latency_measure"
+        }
       }
     },
     "throughput": {
@@ -113,14 +201,33 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "output_tokens_per_second", "total_output_tokens", "successful_tasks_per_gpu_hour"],
+          "required": [
+            "available",
+            "output_tokens_per_second",
+            "total_output_tokens",
+            "successful_tasks_per_gpu_hour"
+          ],
           "properties": {
-            "available": { "const": true },
-            "output_tokens_per_second": { "type": "number", "minimum": 0 },
-            "total_output_tokens": { "type": "integer", "minimum": 0 },
-            "per_turn_output_tokens_per_second": { "$ref": "#/$defs/latency_measure", "description": "Per-turn throughput distribution (measurement contract requirement)." },
+            "available": {
+              "const": true
+            },
+            "output_tokens_per_second": {
+              "type": "number",
+              "minimum": 0
+            },
+            "total_output_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "per_turn_output_tokens_per_second": {
+              "$ref": "#/$defs/latency_measure",
+              "description": "Per-turn throughput distribution (measurement contract requirement)."
+            },
             "successful_tasks_per_gpu_hour": {
-              "type": ["number", "null"],
+              "type": [
+                "number",
+                "null"
+              ],
               "minimum": 0,
               "description": "Null when the run consumed zero GPU-hours: the measure is undefined, never fabricated."
             }
@@ -129,10 +236,18 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "reason"],
+          "required": [
+            "available",
+            "reason"
+          ],
           "properties": {
-            "available": { "const": false },
-            "reason": { "type": "string", "minLength": 1 }
+            "available": {
+              "const": false
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       ]
@@ -140,8 +255,10 @@
     "gpu": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["telemetry_available"],
-      "description": "GPU telemetry. When telemetry_available is false (e.g. mock/CPU execution), only the explicit unavailable_reason may be present — metric fields must be absent, never zero-filled or fabricated.",
+      "required": [
+        "telemetry_available"
+      ],
+      "description": "GPU telemetry. When telemetry_available is false (e.g. mock/CPU execution), only the explicit unavailable_reason may be present \u2014 metric fields must be absent, never zero-filled or fabricated.",
       "properties": {
         "telemetry_available": {
           "type": "boolean",
@@ -152,37 +269,156 @@
           "minLength": 1,
           "description": "Why telemetry is unavailable (required when telemetry_available is false)."
         },
-        "utilization_mean_pct": { "type": "number", "minimum": 0, "maximum": 100 },
-        "utilization_p95_pct": { "type": "number", "minimum": 0, "maximum": 100 },
-        "memory_peak_gib": { "type": "number", "minimum": 0 },
-        "power_mean_watts": { "type": "number", "minimum": 0 },
-        "energy_joules": { "type": "number", "minimum": 0 },
-        "energy_per_successful_task_joules": { "type": ["number", "null"], "minimum": 0 }
+        "utilization_mean_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "utilization_p95_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "memory_peak_gib": {
+          "type": "number",
+          "minimum": 0
+        },
+        "power_mean_watts": {
+          "type": "number",
+          "minimum": 0
+        },
+        "energy_joules": {
+          "type": "number",
+          "minimum": 0
+        },
+        "energy_per_successful_task_joules": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sampling": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "GPU sampling accuracy record: monotonic-timestamped samples, actual-interval energy integration, and coverage. Required whenever telemetry is available; a summary from insufficient coverage must fail visibly instead of being recorded.",
+          "required": [
+            "sample_count",
+            "window_duration_s",
+            "covered_duration_s",
+            "coverage_fraction",
+            "interval_mean_s",
+            "interval_max_s",
+            "peak_temperature_c",
+            "integration_method"
+          ],
+          "properties": {
+            "sample_count": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "window_duration_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Sampling window from sampler start to stop (monotonic clock)."
+            },
+            "covered_duration_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Span from the first to the last sample timestamp (monotonic clock)."
+            },
+            "coverage_fraction": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "covered_duration_s / window_duration_s; the integral never extrapolates beyond the sampled span."
+            },
+            "interval_mean_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "interval_max_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "peak_temperature_c": {
+              "type": "number"
+            },
+            "integration_method": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Documented integration method (actual elapsed intervals, never sample-count x nominal interval)."
+            }
+          }
+        }
       },
       "oneOf": [
         {
-          "properties": { "telemetry_available": { "const": true } },
-          "required": ["telemetry_available", "utilization_mean_pct", "memory_peak_gib", "energy_joules"],
-          "not": { "required": ["unavailable_reason"] }
+          "properties": {
+            "telemetry_available": {
+              "const": true
+            }
+          },
+          "required": [
+            "telemetry_available",
+            "utilization_mean_pct",
+            "memory_peak_gib",
+            "energy_joules",
+            "sampling"
+          ],
+          "not": {
+            "required": [
+              "unavailable_reason"
+            ]
+          }
         },
         {
-          "properties": { "telemetry_available": { "const": false } },
-          "required": ["telemetry_available", "unavailable_reason"],
-          "propertyNames": { "enum": ["telemetry_available", "unavailable_reason"] }
+          "properties": {
+            "telemetry_available": {
+              "const": false
+            }
+          },
+          "required": [
+            "telemetry_available",
+            "unavailable_reason"
+          ],
+          "propertyNames": {
+            "enum": [
+              "telemetry_available",
+              "unavailable_reason"
+            ]
+          }
         }
       ]
     },
     "errors": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["error_rate", "timeout_rate", "taxonomy"],
+      "required": [
+        "error_rate",
+        "timeout_rate",
+        "taxonomy"
+      ],
       "description": "Execution errors only (quality failures are counted in tasks.quality_failed, never here).",
       "properties": {
-        "error_rate": { "type": "number", "minimum": 0, "maximum": 1, "description": "errored / attempted." },
-        "timeout_rate": { "type": "number", "minimum": 0, "maximum": 1, "description": "timed_out / attempted." },
+        "error_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "errored / attempted."
+        },
+        "timeout_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "timed_out / attempted."
+        },
         "taxonomy": {
           "type": "object",
-          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
           "description": "Execution-error category counts (e.g. endpoint_error, malformed_tool_call, agent_runtime_error, task_timeout)."
         }
       }
@@ -190,14 +426,25 @@
     "slo": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["latency_target_ms", "quality_threshold", "slo_attaining_tasks", "slo_attaining_throughput_per_gpu_hour"],
+      "required": [
+        "latency_target_ms",
+        "quality_threshold",
+        "slo_attaining_tasks",
+        "slo_attaining_throughput_per_gpu_hour"
+      ],
       "properties": {
         "latency_target_ms": {
           "type": "number",
           "exclusiveMinimum": 0,
           "description": "End-to-end task latency target for this profile (owner-approved, decision D-0010)."
         },
-        "ttft_target_ms": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "ttft_target_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
         "quality_threshold": {
           "type": "number",
           "minimum": 0,
@@ -205,7 +452,10 @@
           "description": "Owner-approved S_min = 1.0: a task attains the SLO only when every mandatory evaluator gate passes."
         },
         "slo_attaining_tasks": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "description": "Null when SLO attainment cannot be truthfully measured (mock execution: host-clock replay latency is not production latency)."
         },
@@ -215,30 +465,84 @@
           "description": "Required when slo_attaining_tasks is null."
         },
         "slo_attaining_throughput_per_gpu_hour": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
           "description": "Correctly completed tasks per GPU-hour satisfying both the quality threshold and the latency target. Null when the run consumed zero GPU-hours (mock execution)."
         }
       },
-      "if": { "properties": { "slo_attaining_tasks": { "type": "null" } } },
-      "then": { "required": ["attainment_unavailable_reason"] }
+      "if": {
+        "properties": {
+          "slo_attaining_tasks": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "attainment_unavailable_reason"
+        ]
+      }
     },
     "observations": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["persisted", "measured_count", "warmup_count"],
+      "required": [
+        "persisted",
+        "measured_count",
+        "warmup_count"
+      ],
       "description": "References to the raw task-observation artifacts (task-observation.schema.json) this summary was derived from. File references are safe relative filenames with SHA-256 hashes; raw observations live outside Git next to this result.",
       "properties": {
-        "persisted": { "type": "boolean", "description": "False when LAB_RESULTS_DIR was unset and nothing was written anywhere." },
-        "measured_count": { "type": "integer", "minimum": 0, "description": "Measured task observations backing this summary (= tasks.attempted)." },
-        "warmup_count": { "type": "integer", "minimum": 0, "description": "Warm-up observations retained separately; excluded from every measured summary." },
-        "measured_file": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
-        "measured_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "warmup_file": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
-        "warmup_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "persisted": {
+          "type": "boolean",
+          "description": "False when LAB_RESULTS_DIR was unset and nothing was written anywhere."
+        },
+        "measured_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Measured task observations backing this summary (= tasks.attempted)."
+        },
+        "warmup_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Warm-up observations retained separately; excluded from every measured summary."
+        },
+        "measured_file": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "measured_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "warmup_file": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "warmup_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
       },
-      "if": { "properties": { "persisted": { "const": true } } },
-      "then": { "required": ["persisted", "measured_count", "warmup_count", "measured_file", "measured_sha256"] },
+      "if": {
+        "properties": {
+          "persisted": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "persisted",
+          "measured_count",
+          "warmup_count",
+          "measured_file",
+          "measured_sha256"
+        ]
+      },
       "else": {
         "properties": {
           "measured_file": false,
@@ -251,32 +555,75 @@
     "mock_diagnostics": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["note", "host_clock_task_completion_ms", "wall_time_s"],
+      "required": [
+        "note",
+        "host_clock_task_completion_ms",
+        "wall_time_s"
+      ],
       "description": "Clearly separated FUNCTIONAL diagnostics for mock execution: host-clock replay timings of the offline mock pipeline. These are NOT benchmark performance, NOT model latency, and NOT tokens/sec; they exist only to sanity-check the harness. Forbidden for gpu execution.",
       "properties": {
-        "note": { "type": "string", "minLength": 1 },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        },
         "host_clock_task_completion_ms": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mean", "min", "max", "count"],
+          "required": [
+            "mean",
+            "min",
+            "max",
+            "count"
+          ],
           "properties": {
-            "mean": { "type": "number", "minimum": 0 },
-            "min": { "type": "number", "minimum": 0 },
-            "max": { "type": "number", "minimum": 0 },
-            "count": { "type": "integer", "minimum": 1 }
+            "mean": {
+              "type": "number",
+              "minimum": 0
+            },
+            "min": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max": {
+              "type": "number",
+              "minimum": 0
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         },
-        "wall_time_s": { "type": "number", "minimum": 0 }
+        "wall_time_s": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "economics": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["gpu_hours", "list_price_usd_per_hour", "cost_per_successful_task_usd"],
+      "required": [
+        "gpu_hours",
+        "list_price_usd_per_hour",
+        "cost_per_successful_task_usd"
+      ],
       "properties": {
-        "gpu_hours": { "type": "number", "minimum": 0 },
-        "list_price_usd_per_hour": { "type": "number", "minimum": 0 },
-        "cost_per_successful_task_usd": { "type": ["number", "null"], "minimum": 0 },
+        "gpu_hours": {
+          "type": "number",
+          "minimum": 0
+        },
+        "list_price_usd_per_hour": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cost_per_successful_task_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
         "cost_basis_note": {
           "type": "string",
           "description": "What the price basis includes/excludes (taxes, discounts, storage reported separately)."
@@ -291,36 +638,104 @@
   "allOf": [
     {
       "if": {
-        "properties": { "execution_mode": { "const": "mock" } },
-        "required": ["execution_mode"]
+        "properties": {
+          "execution_mode": {
+            "const": "mock"
+          }
+        },
+        "required": [
+          "execution_mode"
+        ]
       },
       "then": {
-        "required": ["mock_diagnostics"],
+        "required": [
+          "mock_diagnostics"
+        ],
         "properties": {
           "latency_ms": {
             "properties": {
-              "task_completion": { "properties": { "available": { "const": false } } },
-              "time_to_first_token": { "properties": { "available": { "const": false } } },
-              "inter_token": { "properties": { "available": { "const": false } } },
-              "queue_time": { "properties": { "available": { "const": false } } },
-              "model_serving_time": { "properties": { "available": { "const": false } } }
+              "task_completion": {
+                "properties": {
+                  "available": {
+                    "const": false
+                  }
+                }
+              },
+              "time_to_first_token": {
+                "properties": {
+                  "available": {
+                    "const": false
+                  }
+                }
+              },
+              "inter_token": {
+                "properties": {
+                  "available": {
+                    "const": false
+                  }
+                }
+              },
+              "queue_time": {
+                "properties": {
+                  "available": {
+                    "const": false
+                  }
+                }
+              },
+              "model_serving_time": {
+                "properties": {
+                  "available": {
+                    "const": false
+                  }
+                }
+              }
             }
           },
-          "throughput": { "properties": { "available": { "const": false } } },
-          "gpu": { "properties": { "telemetry_available": { "const": false } } },
-          "slo": { "properties": { "slo_attaining_tasks": { "type": "null" } } }
+          "throughput": {
+            "properties": {
+              "available": {
+                "const": false
+              }
+            }
+          },
+          "gpu": {
+            "properties": {
+              "telemetry_available": {
+                "const": false
+              }
+            }
+          },
+          "slo": {
+            "properties": {
+              "slo_attaining_tasks": {
+                "type": "null"
+              }
+            }
+          }
         }
       }
     },
     {
       "if": {
-        "properties": { "execution_mode": { "const": "gpu" } },
-        "required": ["execution_mode"]
+        "properties": {
+          "execution_mode": {
+            "const": "gpu"
+          }
+        },
+        "required": [
+          "execution_mode"
+        ]
       },
       "then": {
         "properties": {
           "mock_diagnostics": false,
-          "slo": { "properties": { "slo_attaining_tasks": { "type": "integer" } } }
+          "slo": {
+            "properties": {
+              "slo_attaining_tasks": {
+                "type": "integer"
+              }
+            }
+          }
         }
       }
     }
@@ -332,24 +747,57 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "mean", "p50", "p90", "p95", "p99", "min", "max", "count"],
+          "required": [
+            "available",
+            "mean",
+            "p50",
+            "p90",
+            "p95",
+            "p99",
+            "min",
+            "max",
+            "count"
+          ],
           "properties": {
-            "available": { "const": true },
-            "mean": { "type": "number", "minimum": 0 },
-            "p50": { "type": "number", "minimum": 0 },
-            "p90": { "type": "number", "minimum": 0 },
+            "available": {
+              "const": true
+            },
+            "mean": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p50": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p90": {
+              "type": "number",
+              "minimum": 0
+            },
             "p95": {
-              "type": ["number", "null"],
+              "type": [
+                "number",
+                "null"
+              ],
               "minimum": 0,
               "description": "Null (suppressed) when count < 200."
             },
             "p99": {
-              "type": ["number", "null"],
+              "type": [
+                "number",
+                "null"
+              ],
               "minimum": 0,
               "description": "Null (suppressed) when count < 1000. Cell-level p99 over pooled repetitions (n >= 1000) is a separately labeled Phase 7 analysis, never a per-repetition value."
             },
-            "min": { "type": "number", "minimum": 0 },
-            "max": { "type": "number", "minimum": 0 },
+            "min": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max": {
+              "type": "number",
+              "minimum": 0
+            },
             "count": {
               "type": "integer",
               "minimum": 1,
@@ -358,24 +806,68 @@
           },
           "allOf": [
             {
-              "if": { "properties": { "count": { "maximum": 199 } } },
-              "then": { "properties": { "p95": { "type": "null" } } },
-              "else": { "properties": { "p95": { "type": "number" } } }
+              "if": {
+                "properties": {
+                  "count": {
+                    "maximum": 199
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "p95": {
+                    "type": "null"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "p95": {
+                    "type": "number"
+                  }
+                }
+              }
             },
             {
-              "if": { "properties": { "count": { "maximum": 999 } } },
-              "then": { "properties": { "p99": { "type": "null" } } },
-              "else": { "properties": { "p99": { "type": "number" } } }
+              "if": {
+                "properties": {
+                  "count": {
+                    "maximum": 999
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "p99": {
+                    "type": "null"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "p99": {
+                    "type": "number"
+                  }
+                }
+              }
             }
           ]
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "reason"],
+          "required": [
+            "available",
+            "reason"
+          ],
           "properties": {
-            "available": { "const": false },
-            "reason": { "type": "string", "minLength": 1 }
+            "available": {
+              "const": false
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       ]

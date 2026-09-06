@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/schemas/run-manifest.schema.json",
   "title": "Run Manifest",
-  "description": "Complete provenance record for one benchmark run. Written before measurement begins; timing-condition fields are finalized at run end. Must contain no secrets, account identifiers, or instance identifiers. Schema version 2.x: mock execution requires the mock engine, forbids GPU host fields, the container digest, and the model block, and uses the truthful not-applicable comparison classification; gpu execution requires a non-mock engine, the GPU host fields, the container digest, and the model block.",
+  "description": "Complete provenance record for one benchmark run. Written before measurement begins; timing-condition fields are finalized at run end. Must contain no secrets, account identifiers, or instance identifiers. Schema version 3.x: mock execution requires the mock engine, forbids GPU host fields, the container digest, and the model block, and uses the truthful not-applicable comparison classification; gpu execution requires a non-mock engine, the GPU host fields, the container digest, and the model block.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,8 +22,11 @@
   "properties": {
     "execution_mode": {
       "type": "string",
-      "enum": ["gpu", "mock"],
-      "description": "How the run executed: 'gpu' for a genuine GPU serving endpoint, 'mock' for the offline deterministic mock client (Phase 2). Mock runs must not fabricate GPU host details, and this field — not is_synthetic_example — is the execution-mode indicator."
+      "enum": [
+        "gpu",
+        "mock"
+      ],
+      "description": "How the run executed: 'gpu' for a genuine GPU serving endpoint, 'mock' for the offline deterministic mock client (Phase 2). Mock runs must not fabricate GPU host details, and this field \u2014 not is_synthetic_example \u2014 is the execution-mode indicator."
     },
     "schema_version": {
       "type": "string",
@@ -47,7 +50,10 @@
     "git": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["commit", "repository"],
+      "required": [
+        "commit",
+        "repository"
+      ],
       "properties": {
         "commit": {
           "type": "string",
@@ -67,8 +73,13 @@
     "model": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["artifact", "revision", "artifact_hash", "precision"],
-      "description": "The served model. Required for gpu execution; FORBIDDEN for mock execution — the mock client serves no model, and no workload/catalog digest may be misrepresented as a model artifact hash (the catalog digest lives in workload.catalog_digest).",
+      "required": [
+        "artifact",
+        "revision",
+        "artifact_hash",
+        "precision"
+      ],
+      "description": "The served model. Required for gpu execution; FORBIDDEN for mock execution \u2014 the mock client serves no model, and no workload/catalog digest may be misrepresented as a model artifact hash (the catalog digest lives in workload.catalog_digest).",
       "properties": {
         "artifact": {
           "type": "string",
@@ -85,7 +96,13 @@
         },
         "precision": {
           "type": "string",
-          "enum": ["bf16", "nvfp4", "fp8", "w4a16", "other"],
+          "enum": [
+            "bf16",
+            "nvfp4",
+            "fp8",
+            "w4a16",
+            "other"
+          ],
           "description": "Numerical precision / quantization of the served weights."
         },
         "license": {
@@ -97,11 +114,20 @@
     "serving": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine", "engine_version"],
+      "required": [
+        "engine",
+        "engine_version"
+      ],
       "properties": {
         "engine": {
           "type": "string",
-          "enum": ["vllm", "tensorrt-llm", "nim", "mock", "other"],
+          "enum": [
+            "vllm",
+            "tensorrt-llm",
+            "nim",
+            "mock",
+            "other"
+          ],
           "description": "Serving path. 'mock' is the offline deterministic mock client (execution_mode must be 'mock'; gpu execution requires a non-mock engine)."
         },
         "engine_version": {
@@ -115,13 +141,21 @@
         },
         "launch_flags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Complete engine launch flags (no secrets)."
         },
         "environment_overrides": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "Non-secret environment variables affecting engine behavior (e.g. backend selections)."
+        },
+        "container_cuda_runtime_version": {
+          "type": "string",
+          "description": "Actual CUDA runtime version observed INSIDE the running serving container (e.g. torch.version.cuda) \u2014 a separate fact from the driver's maximum supported CUDA version."
         }
       }
     },
@@ -134,50 +168,112 @@
         "vcpu_count",
         "system_memory_gib"
       ],
-      "description": "Host description. GPU fields (gpu_model, gpu_count, gpu_memory_gb, driver_version, cuda_version) are required when execution_mode is 'gpu' and FORBIDDEN when execution_mode is 'mock' — mock runs must not fabricate GPU values.",
+      "description": "Host description. GPU fields (gpu_model, gpu_count, gpu_memory_gb, driver_version, driver_max_cuda_version) are required when execution_mode is 'gpu' and FORBIDDEN when execution_mode is 'mock' \u2014 mock runs must not fabricate GPU values.",
       "properties": {
-        "gpu_model": { "type": "string", "description": "e.g. NVIDIA RTX PRO 6000 Blackwell Server Edition" },
-        "gpu_count": { "type": "integer", "minimum": 1 },
-        "gpu_memory_gb": { "type": "number", "exclusiveMinimum": 0 },
-        "driver_version": { "type": "string", "description": "NVIDIA driver version." },
-        "cuda_version": { "type": "string", "description": "CUDA toolkit/runtime version." },
-        "operating_system": { "type": "string", "description": "OS distribution and version." },
-        "cpu_model": { "type": "string", "description": "Host CPU model as reported by the instance." },
-        "vcpu_count": { "type": "integer", "minimum": 1 },
-        "system_memory_gib": { "type": "number", "exclusiveMinimum": 0 },
-        "storage_description": { "type": "string", "description": "Storage type/layout (no volume identifiers)." },
-        "network_description": { "type": "string", "description": "Advertised network tier/bandwidth of the purchasable configuration (no addresses or interface identifiers)." },
-        "virtualization": { "type": "string", "description": "Hypervisor / virtualization notes if known." }
+        "gpu_model": {
+          "type": "string",
+          "description": "e.g. NVIDIA RTX PRO 6000 Blackwell Server Edition"
+        },
+        "gpu_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "gpu_memory_gb": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "driver_version": {
+          "type": "string",
+          "description": "NVIDIA driver version."
+        },
+        "driver_max_cuda_version": {
+          "type": "string",
+          "description": "Maximum CUDA version supported by the installed driver (nvidia-smi banner). This is NOT the container CUDA runtime version, which is recorded separately in serving.container_cuda_runtime_version."
+        },
+        "operating_system": {
+          "type": "string",
+          "description": "OS distribution and version."
+        },
+        "cpu_model": {
+          "type": "string",
+          "description": "Host CPU model as reported by the instance."
+        },
+        "vcpu_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "system_memory_gib": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "storage_description": {
+          "type": "string",
+          "description": "Storage type/layout (no volume identifiers)."
+        },
+        "network_description": {
+          "type": "string",
+          "description": "Advertised network tier/bandwidth of the purchasable configuration (no addresses or interface identifiers)."
+        },
+        "virtualization": {
+          "type": "string",
+          "description": "Hypervisor / virtualization notes if known."
+        }
       }
     },
     "cloud": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "instance_type", "region", "comparison_mode"],
+      "required": [
+        "provider",
+        "instance_type",
+        "region",
+        "comparison_mode"
+      ],
       "properties": {
         "provider": {
           "type": "string",
-          "enum": ["akamai", "gcp", "aws", "other"],
+          "enum": [
+            "akamai",
+            "gcp",
+            "aws",
+            "other"
+          ],
           "description": "Cloud provider."
         },
         "instance_type": {
           "type": "string",
           "description": "Purchasable instance type / plan name (NOT an instance identifier)."
         },
-        "region": { "type": "string", "description": "Provider region name (zone allowed where applicable)." },
+        "region": {
+          "type": "string",
+          "description": "Provider region name (zone allowed where applicable)."
+        },
         "comparison_mode": {
           "type": "string",
-          "enum": ["controlled-resource", "provider-native", "not-applicable"],
+          "enum": [
+            "controlled-resource",
+            "provider-native",
+            "not-applicable"
+          ],
           "description": "Which comparison mode this run belongs to. Modes are never mixed in analysis. Mock execution must use 'not-applicable' (there is no serving resource to classify); gpu execution must use a real mode."
         },
         "resource_limits": {
           "type": "object",
           "additionalProperties": false,
           "description": "Container resource caps applied in controlled-resource mode: the JOINT total across the serving and benchmark workload (see methodology). Required whenever comparison_mode is controlled-resource.",
-          "required": ["vcpu_limit", "memory_limit_gib"],
+          "required": [
+            "vcpu_limit",
+            "memory_limit_gib"
+          ],
           "properties": {
-            "vcpu_limit": { "type": "number", "exclusiveMinimum": 0 },
-            "memory_limit_gib": { "type": "number", "exclusiveMinimum": 0 }
+            "vcpu_limit": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "memory_limit_gib": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
           }
         },
         "list_price_usd_per_hour": {
@@ -192,25 +288,55 @@
         }
       },
       "if": {
-        "properties": { "comparison_mode": { "const": "controlled-resource" } },
-        "required": ["comparison_mode"]
+        "properties": {
+          "comparison_mode": {
+            "const": "controlled-resource"
+          }
+        },
+        "required": [
+          "comparison_mode"
+        ]
       },
-      "then": { "required": ["resource_limits"] }
+      "then": {
+        "required": [
+          "resource_limits"
+        ]
+      }
     },
     "generation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["temperature", "top_p", "max_tokens"],
+      "required": [
+        "temperature",
+        "top_p",
+        "max_tokens"
+      ],
       "properties": {
-        "temperature": { "type": "number", "minimum": 0 },
-        "top_p": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
-        "max_tokens": { "type": "integer", "minimum": 1 },
+        "temperature": {
+          "type": "number",
+          "minimum": 0
+        },
+        "top_p": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
         "seed": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "description": "Seed used, or null if the engine does not support seeding."
         },
         "reasoning_mode": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "Chat-template reasoning/thinking toggle if the model supports one."
         }
       }
@@ -218,56 +344,120 @@
     "workload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version", "profile", "concurrency", "tasks_per_repetition", "catalog_digest"],
+      "required": [
+        "name",
+        "version",
+        "profile",
+        "concurrency",
+        "tasks_per_repetition",
+        "catalog_digest"
+      ],
       "properties": {
-        "name": { "type": "string", "description": "Workload identifier (e.g. cloud-ops-agent)." },
-        "version": { "type": "string", "description": "Workload/scenario fixture version (Git commit or semver)." },
+        "name": {
+          "type": "string",
+          "description": "Workload identifier (e.g. cloud-ops-agent)."
+        },
+        "version": {
+          "type": "string",
+          "description": "Workload/scenario fixture version (Git commit or semver)."
+        },
         "catalog_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "Content-address of the exact scenario catalog used (canonical JSON, SHA-256). This is a WORKLOAD digest — it is never a model artifact hash."
+          "description": "Content-address of the exact scenario catalog used (canonical JSON, SHA-256). This is a WORKLOAD digest \u2014 it is never a model artifact hash."
         },
         "profile": {
           "type": "string",
-          "enum": ["interactive", "batch-heavy"],
+          "enum": [
+            "interactive",
+            "batch-heavy"
+          ],
           "description": "Workload profile."
         },
-        "concurrency": { "type": "integer", "enum": [1, 4, 8], "description": "Requested concurrency (bounded closed-loop scheduler slots)." },
+        "concurrency": {
+          "type": "integer",
+          "enum": [
+            1,
+            4,
+            8
+          ],
+          "description": "Requested concurrency (bounded closed-loop scheduler slots)."
+        },
         "tasks_per_repetition": {
           "type": "integer",
           "minimum": 1,
           "description": "Task instances per measured repetition (measurement default 200, balanced across incident templates; decision D-0010)."
         },
-        "scenario_count": { "type": "integer", "minimum": 1, "description": "Number of distinct incident templates drawn from." },
-        "evaluator_version": { "type": "string", "description": "Version of the task-success evaluator." }
+        "scenario_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of distinct incident templates drawn from."
+        },
+        "evaluator_version": {
+          "type": "string",
+          "description": "Version of the task-success evaluator."
+        }
       }
     },
     "timing_conditions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["started_at_utc", "warmup_description", "repetition_index", "repetitions_planned"],
+      "required": [
+        "started_at_utc",
+        "warmup_description",
+        "repetition_index",
+        "repetitions_planned"
+      ],
       "properties": {
-        "started_at_utc": { "type": "string", "format": "date-time" },
-        "ended_at_utc": { "type": "string", "format": "date-time" },
+        "started_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
         "warmup_description": {
           "type": "string",
           "description": "Warm-up procedure applied before measurement (warm-up observations are retained separately, labeled, and excluded from measured summaries)."
         },
-        "repetition_index": { "type": "integer", "minimum": 1, "description": "1-based index of this repetition within the cell." },
-        "repetitions_planned": { "type": "integer", "minimum": 1, "description": "Planned repetitions for the cell (5 per the measurement contract)." },
-        "clock_source": { "type": "string", "description": "Clock/timing methodology notes (e.g. monotonic client-side)." },
-        "notes": { "type": "string", "description": "Any other timing-relevant conditions (must contain no sensitive metadata)." }
+        "repetition_index": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based index of this repetition within the cell."
+        },
+        "repetitions_planned": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Planned repetitions for the cell (5 per the measurement contract)."
+        },
+        "clock_source": {
+          "type": "string",
+          "description": "Clock/timing methodology notes (e.g. monotonic client-side)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Any other timing-relevant conditions (must contain no sensitive metadata)."
+        }
       }
     }
   },
   "allOf": [
     {
       "if": {
-        "properties": { "execution_mode": { "const": "gpu" } },
-        "required": ["execution_mode"]
+        "properties": {
+          "execution_mode": {
+            "const": "gpu"
+          }
+        },
+        "required": [
+          "execution_mode"
+        ]
       },
       "then": {
-        "required": ["model"],
+        "required": [
+          "model"
+        ],
         "properties": {
           "host": {
             "required": [
@@ -275,7 +465,7 @@
               "gpu_count",
               "gpu_memory_gb",
               "driver_version",
-              "cuda_version",
+              "driver_max_cuda_version",
               "operating_system",
               "cpu_model",
               "vcpu_count",
@@ -283,14 +473,30 @@
             ]
           },
           "serving": {
-            "required": ["engine", "engine_version", "container_digest"],
+            "required": [
+              "engine",
+              "engine_version",
+              "container_digest"
+            ],
             "properties": {
-              "engine": { "enum": ["vllm", "tensorrt-llm", "nim", "other"] }
+              "engine": {
+                "enum": [
+                  "vllm",
+                  "tensorrt-llm",
+                  "nim",
+                  "other"
+                ]
+              }
             }
           },
           "cloud": {
             "properties": {
-              "comparison_mode": { "enum": ["controlled-resource", "provider-native"] }
+              "comparison_mode": {
+                "enum": [
+                  "controlled-resource",
+                  "provider-native"
+                ]
+              }
             }
           }
         }
@@ -298,15 +504,23 @@
     },
     {
       "if": {
-        "properties": { "execution_mode": { "const": "mock" } },
-        "required": ["execution_mode"]
+        "properties": {
+          "execution_mode": {
+            "const": "mock"
+          }
+        },
+        "required": [
+          "execution_mode"
+        ]
       },
       "then": {
         "properties": {
           "model": false,
           "serving": {
             "properties": {
-              "engine": { "const": "mock" },
+              "engine": {
+                "const": "mock"
+              },
               "container_digest": false
             }
           },
@@ -316,12 +530,14 @@
               "gpu_count": false,
               "gpu_memory_gb": false,
               "driver_version": false,
-              "cuda_version": false
+              "driver_max_cuda_version": false
             }
           },
           "cloud": {
             "properties": {
-              "comparison_mode": { "const": "not-applicable" }
+              "comparison_mode": {
+                "const": "not-applicable"
+              }
             }
           }
         }
