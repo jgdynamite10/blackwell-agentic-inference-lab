@@ -312,3 +312,53 @@ any real measurement.
 2026-09-06), approving the previously highlighted proposals and correcting
 the evaluator, sample plan, timing, concurrency, streaming, and accounting
 semantics before any genuine measurement exists.
+
+*Note: the evidence-predicate result representation and version numbers of
+item 2 and the submission-stamping detail of items 4–5 are refined by
+D-0011; the entry is retained unaltered as the historical record.*
+
+## 2026-09-06 — D-0011: Phase 2 blocking corrections — claim-time submission, typed evidence result constraints, terminal-tool deadline, positive integer tool arguments (refines D-0010 items 2, 4, and 5)
+
+**No genuine results predate this change.** No genuine benchmark has been
+executed in any phase, so this revision cannot retroactively affect any real
+measurement.
+
+**Decision.** Per the owner's final blocking review of PR #5 (2026-09-06):
+
+1. **Genuine bounded closed-loop scheduler (refines D-0010 items 4–5).**
+   Task submission is stamped the moment a scheduler slot becomes available
+   and the worker claims the task — never pre-stamped for the whole schedule
+   at enqueue. At most `concurrency` slots exist, no unbounded backlog is
+   ever pre-submitted, and a task that has not entered a slot consumes none
+   of its timeout budget. Requested / achieved-maximum / mean in-flight
+   concurrency remain recorded, and exact enforcement during ramp-up and
+   drain remains unclaimed.
+2. **Typed evidence result constraints (refines D-0010 item 2).** Evidence
+   predicates no longer match substrings over a canonical JSON serialization
+   of a tool response. Each alternative declares an explicit typed result
+   constraint evaluated against the tool's structured response fields:
+   a returned log line's message containing the required value (with
+   `total_matches > 0`), a returned change's `change_id` matching exactly,
+   a found (`found is true`) runbook's remediation list containing the exact
+   remediation, a found metric with the exact name and non-empty points, or
+   a returned service component with the exact status. Echoed request
+   arguments, `available` listings, unknown-resource responses, and
+   `found: false` responses can never satisfy evidence. The workload catalog
+   is version **2.2.0** and the evaluator is version **3.1.0**; adversarial
+   regression tests pin the previously exploitable cases (zero-match
+   searches with the expected text only in the query; `found: false`
+   runbook responses with the remediation id smuggled into the key).
+3. **Deadline enforcement around every tool, including the terminal tool.**
+   The remaining deadline is checked before and after every tool execution;
+   a terminal recommendation whose tool latency reaches or crosses the
+   deadline is a `task_timeout`, never a completion.
+4. **Positive integer tool-argument validation.** `search_logs.limit`,
+   `query_metrics.window_s`, and `check_recent_changes.window_s` reject
+   booleans and every non-positive integer (`invalid_tool_arguments`).
+
+**Rationale.** Owner blocking review of PR #5 (2026-09-06): the previous
+scheduler pre-stamped submissions and silently charged queue wait against
+task timeouts; JSON-serialization substring matching allowed echoed
+arguments and not-found responses to count as evidence; the terminal tool
+escaped the deadline; and non-positive limits/windows were accepted. All
+four defects are corrected before any genuine measurement exists.

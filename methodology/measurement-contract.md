@@ -20,7 +20,7 @@ resulting tool calls.
 
 | Measure | Start boundary | End boundary |
 | --- | --- | --- |
-| End-to-end task completion time | Benchmark driver submits the task — the actual driver submission instant, **before** any queueing or worker dequeue | Terminal record handed to the evaluator (immediately on task termination — the implementation and this boundary agree) |
+| End-to-end task completion time | Benchmark driver submits the task — the actual driver submission instant, stamped the moment a bounded-scheduler slot becomes available and the worker claims the task (a task that has not entered a slot has not been submitted) | Terminal record handed to the evaluator (immediately on task termination — the implementation and this boundary agree) |
 | Queue time | Request accepted by the serving endpoint | First scheduling of the request onto the engine (from engine queue telemetry; if the engine reports none, queue time is recorded as **unavailable with a reason**, never approximated silently) |
 | Time to first token (TTFT) | Driver sends the request for a turn | Driver receives the **first non-empty content-bearing event** of that turn |
 | Inter-token latency (ITL) | Token *n* received | Token *n+1* received; available **only when true per-token timing exists** — transport text chunks are never tokens, and without token events ITL is recorded as unavailable with a reason |
@@ -37,8 +37,10 @@ transport text chunks, true token events, authoritative usage/token counts,
 and optional serving-queue telemetry. Output-token counts come only from
 authoritative usage data or the exact model tokenizer; network chunk counts
 are never reported as token counts. Durations use an injectable monotonic
-clock; task timing starts at actual driver submission, so driver-side slot
-wait (queue_wait) is part of end-to-end task time and of the timeout budget.
+clock; task timing starts at actual driver submission — the instant the
+bounded scheduler's slot is claimed — so a task that has not entered a slot
+consumes none of its timeout budget, and any residual driver-side wait after
+submission (queue_wait) is part of end-to-end task time.
 
 ## 3. Primary measures
 
@@ -146,10 +148,14 @@ latency target. Mock execution never reports SLO attainment (section 13).
 ## 7. Errors and timeouts
 
 - Per-task timeout: fixed per workload profile (section 4). The timeout
-  budget starts at driver submission and is consumed by driver queue wait,
-  model turns, **and simulated tool delays**; the model client receives and
-  honors a per-turn deadline, so a timed-out task returns close to its
-  deadline rather than after an arbitrary blocking delay.
+  budget starts at driver submission (the slot-claim instant; unslotted
+  tasks consume no budget) and is consumed by model turns **and simulated
+  tool delays**; the model client receives and honors a per-turn deadline,
+  so a timed-out task returns close to its deadline rather than after an
+  arbitrary blocking delay. The remaining deadline is also enforced before
+  and after **every tool execution, including the terminal tool**: a
+  terminal recommendation whose tool latency reaches or crosses the deadline
+  is a `task_timeout`, never a completion.
 - A task is an **execution error** if the serving endpoint returns a failure
   (`endpoint_error`), the agent emits a malformed/invalid tool call
   (`malformed_tool_call`, `invalid_tool_name`, `invalid_tool_arguments`),
@@ -183,8 +189,12 @@ latency target. Mock execution never reports SLO attainment (section 13).
   - the submitted `remediation_id` is in the accepted set (distractors
     fail);
   - **every mandatory evidence predicate** declared by the scenario is
-    satisfied by the recorded tool trace (tool, validated arguments,
-    relevant results). Scenarios declare permitted alternative evidence
+    satisfied by the recorded tool trace (tool, validated arguments, and an
+    explicit **typed result constraint** evaluated against the tool's
+    structured response fields — never against a serialization of the whole
+    response, so echoed request arguments, `available` listings,
+    unknown-resource responses, and `found: false` responses can never
+    satisfy evidence). Scenarios declare permitted alternative evidence
     paths; keyword-substring matching over free text is never a success
     criterion.
 - Component scores (diagnosis / remediation / evidence) are retained as

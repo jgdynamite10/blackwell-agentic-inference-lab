@@ -25,6 +25,12 @@ list — so the model selects among candidates rather than guessing a hidden
 string), a free-text `rationale` (diagnostic only, never a success gate), and
 a `remediation_id`.
 
+Tool arguments are strictly validated (`invalid_tool_arguments` on any
+violation): required strings must be non-empty, and every integer argument
+(`search_logs.limit`, `query_metrics.window_s`,
+`check_recent_changes.window_s`) must be a **positive integer** — booleans,
+zero, and negative values are rejected.
+
 Tool responses are deterministic functions of (scenario, query). Tool
 latencies are simulated with fixed, documented values so tool-execution time
 is separable from model-serving time (measurement contract §2). The fixed
@@ -61,12 +67,20 @@ Each incident definition specifies: the fixture data every tool returns, the
 ground-truth root cause with a stable **diagnosis id**, the **accepted and
 distractor diagnosis ids** (published to the agent as candidates), the
 accepted and distractor remediation sets, and **machine-checkable evidence
-predicates** — each with the relevant tool, argument, and result constraints
-and with permitted **alternative evidence paths** (a reference and an
-alternative tool sequence both satisfy every predicate by construction, and
-tests prove it). Scenarios are versioned; the workload version appears in
-every run manifest. The Phase 2 catalog
-(`src/blackwell_lab/workload/scenarios.py`, workload version 2.1.0)
+predicates** — each with the relevant tool, argument constraints, and an
+explicit **typed result constraint** evaluated against the tool's structured
+response fields (e.g. `found is true`, `total_matches > 0`, a returned log
+line's message containing the required value, a returned change's
+`change_id` matching exactly, a found runbook's remediation list containing
+the exact remediation, a found metric with the exact name and non-empty
+points). Result constraints are never evaluated against a serialization of
+the whole response, so echoed request arguments, `available` listings,
+unknown-resource responses, and `found: false` responses can never satisfy
+evidence. Predicates declare permitted **alternative evidence paths** (a
+reference and an alternative tool sequence both satisfy every predicate by
+construction, and tests prove it). Scenarios are versioned; the workload
+version appears in every run manifest. The Phase 2 catalog
+(`src/blackwell_lab/workload/scenarios.py`, workload version 2.2.0)
 implements one scenario per class and is additionally **content-addressed**:
 the SHA-256 digest of the canonical catalog JSON is recorded in every run
 manifest under `workload.catalog_digest` (never as a model artifact hash).
@@ -126,12 +140,14 @@ interactive limit.
 
 Concurrency levels 1, 4, and 8 denote requested simultaneous in-flight agent
 tasks against the single serving endpoint. The scheduler is a **bounded
-closed loop**: every task is stamped at actual driver submission, at most
-the requested number of tasks is ever in flight (no pre-submitted unbounded
-backlog), and in-flight work is **not claimed to be exactly enforced** during
-ramp-up and drain. Every result records the requested concurrency, the
-achieved maximum concurrency, and the measured mean in-flight work; a
-configuration with fewer tasks than the requested concurrency is rejected.
+closed loop**: at most the requested number of slots exists, and a worker
+claims the next task — stamping its submission at that instant — only when a
+slot becomes available (no pre-submitted unbounded backlog; a task that has
+not entered a slot consumes none of its timeout budget). In-flight work is
+**not claimed to be exactly enforced** during ramp-up and drain. Every
+result records the requested concurrency, the achieved maximum concurrency,
+and the measured mean in-flight work; a configuration with fewer tasks than
+the requested concurrency is rejected.
 
 ## Data safety
 

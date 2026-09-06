@@ -92,7 +92,7 @@ sequenceDiagram
     participant T as Simulated tools
     participant E as Evaluator
 
-    R->>A: driver submission (E2E clock starts HERE,<br/>before any queueing; deadline = submission + timeout)
+    R->>A: driver submission (a bounded-scheduler slot is claimed;<br/>E2E clock starts HERE; deadline = submission + timeout;<br/>unslotted tasks consume no timeout budget)
     loop each turn (until terminal tool, error, or timeout)
         A->>M: model request with deadline (TTFT + serving clocks)
         M-->>A: typed stream events (content chunks;<br/>token/usage/queue events when the client has them)
@@ -101,9 +101,9 @@ sequenceDiagram
         A->>T: execute simulated tool
         T-->>A: deterministic result (fixed latency<br/>CONSUMED through the clock: it spends<br/>task duration and timeout budget)
     end
-    A->>T: recommend_remediation (diagnosis_id,<br/>rationale, remediation_id)
+    A->>T: recommend_remediation (diagnosis_id,<br/>rationale, remediation_id; the deadline is enforced<br/>after EVERY tool, including this terminal one)
     A->>E: terminal record handed to evaluator immediately
-    E-->>R: mandatory gates (diagnosis, remediation,<br/>evidence predicates) -> binary success
+    E-->>R: mandatory gates (diagnosis, remediation,<br/>evidence predicates with typed result constraints)<br/>-> binary success
     R->>R: build manifest + result + raw observations,<br/>validate schemas + semantic invariants
     R-->>R: persist promptly + atomically via<br/>LAB_RESULTS_DIR guard (or no persistence)
 ```
@@ -151,7 +151,10 @@ Deterministic incident definitions (elevated latency, pod failures, memory
 pressure, GPU saturation, storage latency, failed deployments, unhealthy
 upstreams, DNS failures, rate limiting, capacity exhaustion) with
 machine-checkable success criteria: published diagnosis candidates, accepted
-remediation sets, and evidence predicates with permitted alternative paths.
+remediation sets, and evidence predicates with permitted alternative paths
+whose result requirements are explicit typed constraints on the tools'
+structured response fields (echoed arguments, `available` listings, and
+`found: false` responses never satisfy evidence).
 Success is gate-based (S_min = 1.0, decision D-0010); component scores are
 diagnostics only. Scenarios are deterministic; model outputs are not assumed
 to be. Runs use fixed generation settings, record seeds when supported, and
