@@ -74,8 +74,8 @@
         },
         "artifact_hash": {
           "type": "string",
-          "description": "Aggregate content hash of the model files (algorithm:hex).",
-          "pattern": "^(sha256|sha512|blake3):[0-9a-f]+$"
+          "description": "Aggregate content hash of the model files (algorithm:hex). Digest length is algorithm-specific: sha256 and blake3 require exactly 64 hex characters; sha512 requires exactly 128.",
+          "pattern": "^(sha256:[0-9a-f]{64}|sha512:[0-9a-f]{128}|blake3:[0-9a-f]{64})$"
         },
         "precision": {
           "type": "string",
@@ -170,7 +170,8 @@
         "resource_limits": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Container resource caps applied in controlled-resource mode.",
+          "description": "Container resource caps applied in controlled-resource mode: the JOINT total across the serving and benchmark workload (see methodology). Required whenever comparison_mode is controlled-resource.",
+          "required": ["vcpu_limit", "memory_limit_gib"],
           "properties": {
             "vcpu_limit": { "type": "number", "exclusiveMinimum": 0 },
             "memory_limit_gib": { "type": "number", "exclusiveMinimum": 0 }
@@ -186,7 +187,12 @@
           "format": "date",
           "description": "Date the list price was sourced."
         }
-      }
+      },
+      "if": {
+        "properties": { "comparison_mode": { "const": "controlled-resource" } },
+        "required": ["comparison_mode"]
+      },
+      "then": { "required": ["resource_limits"] }
     },
     "generation": {
       "type": "object",

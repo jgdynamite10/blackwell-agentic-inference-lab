@@ -8,10 +8,13 @@ version = "0.1.0"
 description = "Tooling for the Blackwell Agentic Inference Lab (schemas, results-privacy guards, preflight checks)"
 readme = "README.md"
 requires-python = ">=3.10"
-# Licensing is under review; no open-source license is granted at this time.
-license = { text = "Proprietary - licensing under review, all rights reserved" }
+# No license/license-files metadata and no LICENSE file: ownership and
+# licensing are under review, and no license is currently granted (see
+# README "License and disclaimer").
 dependencies = [
-    "jsonschema>=4.21",
+    # format-nongpl provides rfc3339-validator etc. so JSON Schema format
+    # checking rejects invalid date/date-time strings.
+    "jsonschema[format-nongpl]>=4.21",
 ]
 
 [project.optional-dependencies]

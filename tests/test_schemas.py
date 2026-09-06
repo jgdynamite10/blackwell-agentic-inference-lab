@@ -73,3 +73,99 @@ def test_result_rejects_missing_slo_block():
     del document["slo"]
     with pytest.raises(jsonschema.ValidationError):
         validate_benchmark_result(document)
+
+
+class TestFormatChecking:
+    """Invalid date and date-time strings must fail, not silently pass."""
+
+    def test_invalid_datetime_is_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["created_at_utc"] = "not-a-timestamp"
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_impossible_datetime_is_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["timing_conditions"]["started_at_utc"] = "2026-01-32T00:00:00Z"
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_invalid_date_is_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["cloud"]["price_source_date"] = "2026-13-99"
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_valid_datetime_still_passes(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["created_at_utc"] = "2026-02-03T04:05:06+00:00"
+        validate_run_manifest(document)
+
+
+class TestDigestValidation:
+    """Artifact digests are algorithm-specific (e.g. exactly 64 hex for SHA-256)."""
+
+    def test_sha256_with_63_hex_chars_is_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["model"]["artifact_hash"] = "sha256:" + "0" * 63
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_sha256_with_65_hex_chars_is_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["model"]["artifact_hash"] = "sha256:" + "0" * 65
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_sha256_with_non_hex_characters_is_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["model"]["artifact_hash"] = "sha256:" + "g" * 64
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_sha512_requires_128_hex_chars(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["model"]["artifact_hash"] = "sha512:" + "0" * 64
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+        document["model"]["artifact_hash"] = "sha512:" + "0" * 128
+        validate_run_manifest(document)
+
+    def test_container_digest_requires_64_hex_chars(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["serving"]["container_digest"] = "docker.io/example/vllm@sha256:" + "0" * 63
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+
+class TestControlledResourceMode:
+    """controlled-resource manifests must record the applied resource limits."""
+
+    def test_controlled_resource_without_limits_is_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["cloud"]["comparison_mode"] = "controlled-resource"
+        document["cloud"].pop("resource_limits", None)
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_controlled_resource_with_limits_passes(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["cloud"]["comparison_mode"] = "controlled-resource"
+        document["cloud"]["resource_limits"] = {
+            "vcpu_limit": 14,
+            "memory_limit_gib": 100,
+        }
+        validate_run_manifest(document)
+
+    def test_partial_resource_limits_are_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["cloud"]["comparison_mode"] = "controlled-resource"
+        document["cloud"]["resource_limits"] = {"vcpu_limit": 14}
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_provider_native_mode_does_not_require_limits(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        assert document["cloud"]["comparison_mode"] == "provider-native"
+        assert "resource_limits" not in document["cloud"]
+        validate_run_manifest(document)
