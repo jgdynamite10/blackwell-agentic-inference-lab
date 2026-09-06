@@ -30,7 +30,10 @@ referencing==0.37.0
 rfc3339-validator==0.1.4
 rfc3986-validator==0.1.1
 rfc3987-syntax==1.1.0
-rpds-py==2026.6.3
+# rpds-py 2026.x requires Python >= 3.11; 0.30.0 is the newest release
+# supporting 3.10 (both satisfy jsonschema's rpds-py>=0.25.0).
+rpds-py==2026.6.3; python_version >= "3.11"
+rpds-py==0.30.0; python_version < "3.11"
 ruff==0.16.6
 six==1.17.0
 tomli==2.4.1
