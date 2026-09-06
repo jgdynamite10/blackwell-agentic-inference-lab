@@ -35,17 +35,19 @@ The guard is implemented in `src/blackwell_lab/paths.py`
 (`resolve_results_dir`) and is covered by tests. Expected behavior:
 
 - **Real-run mode** (`RunMode.REAL`, the default): fails closed if
-  `LAB_RESULTS_DIR` is unset or blank; fails if the value — after resolving
-  symlinks, relative segments, and `~` — is the repository root or any
-  directory beneath it. There is **no fallback** to `results/` or any other
-  repository directory.
+  `LAB_RESULTS_DIR` is unset or blank; **rejects every relative path before
+  any resolution** (the location must be an unambiguous absolute path); and
+  fails if the value — after resolving `~` and symlinks canonically — is the
+  repository root or any directory beneath it. There is **no fallback** to
+  `results/` or any other repository directory.
 - **Synthetic/test mode** (`RunMode.SYNTHETIC`): must be requested explicitly
   by the caller; used only for synthetic examples and tests. An unset
   `LAB_RESULTS_DIR` yields "no persistence" (`None`) rather than a silent
-  fallback, and any path that *is* provided is still rejected if it resolves
-  inside the repository.
-- The guard never creates the directory; a nonexistent **external** path is
-  accepted (creation is the runner's explicit, logged action).
+  fallback, and any provided path is subject to the same relative-path and
+  repository-interior rejections.
+- The guard never creates a nonexistent directory merely while validating it;
+  a nonexistent **external** absolute path is accepted (creation is the
+  runner's explicit, logged action).
 
 The benchmark runner (Phase 2 onward) must call the guard at startup, declare
 its mode explicitly, and refuse to run when the guard raises. Runner logs must
@@ -62,7 +64,9 @@ control is that genuine results never exist inside the repository tree at all.
 
 ### 3. CI secret detection
 
-CI runs gitleaks on every push and pull request to catch accidentally
+CI runs the open-source Gitleaks CLI (pinned release, verified checksum,
+redacted output, no findings artifact) on every push and pull request to catch
+accidentally
 committed credentials or tokens.
 
 ### 4. Review gate
@@ -70,6 +74,22 @@ committed credentials or tokens.
 All changes reach `main` via pull request with owner review (squash-only
 merging). Release of genuine results additionally requires the dedicated
 process in [publication-governance.md](publication-governance.md).
+
+### 5. Sanitization flow (external, two-directory)
+
+If a release is ever authorized, sanitization runs **locally** and entirely
+outside the repository:
+
+1. The sanitizer reads raw inputs **only from the external
+   `LAB_RESULTS_DIR`**.
+2. It writes the sanitized candidate to a **separate external staging
+   directory** — never into the repository or `LAB_RESULTS_DIR` itself.
+3. Raw data never enters the repository at any point.
+4. The sanitized candidate may enter Git **only after explicit owner review
+   and approval** of that specific candidate.
+5. Raw provider bills and account-level cost records remain external
+   permanently. The decision log may contain **only an explicitly approved
+   sanitized summary** of costs — never raw billing information.
 
 ## If genuine results or secrets are ever committed
 

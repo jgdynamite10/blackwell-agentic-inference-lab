@@ -40,20 +40,27 @@ authorize its release anywhere.
    [../methodology/measurement-contract.md](../methodology/measurement-contract.md);
    any methodology revisions that occurred after data collection are
    cross-checked against [decision-log.md](decision-log.md).
-3. **Sanitization.** A redaction/sanitization script (operating on sanitized
-   input only) produces the release candidate. Sanitization removes: cloud
-   account identifiers, project/tenant identifiers, internal hostnames and IP
-   addresses, instance identifiers, private endpoints, signed URLs,
-   credentials or tokens of any kind, and any log fragments containing
-   sensitive infrastructure metadata. Region names, instance *types*, list
-   prices, and hardware/software versions are releasable if the owner
-   approves.
-4. **Limitations statement.** Every release includes its limitations: sample
+3. **Sanitization (external, two-directory flow).** A **locally executed**
+   sanitizer reads raw inputs **only from the external `LAB_RESULTS_DIR`**
+   and writes the sanitized candidate to a **separate external staging
+   directory** — raw data never enters the repository at any point in this
+   flow. Sanitization removes: cloud account identifiers, project/tenant
+   identifiers, internal hostnames and IP addresses, instance identifiers,
+   private endpoints, signed URLs, credentials or tokens of any kind, and any
+   log fragments containing sensitive infrastructure metadata. Raw provider
+   bills and account-level cost records always remain external. Region names,
+   instance *types*, list prices, and hardware/software versions are
+   releasable if the owner approves.
+4. **Staged review before Git.** The sanitized candidate in the external
+   staging directory may enter Git **only after the owner's explicit review
+   and approval** of that candidate. Nothing moves from `LAB_RESULTS_DIR` or
+   the staging directory into the repository automatically.
+5. **Limitations statement.** Every release includes its limitations: sample
    sizes, environmental differences recorded, and the boundary of what the
    evidence supports. Claims must not exceed the evidence, and
    controlled-resource results must never be mixed with provider-native
    results ([../AGENTS.md](../AGENTS.md), section 6).
-5. **Release PR.** A dedicated pull request titled `Release: <scope>` contains
+6. **Release PR.** A dedicated pull request titled `Release: <scope>` contains
    only the sanitized artifacts and their documentation. The owner reviews and
    merges (squash-only). Merging still does not authorize distribution outside
    this private repository; that requires a separate explicit authorization.
