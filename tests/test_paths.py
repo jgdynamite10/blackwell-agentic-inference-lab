@@ -44,9 +44,20 @@ class TestRealMode:
         with pytest.raises(ResultsLocationError, match="inside the repository"):
             resolve_results_dir(str(REPO_ROOT / "src" / "blackwell_lab" / "deep"))
 
-    def test_relative_path_inside_repository_is_rejected(self, monkeypatch):
+    def test_bare_relative_path_is_rejected_before_resolution(self):
+        with pytest.raises(ResultsLocationError, match="relative path"):
+            resolve_results_dir("relative-results")
+
+    def test_parent_relative_path_is_rejected_even_if_it_would_resolve_outside(self, monkeypatch):
+        # From the repo root, "../external-results" would resolve outside the
+        # repository — it is rejected anyway because it is relative.
         monkeypatch.chdir(REPO_ROOT)
-        with pytest.raises(ResultsLocationError, match="inside the repository"):
+        with pytest.raises(ResultsLocationError, match="relative path"):
+            resolve_results_dir("../external-results")
+
+    def test_dot_relative_path_is_rejected(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        with pytest.raises(ResultsLocationError, match="relative path"):
             resolve_results_dir("./results")
 
     def test_symlink_resolving_into_repository_is_rejected(self, tmp_path):
@@ -83,6 +94,10 @@ class TestSyntheticMode:
     def test_repository_internal_path_is_still_rejected(self):
         with pytest.raises(ResultsLocationError, match="inside the repository"):
             resolve_results_dir(str(REPO_ROOT / "results"), mode=RunMode.SYNTHETIC)
+
+    def test_relative_path_is_still_rejected(self):
+        with pytest.raises(ResultsLocationError, match="relative path"):
+            resolve_results_dir("relative-results", mode=RunMode.SYNTHETIC)
 
     def test_symlink_into_repository_is_still_rejected(self, tmp_path):
         link = tmp_path / "sneaky-link"

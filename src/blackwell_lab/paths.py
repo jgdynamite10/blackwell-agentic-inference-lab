@@ -9,17 +9,19 @@ refuse to run when this module raises.
 Expected behavior (documented in ``docs/results-privacy.md``):
 
 - **Real-run mode** (:attr:`RunMode.REAL`, the default): fails closed when the
-  location is unset or blank; fails when the value — after resolving ``~``,
-  relative segments, and symlinks — is the repository root or any directory
-  beneath it. There is never a fallback to ``results/`` or any other
-  repository directory.
+  location is unset or blank; rejects every **relative path** before any
+  resolution (the private results location must be an unambiguous absolute
+  path); fails when the value — after resolving ``~`` and symlinks
+  canonically — is the repository root or any directory beneath it. There is
+  never a fallback to ``results/`` or any other repository directory.
 - **Synthetic/test mode** (:attr:`RunMode.SYNTHETIC`): must be requested
   explicitly by the caller and is used only for synthetic examples and tests.
   An unset location yields ``None`` ("no persistence") rather than a silent
-  fallback; a provided path is still rejected if it resolves inside the
-  repository.
-- The guard never creates the directory. A nonexistent *external* path is
-  accepted; creating it is the runner's explicit, logged action.
+  fallback; a provided path is subject to the same relative-path and
+  repository-interior rejections.
+- The guard never creates a nonexistent directory merely while validating it.
+  A nonexistent *external* absolute path is accepted; creating it is the
+  runner's explicit, logged action.
 """
 
 from __future__ import annotations
@@ -83,9 +85,20 @@ def resolve_results_dir(
             "(see docs/results-privacy.md). There is no fallback directory."
         )
 
-    # Path.resolve() canonicalizes: expands relative segments and follows
-    # symlinks, so a symlink pointing into the repository is caught.
-    results_dir = Path(raw).expanduser().resolve()
+    # Reject relative paths BEFORE any resolution: the private results
+    # location must be unambiguous and independent of the current working
+    # directory.
+    candidate = Path(raw.strip()).expanduser()
+    if not candidate.is_absolute():
+        raise ResultsLocationError(
+            f"{RESULTS_DIR_ENV_VAR}={raw!r} is a relative path. The private results "
+            "location must be an absolute path outside the repository "
+            "(see docs/results-privacy.md)."
+        )
+
+    # Path.resolve() canonicalizes and follows symlinks, so a symlink
+    # pointing into the repository is caught.
+    results_dir = candidate.resolve()
     root = (repo_root or repository_root()).resolve()
 
     if results_dir == root or root in results_dir.parents:
