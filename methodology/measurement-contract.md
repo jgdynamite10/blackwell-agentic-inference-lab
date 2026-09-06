@@ -54,9 +54,20 @@ container-network path is recorded in the manifest.
     latency target.
 
 Latency measures are reported as p50 / p90 / p95 / p99 plus mean; no measure
-is reported as a bare mean alone. Phase 2 must define, before GPU measurement
-begins, the minimum task/sample counts needed for p95 and p99 to be
-meaningful; percentiles are not reported for samples below those minimums.
+is reported as a bare mean alone. Minimum sample counts (fixed in Phase 2,
+decision D-0009): **p95 requires at least 200 observations and p99 requires at
+least 1,000 observations** — with the nearest-rank method these minimums place
+at least 10 observations at or beyond the percentile rank, so a tail estimate
+is never dominated by a handful of samples. Below the applicable minimum the
+percentile is **suppressed explicitly** (JSON `null`, with the sample `count`
+recorded so suppression is machine-checkable and schema-enforced) rather than
+fabricated. Percentiles are calculated **per repetition** over that
+repetition's own observations, using the deterministic nearest-rank method on
+observed values (no interpolation); any cross-repetition (cell-level) pooling
+is a separate, clearly labeled Phase 7 analysis step and is never mixed into
+per-repetition records. An empty series (for example queue time in mock
+execution mode, where no serving endpoint exists) is recorded with `count: 0`
+and every statistic `null` — never zero-filled.
 
 ## 4. SLO definitions
 

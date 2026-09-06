@@ -142,3 +142,70 @@ other D-0007 items stand):
 
 **Rationale.** Owner instruction (final publication and secondary sync memo,
 2026-09-06).
+
+## 2026-09-06 — D-0009: Phase 2 authorization — synthetic workload, evaluator, and statistical rules
+
+**Decision.** Per the owner's Phase 2 authorization of 2026-09-06:
+
+1. **Phase 2 is authorized and in progress.** Phase 1 is complete. Phase 3
+   and later phases still require separate explicit owner authorization.
+2. **Workload versioning.** The synthetic Cloud Operations Agent workload
+   (`cloud-ops-agent`) is version **2.0.0**
+   (`src/blackwell_lab/workload/scenarios.py`): ten deterministic scenarios,
+   one per documented incident class, each with fixture data for all six
+   simulated tools, a ground-truth root cause, an accepted remediation set,
+   distractor signals, and machine-checkable success criteria. The catalog is
+   additionally content-addressed: the SHA-256 digest of the canonical
+   catalog JSON is recorded as the workload artifact hash in every mock-run
+   manifest. Any scenario or fixture change requires a version bump and a
+   decision-log entry.
+3. **Evaluator versioning and scoring.** The task-success evaluator is
+   version **2.0.0** (`src/blackwell_lab/workload/evaluator.py`),
+   deterministic and machine-checkable, with weights: root-cause diagnosis
+   0.5 (fraction of scenario keywords present in the stated cause), evidence
+   / appropriate tool use 0.2 (fraction of required tools consulted), and
+   remediation 0.3 (all-or-nothing membership in the accepted set;
+   distractors score zero). Error and timeout tasks score 0.0 and stay in
+   the success-rate denominator.
+4. **Proposed quality threshold (owner review required).** S_min = **0.85**:
+   a task must have a fully correct root cause, an accepted remediation, and
+   at least a quarter of the required evidence. **This value is a proposal
+   and is NOT owner-approved yet**; it must be approved (or revised) before
+   Phase 3 measurement.
+5. **Exact profile definitions.** Interactive: closed-loop arrival,
+   `search_logs` limit 10 lines, metric window 900 s, `max_tokens` 1,024,
+   per-task timeout 120,000 ms. Batch-heavy: queue-full arrival,
+   `search_logs` limit 50 lines, metric window 3,600 s, `max_tokens` 4,096,
+   per-task timeout 600,000 ms. Both draw from the same catalog with
+   identical success criteria.
+6. **Proposed SLO targets (owner review required).** Interactive: task
+   completion T_task ≤ 60,000 ms and per-turn TTFT ≤ 2,500 ms. Batch-heavy:
+   T_task ≤ 300,000 ms, no TTFT target (throughput-oriented). **These values
+   are proposals and are NOT owner-approved yet**; they must be fixed before
+   Phase 3 measurement (measurement contract §4).
+7. **Percentile sample-count rules.** p95 requires ≥ 200 observations; p99
+   requires ≥ 1,000 observations (nearest-rank method: these place at least
+   10 observations at or beyond the percentile rank). Below the minimum the
+   percentile is suppressed as explicit `null` with the sample `count`
+   recorded; the benchmark-result schema enforces the suppression.
+   Percentiles are computed per repetition over that repetition's own
+   observations; cell-level pooling is a separate, clearly labeled Phase 7
+   step.
+8. **Insufficient or unavailable measurements are represented explicitly,
+   never fabricated.** Empty series (e.g. queue time in mock mode) are
+   `count: 0` with all statistics `null`. Mock runs record
+   `execution_mode: "mock"` in the manifest (a new required field —
+   `is_synthetic_example` is *not* the execution-mode indicator), omit GPU
+   host fields, and record GPU telemetry as
+   `telemetry_available: false` with an explicit reason; GPU-hour-derived
+   measures are `null`. Schema versions bumped to 1.1.0.
+9. **Retry policy retries=0** for measurement runs, with the documented
+   error taxonomy: `endpoint_error`, `malformed_tool_call`,
+   `invalid_tool_name`, `invalid_tool_arguments`,
+   `no_terminal_recommendation`, `task_timeout`.
+
+**Rationale.** Owner instruction (Phase 2 authorization memo, 2026-09-06).
+The workload, evaluator, statistical rules, and schema representation follow
+the measurement contract and workload definition; SLO targets and the quality
+threshold are highlighted as unapproved proposals so measurement cannot begin
+on values the owner never reviewed.

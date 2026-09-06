@@ -20,7 +20,18 @@ remediation using only its simulated tools:
 
 Tool responses are deterministic functions of (scenario, query). Tool
 latencies are simulated with fixed, documented values so tool-execution time
-is separable from model-serving time (measurement contract §2).
+is separable from model-serving time (measurement contract §2). The fixed
+values (implemented in `src/blackwell_lab/workload/tools.py`, recorded as
+tool-execution time, never slept):
+
+| Tool | Simulated latency |
+| --- | --- |
+| `get_service_health` | 5 ms |
+| `query_metrics` | 20 ms |
+| `search_logs` | 30 ms |
+| `retrieve_runbook` | 10 ms |
+| `check_recent_changes` | 15 ms |
+| `recommend_remediation` | 5 ms |
 
 ## Incident catalog
 
@@ -40,7 +51,10 @@ Deterministic incident definitions cover at least these condition classes:
 Each incident definition specifies: the fixture data every tool returns, the
 ground-truth root cause, the accepted remediation set, distractor signals, and
 the success criteria the evaluator applies. Scenarios are versioned; the
-workload version appears in every run manifest.
+workload version appears in every run manifest. The Phase 2 catalog
+(`src/blackwell_lab/workload/scenarios.py`, workload version 2.0.0) implements
+one scenario per class and is additionally **content-addressed**: the SHA-256
+digest of the canonical catalog JSON is recorded in every run manifest.
 
 ## Determinism policy
 
@@ -61,6 +75,20 @@ in Phase 2 before any measurement):
 
 Both profiles draw from the same incident catalog so success criteria are
 identical; they differ in arrival pattern, context size, and SLO targets.
+
+The exact Phase 2 parameterization (implemented in
+`src/blackwell_lab/workload/runner.py`; decision D-0009 — SLO targets are
+**proposals pending owner approval**):
+
+| Parameter | Interactive | Batch-heavy |
+| --- | --- | --- |
+| Arrival | Closed-loop: each slot issues its next task only after its previous task finishes | Queue-full: the task queue is kept full for every slot |
+| Log-context limit (`search_logs`) | 10 lines | 50 lines |
+| Metric window (`query_metrics`) | 900 s | 3,600 s |
+| `max_tokens` per turn | 1,024 | 4,096 |
+| Per-task timeout | 120,000 ms | 600,000 ms |
+| Proposed task-latency SLO (T_task) | 60,000 ms | 300,000 ms |
+| Proposed TTFT SLO per turn (T_ttft) | 2,500 ms | none (throughput-oriented) |
 
 ## Concurrency
 

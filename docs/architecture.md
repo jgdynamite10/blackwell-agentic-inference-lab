@@ -1,8 +1,8 @@
 # Architecture
 
-This document describes the intended system architecture. Phase 1 implements
-only the repository scaffolding; components marked with their phase are built
-later, subject to authorization.
+This document describes both the **implemented architecture** (Phases 1–2)
+and the intended architecture of later phases. Components marked with a later
+phase are built only after that phase is explicitly authorized.
 
 ## Overview
 
@@ -28,9 +28,97 @@ later, subject to authorization.
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## Phase 2 — implemented architecture (current)
+
+Phase 2 is implemented in `src/blackwell_lab/workload/` and is **CLI-first
+and fully offline**: no browser frontend, web server, persistent dashboard,
+authentication system, or hosted service exists or is planned for this phase.
+The entry point is the `blackwell-bench` console script
+(`python -m blackwell_lab.workload.runner`).
+
+### Logical components and data flow
+
+```mermaid
+flowchart LR
+    subgraph repo["Repository (public, synthetic only)"]
+        catalog["Scenario catalog<br/>scenarios.py<br/>10 incident classes,<br/>versioned + content-addressed"]
+        runner["Benchmark runner<br/>runner.py<br/>profiles, concurrency 1/4/8,<br/>warm-up, 5 repetitions"]
+        agent["Cloud Operations Agent<br/>agent.py<br/>multi-turn loop, retries=0,<br/>timeouts, error taxonomy"]
+        tools["Simulated tools<br/>tools.py<br/>6 tools, fixed latencies"]
+        client["Model-client interface<br/>model_client.py<br/>DeterministicMockClient (Phase 2)<br/>vLLM / TRT-LLM / NIM (Phases 3+)"]
+        evaluator["Evaluator + metrics<br/>evaluator.py, stats.py<br/>versioned scoring,<br/>p95/p99 suppression"]
+    end
+    external[("LAB_RESULTS_DIR<br/>external, absolute,<br/>outside the repository<br/>(unset = no persistence)")]
+
+    catalog --> runner
+    runner --> agent
+    agent --> client
+    agent --> tools
+    tools --> agent
+    client --> agent
+    agent --> evaluator
+    evaluator --> runner
+    runner -- "schema-valid manifest<br/>+ result per repetition" --> external
+```
+
+The runner validates every manifest against
+[../schemas/run-manifest.schema.json](../schemas/run-manifest.schema.json) and
+every result against
+[../schemas/benchmark-result.schema.json](../schemas/benchmark-result.schema.json)
+**before** reporting or persisting it, and persists only through the
+`LAB_RESULTS_DIR` guard (`src/blackwell_lab/paths.py`) in explicit synthetic
+mode: unset means no persistence anywhere, and no output can fall back into
+the repository.
+
+### One multi-turn task: sequence and measurement boundaries
+
+```mermaid
+sequenceDiagram
+    participant R as Benchmark runner
+    participant A as Agent loop
+    participant M as Model client
+    participant T as Simulated tools
+    participant E as Evaluator
+
+    R->>A: submit task (start E2E clock, monotonic)
+    loop each turn (until terminal tool, error, or timeout)
+        A->>M: model request (start TTFT + serving clocks)
+        M-->>A: first streamed token (TTFT boundary)
+        M-->>A: remaining tokens (inter-token gaps)
+        Note over A,M: serving time = dispatch to final token
+        A->>A: parse + validate tool call (retries=0)
+        A->>T: execute simulated tool
+        T-->>A: deterministic result (fixed latency, recorded not slept)
+    end
+    A->>T: recommend_remediation (terminal tool)
+    A-->>R: task execution record
+    R->>E: evaluate (root cause, evidence, remediation)
+    E-->>R: deterministic score + success
+    R->>R: build manifest + result, validate schemas
+    R-->>R: persist via LAB_RESULTS_DIR guard (or no persistence)
+```
+
+Measurement boundaries follow the measurement contract §2: end-to-end task
+time runs from driver submission to evaluator receipt of the final answer;
+TTFT and inter-token latency are measured at the driver around the token
+stream; tool-execution time uses the fixed, documented simulated latencies so
+it is separable from model-serving time. Mock runs record GPU telemetry as
+**unavailable with an explicit reason** and queue time as an explicitly empty
+series — no measurement is fabricated.
+
+### Phase 7 reporting interface (design only)
+
+Structured manifests, result records, configuration versions, hashes, and
+reproducible analysis are the authoritative outputs; screenshots are
+supplementary only. Because every repetition is a pair of schema-valid JSON
+documents, Phase 7 can optionally generate a **static HTML report or
+read-only dashboard** from an explicitly approved, sanitized dataset by
+consuming those documents — no server, no live service, and no additional
+interfaces are required from Phase 2 beyond the stable schemas.
+
 ## Components
 
-### Synthetic Cloud Operations Agent (Phase 2)
+### Synthetic Cloud Operations Agent (Phase 2 — implemented)
 
 An agent loop that receives deterministic incident scenarios and works them
 using simulated tools: `get_service_health()`, `query_metrics()`,
@@ -40,7 +128,7 @@ never production systems or customer information. Tool latency is simulated
 deterministically so tool-execution time can be separated from model-serving
 time.
 
-### Scenario driver and evaluator (Phase 2)
+### Scenario driver and evaluator (Phase 2 — implemented)
 
 Deterministic incident definitions (elevated latency, pod failures, memory
 pressure, GPU saturation, storage latency, failed deployments, unhealthy
@@ -101,11 +189,28 @@ memory, storage type, network configuration, virtualization, driver, CUDA
 version, OS, region, and any other material environmental facts, so
 differences are recorded rather than hidden.
 
-## Infrastructure-as-code (Phases 3+)
+## Infrastructure-as-code (Phases 3+; deferred, not implemented in Phase 2)
+
+Provider deployment diagrams and infrastructure-as-code are deferred to their
+authorized phases: Phase 3 (Akamai Cloud baseline deployment and lifecycle),
+Phase 5 (Google Cloud replication), and Phase 6 (AWS replication). Nothing in
+Phase 2 provisions, modifies, or tears down any cloud resource.
 
 Provisioning will use Terraform with per-provider modules; state and `.tfvars`
 stay outside the repository. `terraform apply`/`destroy` require explicit
 owner approval per [../AGENTS.md](../AGENTS.md).
+
+The future infrastructure workflow must support, in order:
+
+1. plan →
+2. explicit owner approval →
+3. provision →
+4. deploy →
+5. benchmark →
+6. verify external result export (to `LAB_RESULTS_DIR`) →
+7. explicit teardown approval →
+8. remove **only** resources created for the exact run →
+9. verify no project-created billable resources remain.
 
 Billing-safety design constraint: on Akamai, powering off a Linode does not
 stop billing — compute billing stops only when the service is deleted from

@@ -76,7 +76,11 @@ To prevent post-hoc methodology drift, the following are fixed and recorded
 before Phase 3 measurement starts (decision-log entries required to change):
 
 1. SLO latency targets and quality threshold (measurement contract §4, §8).
-2. Per-profile task timeout values.
+   Phase 2 proposals (pending owner approval, decision D-0009): interactive
+   T_task 60,000 ms and T_ttft 2,500 ms per turn; batch-heavy T_task
+   300,000 ms with no TTFT target; quality threshold S_min 0.85.
+2. Per-profile task timeout values. Phase 2 values (D-0009): interactive
+   120,000 ms; batch-heavy 600,000 ms.
 3. Warm-up criterion.
 4. Generation settings (candidate: temperature 1.0, top_p 0.95 — the model
    card's recommended sampling — with a fixed max-token budget; reasoning mode
