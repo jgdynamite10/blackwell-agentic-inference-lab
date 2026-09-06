@@ -9,9 +9,11 @@ to satisfy production-like agentic-AI service-level objectives (SLOs).
 **Canonical repository:**
 [https://github.com/jgdynamite10/blackwell-agentic-inference-lab](https://github.com/jgdynamite10/blackwell-agentic-inference-lab)
 — all development, issues, pull requests, releases, security reporting, and
-documentation live here. The repository at
-`github.com/jgdynamite/blackwell-agentic-inference-lab` is a non-synchronized
-redirect only and will be archived.
+CI decisions live here. The repository at
+`github.com/jgdynamite/blackwell-agentic-inference-lab` is a **public,
+one-way mirror of canonical `main`**: it is synchronized only from reviewed
+and merged canonical `main`, and changes must never flow from the mirror back
+to this repository.
 
 **Status:** Phase 1 — repository foundation and feasibility.
 

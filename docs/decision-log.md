@@ -118,3 +118,27 @@ public; the methodology is described as documented and reproducible.
 superseding D-0006 items (a) and (b). D-0006 items (c) and (d) — the
 credential-free Cloud Agent boundary and the external-results design — are
 unchanged.
+
+*Note: item 5 above (archived redirect) is superseded by D-0008; the entry is
+retained unaltered as the historical record.*
+
+## 2026-09-06 — D-0008: Secondary repository is a one-way mirror (supersedes D-0007 item 5 only)
+
+**Decision.** Per the owner's final-publication instruction of 2026-09-06,
+superseding **only** the archived-redirect decision in D-0007 item 5 (all
+other D-0007 items stand):
+
+1. `jgdynamite10/blackwell-agentic-inference-lab` remains the **canonical**
+   repository.
+2. `jgdynamite/blackwell-agentic-inference-lab` is a **public, one-way
+   mirror of canonical `main`** — not an archived redirect and not an
+   independent development repository. It remains unarchived.
+3. Development, issues, pull requests, releases, security reports, and CI
+   decisions belong in `jgdynamite10`.
+4. Changes must never flow from the secondary repository back to the
+   primary.
+5. The secondary mirror is synchronized only from reviewed and merged
+   primary `main`.
+
+**Rationale.** Owner instruction (final publication and secondary sync memo,
+2026-09-06).

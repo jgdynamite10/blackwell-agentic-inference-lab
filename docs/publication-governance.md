@@ -14,8 +14,11 @@ authorize class B.
   no special release process applies to ordinary code and documentation.
 - The canonical public repository is
   `jgdynamite10/blackwell-agentic-inference-lab`; the personal
-  `jgdynamite/blackwell-agentic-inference-lab` repository is a
-  non-synchronized redirect that will be archived.
+  `jgdynamite/blackwell-agentic-inference-lab` repository is a public,
+  one-way mirror synchronized only from reviewed and merged canonical
+  `main`. Development, issues, pull requests, releases, security reports,
+  and CI decisions belong in the canonical repository, and changes never
+  flow from the mirror back to it (owner decision D-0008).
 
 ## Class B — Benchmark-result publication (restricted)
 

@@ -27,11 +27,13 @@ explicitly revises them in writing.
    (`jgdynamite10/blackwell-agentic-inference-lab`). Its source code and
    documented methodology are intended to be public under the
    **Apache License 2.0** (see [LICENSE](LICENSE) and [NOTICE](NOTICE)), per
-   owner decision D-0007 in [docs/decision-log.md](docs/decision-log.md). The
-   repository at `github.com/jgdynamite/blackwell-agentic-inference-lab` is a
-   non-synchronized redirect only and will be archived; all development,
-   issues, pull requests, releases, security reporting, and documentation
-   belong here.
+   owner decisions D-0007 and D-0008 in
+   [docs/decision-log.md](docs/decision-log.md). The repository at
+   `github.com/jgdynamite/blackwell-agentic-inference-lab` is a **public,
+   one-way mirror** of canonical `main`, synchronized only from reviewed and
+   merged canonical `main`. All development, issues, pull requests, releases,
+   security reports, and CI decisions belong here, and changes must never
+   flow from the secondary repository back to this one.
 2. **Public visibility does not authorize publication of genuine benchmark
    results.** Raw and processed benchmark data remain external to Git through
    `LAB_RESULTS_DIR`; only explicitly approved sanitized summaries may later
