@@ -7,18 +7,27 @@
 #   # fill in the pinned values, then:
 #   ssh <host> '/opt/bwlab-bootstrap/bootstrap.sh'
 #
-# Design (decision D-0012):
+# Design (decisions D-0012, D-0013):
 # - IDEMPOTENT: every step checks its own outcome before acting; re-running
-#   after a failure resumes safely. Marker files under $STATE_DIR record
-#   completed steps.
-# - PINNED: OS, container image (immutable digest), model artifact revision,
-#   and digest manifest are pinned in bootstrap.env; the script REFUSES to
-#   serve when a pin is missing.
-# - VERIFIED: NVIDIA driver/CUDA compatibility is checked, and every model
-#   file is verified against the frozen sha256 manifest BEFORE serving.
-# - This script downloads the model and container; it therefore runs ONLY on
-#   the provisioned instance in an owner-approved session — never in the
-#   hosted Cloud Agent and never in CI.
+#   after a failure (or after the required reboot) resumes safely. Marker
+#   files under $STATE_DIR record completed steps.
+# - PINNED GPU-STACK ROUTE: the generic Ubuntu image is NOT assumed to ship
+#   an NVIDIA driver or the NVIDIA Container Toolkit. This script installs
+#   the exact pinned driver and toolkit packages itself, then requires a
+#   reboot and a post-reboot re-run that validates the running stack. Exit
+#   code 2 means "reboot, then re-run bootstrap.sh".
+# - PINNED INPUTS: OS, driver package, container-toolkit package, serving
+#   image (immutable digest), GPU probe image (immutable digest), model
+#   artifact revision, and digest manifest are pinned in bootstrap.env; the
+#   script REFUSES to serve when a pin is missing.
+# - VERIFIED: host driver/max-CUDA compatibility AND the container's actual
+#   CUDA runtime are checked separately (the nvidia-smi banner is the
+#   driver's maximum supported CUDA, not the container runtime), and every
+#   model file is verified against the frozen sha256 manifest BEFORE serving.
+# - This script downloads the container image; the model is acquired
+#   separately by fetch-model.sh. Both run ONLY on the provisioned instance
+#   in an owner-approved session — never in the hosted Cloud Agent, never in
+#   CI. No token is ever accepted as an argument or written to any file.
 #
 # The watchdog it installs limits runaway WORKLOAD only. It is NOT a billing
 # control: on Akamai a powered-off instance still bills. Deleting the
@@ -29,6 +38,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/bootstrap.env"
 STATE_DIR="/var/lib/bwlab-bootstrap"
+REBOOT_REQUIRED_EXIT=2
 
 log() { printf '[bwlab-bootstrap] %s\n' "$*"; }
 fail() { printf '[bwlab-bootstrap] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -51,8 +61,10 @@ require_pin VLLM_IMAGE "${VLLM_IMAGE:-}"
 require_pin MODEL_ARTIFACT "${MODEL_ARTIFACT:-}"
 require_pin MODEL_DIR "${MODEL_DIR:-}"
 require_pin MODEL_DIGEST_MANIFEST "${MODEL_DIGEST_MANIFEST:-}"
+require_pin NVIDIA_DRIVER_PACKAGE "${NVIDIA_DRIVER_PACKAGE:-}"
 require_pin MIN_DRIVER_BRANCH "${MIN_DRIVER_BRANCH:-}"
-require_pin REQUIRED_CUDA_MAJOR "${REQUIRED_CUDA_MAJOR:-}"
+require_pin DRIVER_MAX_CUDA_MAJOR "${DRIVER_MAX_CUDA_MAJOR:-}"
+require_pin GPU_PROBE_IMAGE "${GPU_PROBE_IMAGE:-}"
 require_pin SERVED_MODEL_NAME "${SERVED_MODEL_NAME:-}"
 require_pin SERVING_PORT "${SERVING_PORT:-}"
 require_pin WATCHDOG_IDLE_MINUTES "${WATCHDOG_IDLE_MINUTES:-}"
@@ -70,21 +82,58 @@ check_os() {
   log "OS check passed: ${ID} ${VERSION_ID}"
 }
 
-# --- step 2: NVIDIA driver + CUDA compatibility --------------------------------
+# --- step 2: pinned NVIDIA driver + container toolkit installation --------------
+# Reproducible route (D-0013): install the exact pinned packages when the
+# stack is absent, then reboot and re-run for post-reboot validation.
+
+install_gpu_stack() {
+  if step_done gpu-stack-installed; then
+    log "GPU stack packages already installed (marker present)"
+    return
+  fi
+  local driver_pkg="${NVIDIA_DRIVER_PACKAGE}"
+  if [ -n "${NVIDIA_DRIVER_PACKAGE_VERSION:-}" ]; then
+    driver_pkg="${NVIDIA_DRIVER_PACKAGE}=${NVIDIA_DRIVER_PACKAGE_VERSION}"
+  fi
+  local ctk_pkg="nvidia-container-toolkit"
+  if [ -n "${NVIDIA_CTK_PACKAGE_VERSION:-}" ]; then
+    ctk_pkg="nvidia-container-toolkit=${NVIDIA_CTK_PACKAGE_VERSION}"
+  fi
+  log "installing pinned GPU stack: ${driver_pkg}, ${ctk_pkg}"
+  apt-get update -q
+  DEBIAN_FRONTEND=noninteractive apt-get install -q -y "${driver_pkg}"
+  # The NVIDIA Container Toolkit apt repository must be configured per
+  # NVIDIA's install guide before this step (one-time operator action,
+  # documented in infra/akamai/README.md). No token is involved.
+  DEBIAN_FRONTEND=noninteractive apt-get install -q -y "${ctk_pkg}" \
+    || fail "nvidia-container-toolkit install failed: configure NVIDIA's apt repository first (see README)"
+  mark_done gpu-stack-installed
+  if ! nvidia-smi >/dev/null 2>&1; then
+    log "GPU stack installed but the driver is not active yet."
+    log "REBOOT REQUIRED: reboot now, then re-run bootstrap.sh for post-reboot validation."
+    exit "${REBOOT_REQUIRED_EXIT}"
+  fi
+  log "GPU stack installed and driver already active (no reboot needed)"
+}
+
+# --- step 3: post-reboot NVIDIA driver + driver-max-CUDA validation -------------
 
 check_gpu_stack() {
   command -v nvidia-smi >/dev/null 2>&1 \
-    || fail "nvidia-smi not found: install the pinned NVIDIA driver (R${MIN_DRIVER_BRANCH}+ branch) first"
-  local driver_version driver_branch cuda_version cuda_major gpu_name gpu_count
+    || fail "nvidia-smi not found after installation: reboot and re-run bootstrap.sh (post-reboot validation)"
+  local driver_version driver_branch driver_max_cuda cuda_major gpu_name gpu_count
   driver_version="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1)"
   driver_branch="${driver_version%%.*}"
   [ "${driver_branch}" -ge "${MIN_DRIVER_BRANCH}" ] \
     || fail "driver ${driver_version} is older than the pinned minimum branch R${MIN_DRIVER_BRANCH}"
-  cuda_version="$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9][0-9]*\.[0-9]*\).*/\1/p' | head -n1)"
-  [ -n "${cuda_version}" ] || fail "could not determine the CUDA version from nvidia-smi"
-  cuda_major="${cuda_version%%.*}"
-  [ "${cuda_major}" -eq "${REQUIRED_CUDA_MAJOR}" ] \
-    || fail "CUDA ${cuda_version} does not match the pinned major version ${REQUIRED_CUDA_MAJOR}.x"
+  # The nvidia-smi banner reports the MAXIMUM CUDA version the driver
+  # supports — NOT the CUDA runtime any container actually uses. The
+  # container runtime is validated separately in check_container_cuda.
+  driver_max_cuda="$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9][0-9]*\.[0-9]*\).*/\1/p' | head -n1)"
+  [ -n "${driver_max_cuda}" ] || fail "could not determine the driver's max CUDA version from nvidia-smi"
+  cuda_major="${driver_max_cuda%%.*}"
+  [ "${cuda_major}" -ge "${DRIVER_MAX_CUDA_MAJOR}" ] \
+    || fail "driver max CUDA ${driver_max_cuda} is below the pinned major ${DRIVER_MAX_CUDA_MAJOR}.x"
   gpu_count="$(nvidia-smi --list-gpus | wc -l)"
   [ "${gpu_count}" -eq 1 ] || fail "expected exactly 1 GPU, found ${gpu_count} (single-GPU baseline)"
   gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1)"
@@ -92,14 +141,14 @@ check_gpu_stack() {
     *"RTX PRO 6000"*) ;;
     *) fail "GPU is '${gpu_name}', expected an RTX PRO 6000 Blackwell part" ;;
   esac
-  log "GPU stack check passed: ${gpu_name}, driver ${driver_version}, CUDA ${cuda_version}"
+  log "GPU stack validated: ${gpu_name}, driver ${driver_version}, driver-max CUDA ${driver_max_cuda}"
 }
 
-# --- step 3: container runtime -------------------------------------------------
+# --- step 4: container runtime (docker + NVIDIA runtime + digest-pinned probe) ---
 
 install_container_runtime() {
   if step_done container-runtime; then
-    log "container runtime already installed (marker present)"
+    log "container runtime already configured (marker present)"
     return
   fi
   command -v docker >/dev/null 2>&1 || {
@@ -108,16 +157,22 @@ install_container_runtime() {
     DEBIAN_FRONTEND=noninteractive apt-get install -q -y docker.io
   }
   command -v nvidia-ctk >/dev/null 2>&1 \
-    || fail "nvidia-container-toolkit is not installed; install the NVIDIA-pinned package before rerunning"
+    || fail "nvidia-ctk not found: install_gpu_stack must complete (and the host reboot) first"
   nvidia-ctk runtime configure --runtime=docker
   systemctl restart docker
-  docker run --rm --gpus all "ubuntu:24.04" true \
-    || fail "docker cannot access the GPU through the NVIDIA runtime"
+  require_pin GPU_PROBE_IMAGE_DIGEST "${GPU_PROBE_IMAGE_DIGEST:-}"
+  case "${GPU_PROBE_IMAGE_DIGEST}" in
+    sha256:*) ;;
+    *) fail "GPU_PROBE_IMAGE_DIGEST must be an immutable sha256:... digest (mutable tags are never pulled)" ;;
+  esac
+  local probe_ref="${GPU_PROBE_IMAGE%%@*}@${GPU_PROBE_IMAGE_DIGEST}"
+  docker run --rm --gpus all "${probe_ref}" true \
+    || fail "docker cannot access the GPU through the NVIDIA runtime (probe image ${probe_ref})"
   mark_done container-runtime
-  log "container runtime ready (docker + nvidia-container-toolkit)"
+  log "container runtime ready (docker + nvidia-container-toolkit; digest-pinned probe passed)"
 }
 
-# --- step 4: serving image by immutable digest ---------------------------------
+# --- step 5: serving image by immutable digest ---------------------------------
 
 pull_serving_image() {
   require_pin VLLM_IMAGE_DIGEST "${VLLM_IMAGE_DIGEST:-}"
@@ -135,10 +190,25 @@ pull_serving_image() {
   log "serving image verified: ${pinned_ref}"
 }
 
-# --- step 5: model artifact digest verification ---------------------------------
+# --- step 6: container CUDA runtime validation (separate from driver max) --------
+
+check_container_cuda() {
+  require_pin REQUIRED_CONTAINER_CUDA_VERSION "${REQUIRED_CONTAINER_CUDA_VERSION:-}"
+  local pinned_ref="${VLLM_IMAGE%%@*}@${VLLM_IMAGE_DIGEST}"
+  local container_cuda
+  container_cuda="$(docker run --rm --gpus all --entrypoint python3 "${pinned_ref}" \
+    -c 'import torch; print(torch.version.cuda)')" \
+    || fail "could not observe the container's CUDA runtime version"
+  container_cuda="$(printf '%s' "${container_cuda}" | tail -n1 | tr -d '[:space:]')"
+  [ "${container_cuda}" = "${REQUIRED_CONTAINER_CUDA_VERSION}" ] \
+    || fail "container CUDA runtime is ${container_cuda}, pinned expectation is ${REQUIRED_CONTAINER_CUDA_VERSION} (the driver's max CUDA is a different fact and does not substitute)"
+  log "container CUDA runtime validated: ${container_cuda}"
+}
+
+# --- step 7: model artifact digest verification ---------------------------------
 
 verify_model_artifact() {
-  [ -d "${MODEL_DIR}" ] || fail "model directory ${MODEL_DIR} does not exist (download the pinned artifact first)"
+  [ -d "${MODEL_DIR}" ] || fail "model directory ${MODEL_DIR} does not exist (run fetch-model.sh first)"
   [ -f "${MODEL_DIGEST_MANIFEST}" ] \
     || fail "digest manifest ${MODEL_DIGEST_MANIFEST} not found: the artifact hash must be frozen before serving"
   log "verifying every model file against the frozen digest manifest (this can take a while)"
@@ -147,20 +217,25 @@ verify_model_artifact() {
   log "model artifact verified against ${MODEL_DIGEST_MANIFEST}"
 }
 
-# --- step 6: launch serving container ------------------------------------------
+# --- step 8: launch serving container (idempotent restart behavior) --------------
 
 start_serving() {
   local container_name="bwlab-vllm"
   local pinned_ref="${VLLM_IMAGE%%@*}@${VLLM_IMAGE_DIGEST}"
+  local health_url="http://127.0.0.1:${SERVING_PORT}/health"
   if docker ps --format '{{.Names}}' | grep -qx "${container_name}"; then
-    log "serving container already running"
-    return
+    if curl -fsS --max-time 5 "${health_url}" >/dev/null 2>&1; then
+      log "serving container already running and healthy"
+      return
+    fi
+    log "serving container is running but not healthy: restarting it"
   fi
   docker rm -f "${container_name}" >/dev/null 2>&1 || true
-  log "starting vLLM serving container (loopback binding only)"
+  log "starting vLLM serving container (loopback binding only; never a public port)"
   # shellcheck disable=SC2086
   docker run -d --name "${container_name}" \
     --gpus all --ipc=host \
+    --restart no \
     -p "127.0.0.1:${SERVING_PORT}:8000" \
     -v "${MODEL_DIR}:/model:ro" \
     "${pinned_ref}" \
@@ -169,14 +244,14 @@ start_serving() {
     ${VLLM_EXTRA_ARGS}
 }
 
-# --- step 7: health / readiness ------------------------------------------------
+# --- step 9: health / readiness ------------------------------------------------
 
 wait_for_readiness() {
   local url="http://127.0.0.1:${SERVING_PORT}"
   local deadline=$(( $(date +%s) + 900 ))
   log "waiting for serving readiness at ${url} (max 15 minutes)"
   until curl -fsS "${url}/health" >/dev/null 2>&1; do
-    [ "$(date +%s)" -lt "${deadline}" ] || fail "serving endpoint did not become healthy within 15 minutes"
+    [ "$(date +%s)" -lt "${deadline}" ] || fail "serving endpoint did not become healthy within 15 minutes (re-run bootstrap.sh to restart it)"
     sleep 5
   done
   curl -fsS "${url}/v1/models" | grep -q "${SERVED_MODEL_NAME}" \
@@ -184,7 +259,7 @@ wait_for_readiness() {
   log "serving endpoint is healthy and lists the pinned model"
 }
 
-# --- step 8: workload watchdog ---------------------------------------------------
+# --- step 10: workload watchdog ---------------------------------------------------
 
 install_watchdog() {
   log "installing workload watchdog (idle limit ${WATCHDOG_IDLE_MINUTES} minutes)"
@@ -200,9 +275,11 @@ install_watchdog() {
 
 main() {
   check_os
+  install_gpu_stack
   check_gpu_stack
   install_container_runtime
   pull_serving_image
+  check_container_cuda
   verify_model_artifact
   start_serving
   wait_for_readiness
