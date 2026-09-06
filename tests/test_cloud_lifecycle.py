@@ -198,8 +198,51 @@ class TestExternalArtifacts:
         lifecycle.write_private_json(target, {"x": 1})
         assert stat.S_IMODE(os.stat(target).st_mode) == 0o600
         assert stat.S_IMODE(os.stat(target.parent).st_mode) == 0o700
-        # No temp residue.
         assert [p.name for p in target.parent.iterdir()] == ["artifact.json"]
+
+
+class TestPilotBlockers:
+    def _ready_ledger(self):
+        return {
+            "run_tag": RUN_TAG,
+            "reconciled": True,
+            "reconciliation": {"provider_checked": True},
+            "resources": [
+                {
+                    "address": "linode_instance.gpu_baseline",
+                    "type": "linode_instance",
+                    "provider_id": "12345678",
+                },
+                {
+                    "address": "linode_firewall.gpu_baseline",
+                    "type": "linode_firewall",
+                    "provider_id": "555",
+                },
+            ],
+        }
+
+    def test_all_gates_pass_with_expected_shape(self):
+        assert lifecycle.pilot_blockers(self._ready_ledger(), pending=False) == []
+
+    def test_pending_operation_blocks(self):
+        blockers = lifecycle.pilot_blockers(self._ready_ledger(), pending=True)
+        assert "a pending lifecycle operation exists" in blockers
+
+    def test_unreconciled_ledger_blocks(self):
+        ledger = self._ready_ledger()
+        ledger["reconciled"] = False
+        assert "not cleanly reconciled" in lifecycle.pilot_blockers(ledger, pending=False)[0]
+
+    def test_missing_provider_check_blocks(self):
+        ledger = self._ready_ledger()
+        ledger["reconciliation"] = {"provider_checked": False}
+        assert any("provider API" in b for b in lifecycle.pilot_blockers(ledger, pending=False))
+
+    def test_wrong_resource_counts_block(self):
+        ledger = self._ready_ledger()
+        ledger["resources"] = [ledger["resources"][0]]
+        blockers = lifecycle.pilot_blockers(ledger, pending=False)
+        assert any("firewall" in b for b in blockers)
 
 
 class TestSavedPlan:
@@ -237,14 +280,14 @@ class TestSavedPlan:
 
     def test_apply_stage_plan_with_delete_fails_closed(self, paths, tf_dir):
         runner = FakeRunner(show_plan=plan_json([("linode_instance.gpu_baseline", ["delete"])]))
-        with pytest.raises(LifecycleError, match="delete, replace, or unrelated"):
+        with pytest.raises(LifecycleError, match="delete, replace, update, or unrelated"):
             make_plan(paths, tf_dir, runner)
 
     def test_apply_stage_plan_with_replace_fails_closed(self, paths, tf_dir):
         runner = FakeRunner(
             show_plan=plan_json([("linode_instance.gpu_baseline", ["delete", "create"])])
         )
-        with pytest.raises(LifecycleError, match="delete, replace, or unrelated"):
+        with pytest.raises(LifecycleError, match="delete, replace, update, or unrelated"):
             make_plan(paths, tf_dir, runner)
 
     def test_apply_stage_plan_with_unrelated_resource_fails_closed(self, paths, tf_dir):
@@ -258,6 +301,21 @@ class TestSavedPlan:
         )
         with pytest.raises(LifecycleError, match="unrelated"):
             make_plan(paths, tf_dir, runner)
+
+    def test_apply_stage_plan_with_update_fails_closed(self, paths, tf_dir):
+        runner = FakeRunner(show_plan=plan_json([("linode_instance.gpu_baseline", ["update"])]))
+        with pytest.raises(LifecycleError, match="delete, replace, update, or unrelated"):
+            make_plan(paths, tf_dir, runner)
+
+    def test_wrong_terraform_cli_version_is_rejected(self, paths, tf_dir):
+        class WrongVersionRunner(FakeRunner):
+            def __call__(self, argv, cwd, env):
+                if argv[:2] == ["terraform", "version"]:
+                    return CommandResult(0, json.dumps({"terraform_version": "1.9.7"}))
+                return super().__call__(argv, cwd, env)
+
+        with pytest.raises(LifecycleError, match=r"must be exactly 1\.9\.8"):
+            make_plan(paths, tf_dir, WrongVersionRunner())
 
 
 class TestVerifySavedPlan:
@@ -336,7 +394,14 @@ class TestApply:
     def test_apply_executes_exactly_the_saved_plan_no_auto_approve(self, paths, tf_dir):
         meta, runner = make_plan(paths, tf_dir)
         report = lifecycle.apply(
-            RUN_TAG, apply_phrase(meta), paths=paths, tf_dir=tf_dir, runner=runner, environ={}
+            RUN_TAG,
+            apply_phrase(meta),
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=runner,
+            environ={},
+            fetch=_reconcile_fetch(),
+            token="t",
         )
         assert report["reconciled"] is True
         apply_calls = [c for c in runner.calls if c[1] == "apply"]
@@ -387,7 +452,14 @@ class TestApply:
 
         recorder = Recorder()
         lifecycle.apply(
-            RUN_TAG, apply_phrase(meta), paths=paths, tf_dir=tf_dir, runner=recorder, environ={}
+            RUN_TAG,
+            apply_phrase(meta),
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=recorder,
+            environ={},
+            fetch=_reconcile_fetch(),
+            token="t",
         )
         assert seen["pending_at_apply"] is True
         # Clean reconciliation clears the pending record.
@@ -446,18 +518,74 @@ class TestReconcile:
             RUN_TAG, paths=paths, tf_dir=tf_dir, runner=runner, fetch=fetch, token="t"
         )
         assert report["reconciled"] is False
+        assert report["provider_checked"] is True
         assert report["untracked_billable_count"] == 1
         assert "blocked" in report["note"].lower() or "NOT CLEAN" in report["note"]
 
-    def test_clean_reconciliation_clears_pending(self, paths, tf_dir):
+    def test_clean_reconciliation_requires_provider_check(self, paths, tf_dir):
         lifecycle.write_pending(paths, run_tag=RUN_TAG, operation="apply", plan_sha256="x")
-        report = lifecycle.reconcile(RUN_TAG, paths=paths, tf_dir=tf_dir, runner=FakeRunner())
+        report = lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(),
+            fetch=_reconcile_fetch(),
+            token="t",
+        )
         assert report["reconciled"] is True
+        assert report["provider_checked"] is True
         assert not paths.pending_path.is_file()
 
-    def test_report_is_sanitized_no_provider_ids(self, paths, tf_dir):
+    def test_reconciliation_without_provider_access_stays_dirty_and_retains_pending(
+        self, paths, tf_dir
+    ):
+        lifecycle.write_pending(paths, run_tag=RUN_TAG, operation="apply", plan_sha256="x")
         report = lifecycle.reconcile(RUN_TAG, paths=paths, tf_dir=tf_dir, runner=FakeRunner())
+        assert report["reconciled"] is False
+        assert report["provider_checked"] is False
+        assert paths.pending_path.is_file()
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert ledger["reconciled"] is False
+        assert "recovery" in ledger
+
+    def test_report_is_sanitized_no_provider_ids(self, paths, tf_dir):
+        report = lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(),
+            fetch=_reconcile_fetch(),
+            token="t",
+        )
         assert "12345678" not in json.dumps(report)
+
+
+def _reconcile_fetch(**extra_instances):
+    def fetch(path, token=None):
+        if path.startswith("/linode/instances"):
+            items = [
+                {
+                    "id": 12345678,
+                    "label": f"bwlab-{RUN_TAG}",
+                    "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
+                },
+                *extra_instances,
+            ]
+            return {"data": items, "pages": 1}
+        if path.startswith("/networking/firewalls"):
+            return {
+                "data": [
+                    {
+                        "id": 555,
+                        "label": f"bwlab-fw-{RUN_TAG}",
+                        "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
+                    }
+                ],
+                "pages": 1,
+            }
+        return {"data": [], "pages": 1}
+
+    return fetch
 
 
 def _provider_fetch(instance_overrides=None, firewall_overrides=None):
@@ -486,9 +614,16 @@ def _provider_fetch(instance_overrides=None, firewall_overrides=None):
     return fetch
 
 
-def make_ledger(paths, tf_dir):
-    runner = FakeRunner()
-    lifecycle.reconcile(RUN_TAG, paths=paths, tf_dir=tf_dir, runner=runner)
+def make_ledger(paths, tf_dir, runner=None, show_state=None):
+    runner = runner or FakeRunner(show_state=show_state or state_json())
+    lifecycle.reconcile(
+        RUN_TAG,
+        paths=paths,
+        tf_dir=tf_dir,
+        runner=runner,
+        fetch=_reconcile_fetch(),
+        token="t",
+    )
     return lifecycle.load_ledger(paths.ledger_path)
 
 
@@ -520,7 +655,13 @@ class TestTeardownIdentity:
         ledger["resources"][0]["provider_id"] = "87654321"  # stale/wrong id
         with pytest.raises(LifecycleError, match="identity verification FAILED"):
             lifecycle.verify_teardown_identity(
-                RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=FakeRunner()
+                RUN_TAG,
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(),
+                fetch=_provider_fetch(),
+                token="t",
             )
 
     def test_missing_run_tag_in_state_fails_closed(self, paths, tf_dir):
@@ -530,7 +671,13 @@ class TestTeardownIdentity:
         runner = FakeRunner(show_state=state_json([untagged, FIREWALL_STATE]))
         with pytest.raises(LifecycleError, match="run tag missing"):
             lifecycle.verify_teardown_identity(
-                RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner
+                RUN_TAG,
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                fetch=_provider_fetch(),
+                token="t",
             )
 
     def test_provider_api_mismatch_fails_closed(self, paths, tf_dir):
@@ -551,7 +698,13 @@ class TestTeardownIdentity:
         runner = FakeRunner(show_state=state_json([FIREWALL_STATE]))  # instance vanished
         with pytest.raises(LifecycleError, match="absent from the current state"):
             lifecycle.verify_teardown_identity(
-                RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner
+                RUN_TAG,
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                fetch=_provider_fetch(),
+                token="t",
             )
 
     def test_unexpected_resource_type_fails_closed(self, paths, tf_dir):
@@ -562,11 +715,24 @@ class TestTeardownIdentity:
             "values": {"id": "1", "label": "bwlab-x", "tags": ["blackwell-lab"]},
         }
         runner = FakeRunner(show_state=state_json([INSTANCE_STATE, FIREWALL_STATE, volume_state]))
-        lifecycle.reconcile(RUN_TAG, paths=paths, tf_dir=tf_dir, runner=runner)
+        lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=runner,
+            fetch=_reconcile_fetch(),
+            token="t",
+        )
         ledger = lifecycle.load_ledger(paths.ledger_path)
         with pytest.raises(LifecycleError, match="not a resource this configuration"):
             lifecycle.verify_teardown_identity(
-                RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner
+                RUN_TAG,
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                fetch=_provider_fetch(),
+                token="t",
             )
 
 
@@ -584,14 +750,30 @@ class TestDestroy:
     def _prepared(self, paths, tf_dir):
         ledger = make_ledger(paths, tf_dir)
         runner = self._destroy_runner()
-        meta = lifecycle.plan_destroy(RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner)
+        meta = lifecycle.plan_destroy(
+            RUN_TAG,
+            ledger,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=runner,
+            fetch=_provider_fetch(),
+            token="t",
+        )
         return ledger, meta, runner
 
     def test_destroy_plan_must_match_ledger_addresses_exactly(self, paths, tf_dir):
         ledger = make_ledger(paths, tf_dir)
         runner = FakeRunner(show_plan=plan_json([("linode_instance.gpu_baseline", ["delete"])]))
         with pytest.raises(LifecycleError, match="exactly match the ledger"):
-            lifecycle.plan_destroy(RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner)
+            lifecycle.plan_destroy(
+                RUN_TAG,
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                fetch=_provider_fetch(),
+                token="t",
+            )
 
     def test_destroy_stage_plan_with_create_fails_closed(self, paths, tf_dir):
         ledger = make_ledger(paths, tf_dir)
@@ -604,7 +786,15 @@ class TestDestroy:
             )
         )
         with pytest.raises(LifecycleError, match="non-delete"):
-            lifecycle.plan_destroy(RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner)
+            lifecycle.plan_destroy(
+                RUN_TAG,
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                fetch=_provider_fetch(),
+                token="t",
+            )
 
     def test_destroy_requires_digest_bearing_approval(self, paths, tf_dir):
         ledger, _meta, runner = self._prepared(paths, tf_dir)
@@ -617,6 +807,7 @@ class TestDestroy:
                 tf_dir=tf_dir,
                 runner=runner,
                 environ={},
+                fetch=_provider_fetch(),
                 token="t",
                 probe=lambda path, token: "absent",
             )
@@ -641,6 +832,7 @@ class TestDestroy:
             tf_dir=tf_dir,
             runner=runner,
             environ={},
+            fetch=_provider_fetch(),
             token="t",
             probe=slow_probe,
             monotonic=lambda: float(next(timeline)),
@@ -662,20 +854,22 @@ class TestDestroy:
                 ledger,
                 paths=paths,
                 tf_dir=tf_dir,
-                runner=runner,
-                environ={},
-                token="t",
-                probe=lambda path, token: "present",
+            runner=runner,
+            environ={},
+            fetch=_provider_fetch(),
+            token="t",
+            probe=lambda path, token: "present",
                 monotonic=lambda: float(next(timeline)),
                 sleeper=lambda s: None,
             )
 
-    def test_destroy_without_token_never_reports_success(self, paths, tf_dir):
-        ledger, meta, runner = self._prepared(paths, tf_dir)
-        with pytest.raises(LifecycleError, match="CANNOT BE CONFIRMED"):
+    def test_destroy_without_token_makes_zero_terraform_calls(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        runner = FakeRunner()
+        with pytest.raises(LifecycleError, match="provider verification is required"):
             lifecycle.destroy(
                 RUN_TAG,
-                destroy_phrase(meta),
+                "x",
                 ledger,
                 paths=paths,
                 tf_dir=tf_dir,
@@ -683,6 +877,21 @@ class TestDestroy:
                 environ={},
                 token=None,
             )
+        assert not any(argv[1] in ("plan", "apply") for argv in runner.calls)
+
+    def test_teardown_plan_without_token_makes_zero_terraform_calls(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        runner = FakeRunner()
+        with pytest.raises(LifecycleError, match="provider verification is required"):
+            lifecycle.plan_destroy(
+                RUN_TAG,
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                token=None,
+            )
+        assert not any(argv[1] == "plan" for argv in runner.calls)
 
     def test_destroy_refuses_hosted_environments(self, paths, tf_dir):
         ledger, meta, runner = self._prepared(paths, tf_dir)
@@ -693,9 +902,10 @@ class TestDestroy:
                 ledger,
                 paths=paths,
                 tf_dir=tf_dir,
-                runner=runner,
-                environ={"GITHUB_ACTIONS": "true"},
-                token="t",
+            runner=runner,
+            environ={"GITHUB_ACTIONS": "true"},
+            fetch=_provider_fetch(),
+            token="t",
             )
 
 

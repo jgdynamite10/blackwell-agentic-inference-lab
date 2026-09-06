@@ -105,6 +105,29 @@ def pilot_argv(config_path, run_label="pilot-a", run_tag=RUN_TAG, approve=None):
     ]
 
 
+def pilot_ready_ledger(**overrides):
+    ledger = {
+        "run_tag": RUN_TAG,
+        "reconciled": True,
+        "reconciliation": {"provider_checked": True},
+        "resources": [
+            {
+                "address": "linode_instance.gpu_baseline",
+                "type": "linode_instance",
+                "provider_id": "42",
+                "region": "us-ord",
+            },
+            {
+                "address": "linode_firewall.gpu_baseline",
+                "type": "linode_firewall",
+                "provider_id": "555",
+            },
+        ],
+    }
+    ledger.update(overrides)
+    return ledger
+
+
 class TestPilotGate:
     def test_pilot_refuses_in_hosted_environments(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setenv("CI", "1")
@@ -145,10 +168,37 @@ class TestPilotGate:
         external = tmp_path / "external"
         monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
         paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        lifecycle.write_private_json(paths.ledger_path, pilot_ready_ledger())
         lifecycle.write_pending(paths, run_tag=RUN_TAG, operation="apply", plan_sha256="x")
         config = pilot_config(tmp_path)
         assert main(pilot_argv(config)) == 1
         assert "pending lifecycle operation" in capsys.readouterr().err
+
+    def test_pilot_is_blocked_without_provider_checked(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        lifecycle.write_private_json(
+            paths.ledger_path,
+            pilot_ready_ledger(reconciliation={"provider_checked": False}),
+        )
+        config = pilot_config(tmp_path)
+        assert main(pilot_argv(config)) == 1
+        assert "provider API" in capsys.readouterr().err
+
+    def test_pilot_is_blocked_without_expected_firewall(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        lifecycle.write_private_json(
+            paths.ledger_path,
+            pilot_ready_ledger(resources=[pilot_ready_ledger()["resources"][0]]),
+        )
+        config = pilot_config(tmp_path)
+        assert main(pilot_argv(config)) == 1
+        assert "firewall" in capsys.readouterr().err
 
     def test_pilot_is_blocked_until_reconciliation_is_clean(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
@@ -157,11 +207,7 @@ class TestPilotGate:
         paths = lifecycle.lifecycle_paths(external, RUN_TAG)
         lifecycle.write_private_json(
             paths.ledger_path,
-            {
-                "run_tag": RUN_TAG,
-                "reconciled": False,
-                "resources": [{"address": "linode_instance.gpu_baseline"}],
-            },
+            pilot_ready_ledger(reconciled=False),
         )
         config = pilot_config(tmp_path)
         assert main(pilot_argv(config)) == 1
@@ -174,27 +220,69 @@ class TestPilotGate:
         external = tmp_path / "external"
         monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
         paths = lifecycle.lifecycle_paths(external, RUN_TAG)
-        lifecycle.write_private_json(
-            paths.ledger_path,
-            {
-                "run_tag": RUN_TAG,
-                "reconciled": True,
-                "resources": [
-                    {
-                        "address": "linode_instance.gpu_baseline",
-                        "type": "linode_instance",
-                        "provider_id": "42",
-                        "region": "us-ord",
-                    }
-                ],
-            },
-        )
+        lifecycle.write_private_json(paths.ledger_path, pilot_ready_ledger())
         config = pilot_config(tmp_path)
         assert main(pilot_argv(config)) == 1
         err = capsys.readouterr().err
-        # The failure comes from a genuine observation attempt (no docker /
-        # no model files here), not from accepting the configured values.
         assert "error:" in err
+
+    def test_second_cell_provenance_drift_fails_before_measurement(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        from blackwell_lab.cloud import provenance, realbench
+        from blackwell_lab.cloud.provenance import ObservedProvenance, ProvenanceError
+
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        lifecycle.write_private_json(paths.ledger_path, pilot_ready_ledger())
+
+        calls = {"n": 0}
+        run_calls: list[int] = []
+
+        def fake_verify(**kwargs):
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                raise ProvenanceError(
+                    "container digest differs from the approved pilot configuration"
+                )
+            return ObservedProvenance(
+                container_digest="digest",
+                model_artifact_hash="sha256:" + "ab" * 32,
+                engine_version="0.27.1",
+                instance={
+                    "provider_id": "42",
+                    "instance_type": "g2-rtxpro6000-x1",
+                    "region": "us-ord",
+                    "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
+                },
+                host_facts={
+                    "storage_description": "plan NVMe",
+                    "network_description": "plan default networking",
+                },
+                gpu_facts={"gpu_model": "RTX PRO 6000 Blackwell", "driver_version": "580"},
+                container_cuda_runtime_version="12.8",
+            )
+
+        monkeypatch.setattr(provenance, "verify_live_provenance", fake_verify)
+        monkeypatch.setattr(
+            realbench,
+            "run_real_cell",
+            lambda *args, **kwargs: run_calls.append(1) or [],
+        )
+
+        config = pilot_config(tmp_path)
+        config_data = json.loads(config.read_text(encoding="utf-8"))
+        config_data["cells"] = [
+            {"profile": "interactive", "concurrency": 1},
+            {"profile": "batch-heavy", "concurrency": 4},
+        ]
+        config.write_text(json.dumps(config_data), encoding="utf-8")
+
+        assert main(pilot_argv(config)) == 1
+        assert len(run_calls) == 1
+        assert "container digest" in capsys.readouterr().err
 
 
 class TestApplyDestroyGates:

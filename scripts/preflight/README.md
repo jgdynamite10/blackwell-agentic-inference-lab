@@ -13,7 +13,7 @@ credentials (AGENTS.md, section 3).
 
 | Script | Provider | Needs credentials? |
 | --- | --- | --- |
-| `check_akamai.py` | Akamai Cloud (Linode API) | `--public-only` catalog mode works unauthenticated; the default (full) mode requires `LINODE_TOKEN` (read-only scope) for account availability and fails otherwise |
+| `check_akamai.py` | Akamai Cloud (Linode API) | `--public-only` catalog mode works unauthenticated; authenticated readiness requires `LINODE_TOKEN` (read-only scope) **and `--region`** for account-level deployability and price decisions |
 | `check_gcp.py` | Google Cloud | Needs `gcloud` with a read-only identity |
 | `check_aws.py` | AWS | Needs `aws` CLI with a read-only identity |
 
@@ -22,7 +22,7 @@ Usage (local machine):
 ```bash
 python3 scripts/preflight/check_akamai.py --help
 python3 scripts/preflight/check_akamai.py --public-only   # catalog only, no token needed
-python3 scripts/preflight/check_akamai.py                 # full check, requires LINODE_TOKEN
+python3 scripts/preflight/check_akamai.py --region us-ord   # full check, requires LINODE_TOKEN
 python3 scripts/preflight/check_gcp.py
 python3 scripts/preflight/check_aws.py
 ```

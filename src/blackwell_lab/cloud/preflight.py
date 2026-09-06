@@ -50,8 +50,13 @@ READ_ONLY_BANNER = (
     "or raw error payloads."
 )
 
-#: Injectable fetcher: (path, token) -> decoded JSON object.
-Fetch = Callable[..., dict]
+#: Injectable fetcher: (path, token) -> decoded JSON (object or, for some
+#: endpoints such as ``GET /regions/{region}/availability``, a top-level array).
+Fetch = Callable[..., dict | list]
+
+
+class PreflightResponseError(ValueError):
+    """A provider response was malformed and must not be treated as empty."""
 
 
 def get_json(path: str, token: str | None = None) -> dict:
@@ -62,14 +67,69 @@ def get_json(path: str, token: str | None = None) -> dict:
         return json.load(response)
 
 
+def parse_list_response(payload: dict | list, *, context: str = "response") -> list[dict]:
+    """Parse a Linode list payload: top-level array OR paginated ``{"data": [...]}``.
+
+    Malformed payloads raise :class:`PreflightResponseError` — they are never
+    silently treated as an empty list.
+    """
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict) and "data" in payload:
+        data = payload["data"]
+        if not isinstance(data, list):
+            raise PreflightResponseError(f"{context}: paginated 'data' is not a list")
+        items = data
+    else:
+        raise PreflightResponseError(
+            f"{context}: expected a top-level array or a paginated object with 'data'"
+        )
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise PreflightResponseError(f"{context}: entry {index} is not an object")
+    return items
+
+
+def parse_region_availability(payload: dict | list, *, region: str) -> list[dict]:
+    """Parse ``GET /v4/regions/{region}/availability`` (top-level array in the live API).
+
+    Each entry must include ``region``, ``plan``, and a boolean ``available``.
+    Duplicate ``(region, plan)`` pairs with conflicting ``available`` values fail.
+    """
+    context = f"/regions/{region}/availability"
+    items = parse_list_response(payload, context=context)
+    seen: dict[tuple[str, str], bool] = {}
+    validated: list[dict] = []
+    for index, item in enumerate(items):
+        for field in ("region", "plan", "available"):
+            if field not in item:
+                raise PreflightResponseError(f"{context}: entry {index} missing '{field}'")
+        if not isinstance(item["available"], bool):
+            raise PreflightResponseError(f"{context}: entry {index} 'available' is not a boolean")
+        key = (str(item["region"]), str(item["plan"]))
+        available = item["available"]
+        if key in seen and seen[key] != available:
+            raise PreflightResponseError(
+                f"{context}: conflicting availability records for plan {key[1]!r} in {key[0]!r}"
+            )
+        seen[key] = available
+        validated.append(item)
+    return validated
+
+
 def _paginated(fetch: Fetch, path: str, token: str | None = None) -> list[dict]:
-    """Collects every page of a Linode list endpoint (read-only GETs)."""
+    """Collects every page of a paginated Linode list endpoint (read-only GETs)."""
     results: list[dict] = []
     page = 1
     while True:
         separator = "&" if "?" in path else "?"
         payload = fetch(f"{path}{separator}page={page}", token)
-        results.extend(payload.get("data", []))
+        if not isinstance(payload, dict):
+            raise PreflightResponseError(
+                f"{path}: paginated list endpoints must return an object, not an array"
+            )
+        page_items = parse_list_response(payload, context=f"{path}?page={page}")
+        results.extend(page_items)
         if page >= int(payload.get("pages", 1)):
             return results
         page += 1
@@ -204,8 +264,13 @@ def check_region_deployability(
     try:
         regions = _paginated(fetch, "/regions")
         availability = _paginated(fetch, "/account/availability", token)
-        region_plans = _paginated(fetch, f"/regions/{region}/availability", token)
-    except Exception:
+        # GET /regions/{region}/availability returns a top-level JSON array in
+        # the live API — never a paginated {"data": [...]} wrapper. Parse it
+        # explicitly; malformed responses fail closed rather than looking empty.
+        region_plans = parse_region_availability(
+            fetch(f"/regions/{region}/availability", token), region=region
+        )
+    except (PreflightResponseError, Exception):
         print(
             "BLOCKED: the region deployability lookup failed. Likely causes: "
             "the token lacks account:read_only scope, the token is expired, "

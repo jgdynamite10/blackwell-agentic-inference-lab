@@ -31,7 +31,7 @@ class TestStaticConfiguration:
     def test_provider_and_terraform_versions_are_pinned(self):
         versions = read("versions.tf")
         assert 'version = "4.1.0"' in versions  # exact provider pin
-        assert 'required_version = ">= 1.9.0, < 2.0.0"' in versions
+        assert 'required_version = "= 1.9.8"' in versions
         lock = read(".terraform.lock.hcl")
         assert "linode/linode" in lock and 'version     = "4.1.0"' in lock
 
@@ -201,10 +201,15 @@ class TestBootstrapScripts:
         staged.write_bytes((BOOTSTRAP_DIR / "bootstrap.sh").read_bytes())
         # An env file with a deliberately empty required pin.
         (tmp_path / "bootstrap.env").write_text(
-            'VLLM_IMAGE=""\nMODEL_ARTIFACT="x"\nMODEL_DIR="/tmp/x"\n'
+            'VLLM_IMAGE="img"\nMODEL_ARTIFACT="x"\nMODEL_DIR="/tmp/x"\n'
             'MODEL_DIGEST_MANIFEST="/tmp/x.sha256"\nNVIDIA_DRIVER_PACKAGE="d"\n'
+            'NVIDIA_DRIVER_PACKAGE_VERSION=""\nNVIDIA_CTK_PACKAGE_VERSION="1.0"\n'
+            'NVIDIA_REPO_KEY_URL="https://example/key"\nNVIDIA_REPO_LIST="deb ..."\n'
+            'DOCKER_PACKAGE="docker.io"\nDOCKER_PACKAGE_VERSION=""\n'
             'MIN_DRIVER_BRANCH="580"\nDRIVER_MAX_CUDA_MAJOR="13"\n'
-            'GPU_PROBE_IMAGE="ubuntu"\nSERVED_MODEL_NAME="m"\nSERVING_PORT="8000"\n'
+            'GPU_PROBE_IMAGE="nvcr.io/nvidia/cuda:13.0.0-base-ubuntu24.04"\n'
+            'GPU_PROBE_EXPECTED_GPU="RTX PRO 6000"\n'
+            'SERVED_MODEL_NAME="m"\nSERVING_PORT="8000"\n'
             'WATCHDOG_IDLE_MINUTES="45"\n',
             encoding="utf-8",
         )
@@ -216,7 +221,9 @@ class TestBootstrapScripts:
             check=False,
         )
         assert completed.returncode == 1
-        assert "required pin VLLM_IMAGE is empty" in completed.stdout + completed.stderr
+        assert "required pin NVIDIA_DRIVER_PACKAGE_VERSION is empty" in (
+            completed.stdout + completed.stderr
+        )
 
     def test_fetch_model_refuses_token_arguments(self, bash, tmp_path):
         staged = tmp_path / "fetch-model.sh"
@@ -246,7 +253,9 @@ class TestBootstrapScripts:
         assert "check_container_cuda" in script
         # Probe image is digest-pinned; a mutable tag is never used.
         assert "GPU_PROBE_IMAGE_DIGEST" in script
-        assert 'docker run --rm --gpus all "ubuntu:24.04"' not in script
+        assert "nvidia-smi --query-gpu=name" in script
+        assert "GPU_PROBE_EXPECTED_GPU" in script
+        assert 'docker run --rm --gpus all "${probe_ref}" true' not in script
         # Serving binds to loopback only.
         assert "127.0.0.1:${SERVING_PORT}:8000" in script
 
@@ -267,5 +276,11 @@ class TestBootstrapScripts:
         assert "REQUIRED_CONTAINER_CUDA_VERSION=" in env_example
         assert "GPU_PROBE_IMAGE_DIGEST=" in env_example
         assert "NVIDIA_DRIVER_PACKAGE=" in env_example
+        assert "NVIDIA_DRIVER_PACKAGE_VERSION=" in env_example
+        assert "NVIDIA_CTK_PACKAGE_VERSION=" in env_example
+        assert "NVIDIA_REPO_KEY_URL=" in env_example
+        assert "DOCKER_PACKAGE=" in env_example
+        assert "DOCKER_PACKAGE_VERSION=" in env_example
+        assert "GPU_PROBE_EXPECTED_GPU=" in env_example
         # Digest fields exist but are deliberately unfrozen until the pilot.
         assert 'VLLM_IMAGE_DIGEST=""' in env_example

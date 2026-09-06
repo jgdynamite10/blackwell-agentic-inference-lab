@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from blackwell_lab.cloud import preflight
 from blackwell_lab.cloud.preflight import (
     authenticated_readiness,
@@ -56,7 +58,8 @@ def make_fetch(
         if path.startswith("/linode/types"):
             return {"data": list(types), "pages": 1}
         if path.startswith("/regions/") and "/availability" in path:
-            return {"data": list(region_plans), "pages": 1}
+            # Live API: top-level JSON array, not paginated {"data": [...]}.
+            return list(region_plans)
         if path.startswith("/regions"):
             return {"data": list(regions), "pages": 1}
         if path.startswith("/account/availability"):
@@ -330,3 +333,63 @@ def test_receipt_writer_uses_private_permissions(monkeypatch, tmp_path):
     target = tmp_path / "private" / "preflight-receipts" / name
     assert stat.S_IMODE(os.stat(target).st_mode) == 0o600
     assert stat.S_IMODE(os.stat(target.parent).st_mode) == 0o700
+
+
+class TestRegionAvailabilityParsing:
+    def test_top_level_array_is_the_real_response_shape(self):
+        payload = [{"region": "us-ord", "plan": "g2-rtxpro6000-x1", "available": True}]
+        parsed = preflight.parse_region_availability(payload, region="us-ord")
+        assert parsed == payload
+
+    def test_paginated_object_is_also_supported(self):
+        payload = {"data": [{"region": "us-ord", "plan": "g2-rtxpro6000-x1", "available": True}]}
+        parsed = preflight.parse_region_availability(payload, region="us-ord")
+        assert len(parsed) == 1
+
+    def test_malformed_dictionary_is_not_treated_as_empty(self):
+        with pytest.raises(preflight.PreflightResponseError, match="expected a top-level array"):
+            preflight.parse_region_availability({"unexpected": []}, region="us-ord")
+
+    def test_string_payload_fails_closed(self):
+        with pytest.raises(preflight.PreflightResponseError):
+            preflight.parse_region_availability("not-json-list", region="us-ord")  # type: ignore[arg-type]
+
+    def test_null_payload_fails_closed(self):
+        with pytest.raises(preflight.PreflightResponseError):
+            preflight.parse_region_availability(None, region="us-ord")  # type: ignore[arg-type]
+
+    def test_missing_fields_fail_closed(self):
+        with pytest.raises(preflight.PreflightResponseError, match="missing 'available'"):
+            preflight.parse_region_availability(
+                [{"region": "us-ord", "plan": "x"}], region="us-ord"
+            )
+
+    def test_non_boolean_available_fails_closed(self):
+        with pytest.raises(preflight.PreflightResponseError, match="not a boolean"):
+            preflight.parse_region_availability(
+                [{"region": "us-ord", "plan": "x", "available": "yes"}], region="us-ord"
+            )
+
+    def test_duplicate_conflicting_records_fail_closed(self):
+        payload = [
+            {"region": "us-ord", "plan": "g2-rtxpro6000-x1", "available": True},
+            {"region": "us-ord", "plan": "g2-rtxpro6000-x1", "available": False},
+        ]
+        with pytest.raises(preflight.PreflightResponseError, match="conflicting availability"):
+            preflight.parse_region_availability(payload, region="us-ord")
+
+    def test_malformed_region_availability_makes_deployability_incomplete(self, capsys):
+        def fetch(path, token=None):
+            if path.startswith("/regions/") and "/availability" in path:
+                return {"not": "an array"}
+            if path.startswith("/linode/types"):
+                return {"data": [PLAN_1GPU], "pages": 1}
+            if path.startswith("/regions"):
+                return {"data": [REGION_ORD], "pages": 1}
+            if path.startswith("/account/availability"):
+                return {"data": [], "pages": 1}
+            raise AssertionError(path)
+
+        decision = check_region_deployability("t", "us-ord", PLAN_1GPU, fetch)
+        assert decision["completed"] is False
+        assert decision["plan_deployable"] is False

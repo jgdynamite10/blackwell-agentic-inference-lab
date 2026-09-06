@@ -3,8 +3,8 @@
 # change affects a frozen baseline).
 
 terraform {
-  # Terraform CLI: any 1.9+ release of the 1.x series.
-  required_version = ">= 1.9.0, < 2.0.0"
+  # Terraform CLI: exactly 1.9.8 (matches CI and lifecycle validation).
+  required_version = "= 1.9.8"
 
   # State lives OUTSIDE the Git working tree: the lifecycle wrapper
   # (blackwell-cloud init/plan/apply) configures this local backend with an

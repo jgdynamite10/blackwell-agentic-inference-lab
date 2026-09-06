@@ -59,6 +59,9 @@ from pathlib import Path
 from blackwell_lab.cloud.artifacts import write_private_json, write_private_text
 from blackwell_lab.cloud.preflight import Fetch
 
+#: Exact Terraform CLI version required for every lifecycle operation.
+REQUIRED_TERRAFORM_VERSION = "1.9.8"
+
 #: Every resource this project creates carries this tag.
 PROJECT_TAG = "blackwell-lab"
 
@@ -303,9 +306,16 @@ def _terraform_version(tf_dir: Path, runner: CommandRunner, env: dict[str, str])
     if result.returncode != 0:
         raise LifecycleError("terraform version could not be determined")
     try:
-        return str(json.loads(result.stdout)["terraform_version"])
+        version = str(json.loads(result.stdout)["terraform_version"])
     except (json.JSONDecodeError, KeyError) as exc:
         raise LifecycleError("terraform version output was unparseable") from exc
+    if version != REQUIRED_TERRAFORM_VERSION:
+        raise LifecycleError(
+            f"terraform CLI version must be exactly {REQUIRED_TERRAFORM_VERSION}; "
+            f"found {version}. Install the pinned release documented in "
+            "infra/akamai/README.md"
+        )
+    return version
 
 
 def _tf_env(paths: LifecyclePaths) -> dict[str, str]:
@@ -349,10 +359,12 @@ def init_backend(
             "terraform init failed (backend or provider installation); "
             "inspect the local terraform output"
         )
+    version = _terraform_version(directory, runner, _tf_env(paths))
     return {
         "initialized": True,
         "run_tag": run_tag,
         "external_state": True,
+        "terraform_version": version,
         "note": "state, plans, and TF_DATA_DIR live in the run's external lifecycle directory",
     }
 
@@ -403,7 +415,7 @@ def _enforce_stage_rules(stage: str, classified: list[dict]) -> None:
         blocked = [
             c
             for c in classified
-            if c["classification"] in ("delete", "replace", "unknown")
+            if c["classification"] in ("delete", "replace", "update", "unknown")
             or (
                 c["classification"] not in ("no-op", "read")
                 and c["address"] not in EXPECTED_RESOURCE_ADDRESSES
@@ -412,10 +424,10 @@ def _enforce_stage_rules(stage: str, classified: list[dict]) -> None:
         if blocked:
             addresses = ", ".join(sorted(c["address"] or "<unknown>" for c in blocked))
             raise LifecycleError(
-                "the apply-stage plan contains delete, replace, or unrelated "
+                "the apply-stage plan contains delete, replace, update, or unrelated "
                 f"actions ({addresses}); failing closed. Review the redacted "
-                "plan text; a destructive change requires the separate destroy "
-                "workflow."
+                "plan text; maintenance/update workflows are not authorized and "
+                "destructive changes require the separate destroy workflow."
             )
     elif stage == "destroy":
         wrong = [c for c in classified if c["classification"] not in ("delete", "no-op", "read")]
@@ -682,7 +694,12 @@ def reconcile(
         "untracked_billable": [],
         "missing_from_provider": [],
     }
-    if fetch is not None and token:
+    if fetch is None or not token:
+        reconciliation["provider_note"] = (
+            "the provider API was not checked (no read-only LINODE_TOKEN); "
+            "reconciliation cannot be marked clean"
+        )
+    else:
         from blackwell_lab.cloud.preflight import _paginated
 
         try:
@@ -707,6 +724,7 @@ def reconcile(
     incomplete = [r["address"] for r in resources if not r["provider_id"]]
     clean = (
         state_readable
+        and reconciliation["provider_checked"]
         and not incomplete
         and not reconciliation["untracked_billable"]
         and not reconciliation["missing_from_provider"]
@@ -734,6 +752,19 @@ def reconcile(
                 "locally (terraform state inspection, provider console), then "
                 "re-run reconciliation. This record preserves the pending "
                 "operation context."
+            ),
+            "pending_operation": pending,
+        }
+    elif not reconciliation["provider_checked"]:
+        pending: dict = {}
+        if paths.pending_path.is_file():
+            with contextlib.suppress(OSError, json.JSONDecodeError):
+                pending = json.loads(paths.pending_path.read_text(encoding="utf-8"))
+        ledger["recovery"] = {
+            "note": (
+                "the provider API was not successfully checked; reconciliation "
+                "cannot be marked clean. Set a read-only LINODE_TOKEN locally "
+                "and re-run reconciliation before any pilot execution."
             ),
             "pending_operation": pending,
         }
@@ -835,6 +866,26 @@ def load_ledger(ledger_path: Path) -> dict:
     return ledger
 
 
+def pilot_blockers(ledger: dict, *, pending: bool) -> list[str]:
+    """Human-readable reasons the pilot must not run; empty when all gates pass."""
+    blockers: list[str] = []
+    if pending:
+        blockers.append("a pending lifecycle operation exists")
+    if not ledger.get("reconciled"):
+        blockers.append("the ledger is not cleanly reconciled")
+    reconciliation = ledger.get("reconciliation") or {}
+    if not reconciliation.get("provider_checked"):
+        blockers.append("the provider API has not been successfully checked")
+    resources = ledger.get("resources") or []
+    instances = [r for r in resources if r.get("type") == "linode_instance"]
+    firewalls = [r for r in resources if r.get("type") == "linode_firewall"]
+    if len(instances) != 1:
+        blockers.append(f"expected exactly one instance in the ledger, found {len(instances)}")
+    if len(firewalls) != 1:
+        blockers.append(f"expected exactly one firewall in the ledger, found {len(firewalls)}")
+    return blockers
+
+
 def _verify_resource_identity(
     ledger_resource: dict,
     state_resource: dict | None,
@@ -875,6 +926,12 @@ def _verify_resource_identity(
             api_tags = set(provider_view.get("tags") or [])
             if PROJECT_TAG not in api_tags or f"run:{run_tag}" not in api_tags:
                 mismatches.append(f"{address}: expected tags missing in the API observation")
+            if ledger_resource.get("type") == "linode_instance":
+                api_region = provider_view.get("region")
+                if api_region and api_region != state_resource.get("region"):
+                    mismatches.append(f"{address}: region differs from the API observation")
+                if api_region and api_region != ledger_resource.get("region"):
+                    mismatches.append(f"{address}: region differs between ledger and API")
     return mismatches
 
 
@@ -909,6 +966,11 @@ def verify_teardown_identity(
             "ledger run_tag does not match the requested run: refusing to "
             "target another run's resources"
         )
+    if not token or fetch is None:
+        raise LifecycleError(
+            "read-only provider verification is required before teardown; "
+            "set a read-only LINODE_TOKEN locally and retry"
+        )
     directory = tf_dir or default_terraform_dir()
     show = runner(["terraform", "show", "-json"], directory, _tf_env(paths))
     if show.returncode != 0:
@@ -920,15 +982,14 @@ def verify_teardown_identity(
     except json.JSONDecodeError as exc:
         raise LifecycleError("the current state rendering was unparseable") from exc
 
-    provider_checked = fetch is not None and bool(token)
+    provider_checked = True
     mismatches: list[str] = []
     for resource in ledger["resources"]:
         provider_view: dict | None = None
-        if provider_checked:
-            try:
-                provider_view = fetch(_provider_view_path(resource), token)  # type: ignore[misc]
-            except Exception:
-                provider_view = None
+        try:
+            provider_view = fetch(_provider_view_path(resource), token)
+        except Exception:
+            provider_view = None
         mismatches.extend(
             _verify_resource_identity(
                 resource,
@@ -1050,6 +1111,12 @@ def destroy(
     refuse_hosted_execution(environ)
     directory = tf_dir or default_terraform_dir()
 
+    if not token or fetch is None:
+        raise LifecycleError(
+            "read-only provider verification is required before destroy; "
+            "set a read-only LINODE_TOKEN locally and retry"
+        )
+
     verify_teardown_identity(
         run_tag, ledger, paths=paths, tf_dir=directory, runner=runner, fetch=fetch, token=token
     )
@@ -1083,13 +1150,6 @@ def destroy(
             "the teardown and the orphan report."
         )
 
-    if not token:
-        raise LifecycleError(
-            "destroy executed, but deletion CANNOT BE CONFIRMED without a "
-            "read-only token: billing may continue until deletion is "
-            "confirmed. Set a read-only LINODE_TOKEN locally and re-run the "
-            "confirmation; do not treat this teardown as complete."
-        )
     confirmation = confirm_deletion(
         run_tag,
         ledger,

@@ -62,9 +62,16 @@ require_pin MODEL_ARTIFACT "${MODEL_ARTIFACT:-}"
 require_pin MODEL_DIR "${MODEL_DIR:-}"
 require_pin MODEL_DIGEST_MANIFEST "${MODEL_DIGEST_MANIFEST:-}"
 require_pin NVIDIA_DRIVER_PACKAGE "${NVIDIA_DRIVER_PACKAGE:-}"
+require_pin NVIDIA_DRIVER_PACKAGE_VERSION "${NVIDIA_DRIVER_PACKAGE_VERSION:-}"
+require_pin NVIDIA_CTK_PACKAGE_VERSION "${NVIDIA_CTK_PACKAGE_VERSION:-}"
+require_pin NVIDIA_REPO_KEY_URL "${NVIDIA_REPO_KEY_URL:-}"
+require_pin NVIDIA_REPO_LIST "${NVIDIA_REPO_LIST:-}"
+require_pin DOCKER_PACKAGE "${DOCKER_PACKAGE:-}"
+require_pin DOCKER_PACKAGE_VERSION "${DOCKER_PACKAGE_VERSION:-}"
 require_pin MIN_DRIVER_BRANCH "${MIN_DRIVER_BRANCH:-}"
 require_pin DRIVER_MAX_CUDA_MAJOR "${DRIVER_MAX_CUDA_MAJOR:-}"
 require_pin GPU_PROBE_IMAGE "${GPU_PROBE_IMAGE:-}"
+require_pin GPU_PROBE_EXPECTED_GPU "${GPU_PROBE_EXPECTED_GPU:-}"
 require_pin SERVED_MODEL_NAME "${SERVED_MODEL_NAME:-}"
 require_pin SERVING_PORT "${SERVING_PORT:-}"
 require_pin WATCHDOG_IDLE_MINUTES "${WATCHDOG_IDLE_MINUTES:-}"
@@ -91,22 +98,18 @@ install_gpu_stack() {
     log "GPU stack packages already installed (marker present)"
     return
   fi
-  local driver_pkg="${NVIDIA_DRIVER_PACKAGE}"
-  if [ -n "${NVIDIA_DRIVER_PACKAGE_VERSION:-}" ]; then
-    driver_pkg="${NVIDIA_DRIVER_PACKAGE}=${NVIDIA_DRIVER_PACKAGE_VERSION}"
-  fi
-  local ctk_pkg="nvidia-container-toolkit"
-  if [ -n "${NVIDIA_CTK_PACKAGE_VERSION:-}" ]; then
-    ctk_pkg="nvidia-container-toolkit=${NVIDIA_CTK_PACKAGE_VERSION}"
-  fi
+  local driver_pkg="${NVIDIA_DRIVER_PACKAGE}=${NVIDIA_DRIVER_PACKAGE_VERSION}"
+  local ctk_pkg="nvidia-container-toolkit=${NVIDIA_CTK_PACKAGE_VERSION}"
   log "installing pinned GPU stack: ${driver_pkg}, ${ctk_pkg}"
   apt-get update -q
+  # One-time NVIDIA apt repository material (pinned URLs in bootstrap.env).
+  install -d -m 0755 /usr/share/keyrings
+  curl -fsSL "${NVIDIA_REPO_KEY_URL}" | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  echo "${NVIDIA_REPO_LIST}" > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  apt-get update -q
   DEBIAN_FRONTEND=noninteractive apt-get install -q -y "${driver_pkg}"
-  # The NVIDIA Container Toolkit apt repository must be configured per
-  # NVIDIA's install guide before this step (one-time operator action,
-  # documented in infra/akamai/README.md). No token is involved.
   DEBIAN_FRONTEND=noninteractive apt-get install -q -y "${ctk_pkg}" \
-    || fail "nvidia-container-toolkit install failed: configure NVIDIA's apt repository first (see README)"
+    || fail "nvidia-container-toolkit install failed: verify NVIDIA repo pins in bootstrap.env"
   mark_done gpu-stack-installed
   if ! nvidia-smi >/dev/null 2>&1; then
     log "GPU stack installed but the driver is not active yet."
@@ -151,11 +154,12 @@ install_container_runtime() {
     log "container runtime already configured (marker present)"
     return
   fi
-  command -v docker >/dev/null 2>&1 || {
-    log "installing docker from Ubuntu 24.04 repositories (pinned distro packages)"
+  if ! command -v docker >/dev/null 2>&1; then
+    log "installing pinned docker runtime: ${DOCKER_PACKAGE}=${DOCKER_PACKAGE_VERSION}"
     apt-get update -q
-    DEBIAN_FRONTEND=noninteractive apt-get install -q -y docker.io
-  }
+    DEBIAN_FRONTEND=noninteractive apt-get install -q -y \
+      "${DOCKER_PACKAGE}=${DOCKER_PACKAGE_VERSION}"
+  fi
   command -v nvidia-ctk >/dev/null 2>&1 \
     || fail "nvidia-ctk not found: install_gpu_stack must complete (and the host reboot) first"
   nvidia-ctk runtime configure --runtime=docker
@@ -166,10 +170,20 @@ install_container_runtime() {
     *) fail "GPU_PROBE_IMAGE_DIGEST must be an immutable sha256:... digest (mutable tags are never pulled)" ;;
   esac
   local probe_ref="${GPU_PROBE_IMAGE%%@*}@${GPU_PROBE_IMAGE_DIGEST}"
-  docker run --rm --gpus all "${probe_ref}" true \
-    || fail "docker cannot access the GPU through the NVIDIA runtime (probe image ${probe_ref})"
+  local probe_gpu_name probe_gpu_count
+  probe_gpu_name="$(docker run --rm --gpus all "${probe_ref}" \
+    nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | tr -d '[:space:]')" \
+    || fail "digest-pinned CUDA probe could not run nvidia-smi inside the container"
+  probe_gpu_count="$(docker run --rm --gpus all "${probe_ref}" \
+    nvidia-smi --list-gpus | wc -l | tr -d '[:space:]')"
+  [ "${probe_gpu_count}" = "1" ] \
+    || fail "GPU probe expected exactly 1 GPU, found ${probe_gpu_count}"
+  case "${probe_gpu_name}" in
+    *"${GPU_PROBE_EXPECTED_GPU}"*) ;;
+    *) fail "GPU probe observed '${probe_gpu_name}', expected ${GPU_PROBE_EXPECTED_GPU}" ;;
+  esac
   mark_done container-runtime
-  log "container runtime ready (docker + nvidia-container-toolkit; digest-pinned probe passed)"
+  log "container runtime ready (docker + nvidia-container-toolkit; digest-pinned CUDA probe passed: ${probe_gpu_name})"
 }
 
 # --- step 5: serving image by immutable digest ---------------------------------

@@ -93,6 +93,12 @@ def _check_terraform_files() -> dict:
     missing = [name for name in required if not (directory / name).is_file()]
     if missing:
         return {"status": "failed", "detail": f"missing terraform files: {missing}"}
+    versions = (directory / "versions.tf").read_text(encoding="utf-8")
+    if 'required_version = "= 1.9.8"' not in versions:
+        return {
+            "status": "failed",
+            "detail": "versions.tf must pin Terraform CLI exactly 1.9.8",
+        }
     gitignore = (directory / ".gitignore").read_text(encoding="utf-8")
     for pattern in ("*.tfstate", "*.tfvars", ".terraform"):
         if pattern not in gitignore:
@@ -193,11 +199,18 @@ def _check_bootstrap_pins() -> dict:
         "MODEL_REVISION",
         "MODEL_DIGEST_MANIFEST",
         "NVIDIA_DRIVER_PACKAGE",
+        "NVIDIA_DRIVER_PACKAGE_VERSION",
+        "NVIDIA_CTK_PACKAGE_VERSION",
+        "NVIDIA_REPO_KEY_URL",
+        "NVIDIA_REPO_LIST",
+        "DOCKER_PACKAGE",
+        "DOCKER_PACKAGE_VERSION",
         "MIN_DRIVER_BRANCH",
         "DRIVER_MAX_CUDA_MAJOR",
         "REQUIRED_CONTAINER_CUDA_VERSION",
         "GPU_PROBE_IMAGE",
         "GPU_PROBE_IMAGE_DIGEST",
+        "GPU_PROBE_EXPECTED_GPU",
     )
     missing = [key for key in required_keys if f"{key}=" not in content]
     if missing:
@@ -384,11 +397,10 @@ def cmd_teardown_plan(args: argparse.Namespace) -> int:
                 "redacted_plan_file": paths.plan_text_path("destroy").name,
                 "destroy_approval_phrase": approval,
                 "note": (
-                    "Identity verification passed (ledger vs state"
-                    + (" vs provider API" if token else "; provider API not checked — no token")
-                    + "). The saved destroy plan targets ONLY the ledger's "
-                    "recorded resources. Review the redacted plan, then "
-                    "destroy with the exact approval phrase above."
+                    "Identity verification passed (ledger vs state vs provider API). "
+                    "The saved destroy plan targets ONLY the ledger's recorded "
+                    "resources. Review the redacted plan, then destroy with the "
+                    "exact approval phrase above."
                 ),
             },
             indent=2,
@@ -536,46 +548,34 @@ def cmd_pilot(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Lifecycle gate: the pilot is blocked until reconciliation is clean.
+    # Lifecycle gate: the pilot is blocked until reconciliation is fully clean.
     paths = lifecycle.lifecycle_paths(results_dir, args.run_tag)
-    if lifecycle.has_pending(paths):
+    if not paths.ledger_path.is_file():
         print(
-            "BLOCKED: a pending lifecycle operation exists for this run. "
-            "Run 'blackwell-cloud reconcile' until it reports clean before "
-            "any pilot execution.",
+            "BLOCKED: the resource ledger is missing for this run. Run "
+            "'blackwell-cloud init', apply, and 'blackwell-cloud reconcile' "
+            "before any pilot execution.",
             file=sys.stderr,
         )
         return 1
     ledger = lifecycle.load_ledger(paths.ledger_path)
-    if not ledger.get("reconciled"):
+    blockers = lifecycle.pilot_blockers(ledger, pending=lifecycle.has_pending(paths))
+    if blockers:
         print(
-            "BLOCKED: the run's ledger is not cleanly reconciled. Run "
-            "'blackwell-cloud reconcile' and resolve any untracked or "
-            "possibly created resources first.",
+            "BLOCKED: the pilot cannot run until every lifecycle gate passes. "
+            + "; ".join(blockers)
+            + ". Run 'blackwell-cloud reconcile' with a read-only LINODE_TOKEN "
+            "until reconciliation reports clean.",
             file=sys.stderr,
         )
         return 1
 
-    # Live provenance: observed immediately before the cells; configuration
-    # values are expectations, never manifest facts.
     endpoint = config["endpoint"]
-    observed = provenance.verify_live_provenance(
-        run_tag=args.run_tag,
-        approved=config,
-        ledger=ledger,
-        artifact_dir=Path(config["model_verification"]["artifact_dir"]),
-        digest_manifest=Path(config["model_verification"]["digest_manifest"]),
-        serving_base_url=endpoint["base_url"],
-    )
-
     client = OpenAICompatibleClient(
         endpoint["base_url"],
         endpoint["model"],
         api_key_env=endpoint.get("api_key_env"),
     )
-    host = {**observed.host_facts, **observed.gpu_facts}
-    model = dict(config["model"])
-    model["artifact_hash"] = observed.model_artifact_hash
 
     lifecycle.record_session_event(paths, "pilot_started", {"run_label": run_label})
     cells = config.get("cells") or [
@@ -584,6 +584,19 @@ def cmd_pilot(args: argparse.Namespace) -> int:
     ]
     summaries = []
     for index, cell in enumerate(cells, start=1):
+        # Live provenance: re-observed immediately before EVERY cell; the first
+        # cell's observations are never reused for later cells.
+        observed = provenance.verify_live_provenance(
+            run_tag=args.run_tag,
+            approved=config,
+            ledger=ledger,
+            artifact_dir=Path(config["model_verification"]["artifact_dir"]),
+            digest_manifest=Path(config["model_verification"]["digest_manifest"]),
+            serving_base_url=endpoint["base_url"],
+        )
+        host = {**observed.host_facts, **observed.gpu_facts}
+        model = dict(config["model"])
+        model["artifact_hash"] = observed.model_artifact_hash
         spec = realbench.RealRunSpec(
             profile_name=cell["profile"],
             concurrency=cell["concurrency"],
