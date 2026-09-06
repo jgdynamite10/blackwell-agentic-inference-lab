@@ -259,6 +259,43 @@ class TestBootstrapScripts:
         # Serving binds to loopback only.
         assert "127.0.0.1:${SERVING_PORT}:8000" in script
 
+    def test_bootstrap_normalizes_gpu_probe_names_identically(self):
+        script = (BOOTSTRAP_DIR / "bootstrap.sh").read_text(encoding="utf-8")
+        assert "normalize_gpu_match_string" in script
+        assert "gpu_probe_name_matches" in script
+        assert "tr -d '[:space:]'" in script
+
+    def test_gpu_probe_name_matching_accepts_rtx_pro_6000_and_rejects_others(self, bash, tmp_path):
+        test_sh = tmp_path / "gpu_probe_match.sh"
+        test_sh.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+normalize_gpu_match_string() {
+  printf '%s' "$1" | tr -d '[:space:]'
+}
+gpu_probe_name_matches() {
+  local observed="$1" expected="$2"
+  case "$(normalize_gpu_match_string "${observed}")" in
+    *"$(normalize_gpu_match_string "${expected}")"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+gpu_probe_name_matches "NVIDIA RTX PRO 6000 Blackwell Server Edition" "RTX PRO 6000"
+gpu_probe_name_matches "NVIDIA A100 PCIe" "RTX PRO 6000" && exit 1
+exit 0
+""",
+            encoding="utf-8",
+        )
+        test_sh.chmod(0o755)
+        completed = subprocess.run(
+            [bash, str(test_sh)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+
     def test_watchdog_documents_that_it_is_not_a_billing_control(self):
         watchdog = (BOOTSTRAP_DIR / "watchdog.sh").read_text(encoding="utf-8")
         assert "NOT A BILLING CONTROL" in watchdog

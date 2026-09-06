@@ -149,6 +149,18 @@ check_gpu_stack() {
 
 # --- step 4: container runtime (docker + NVIDIA runtime + digest-pinned probe) ---
 
+normalize_gpu_match_string() {
+  printf '%s' "$1" | tr -d '[:space:]'
+}
+
+gpu_probe_name_matches() {
+  local observed="$1" expected="$2"
+  case "$(normalize_gpu_match_string "${observed}")" in
+    *"$(normalize_gpu_match_string "${expected}")"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 install_container_runtime() {
   if step_done container-runtime; then
     log "container runtime already configured (marker present)"
@@ -172,16 +184,15 @@ install_container_runtime() {
   local probe_ref="${GPU_PROBE_IMAGE%%@*}@${GPU_PROBE_IMAGE_DIGEST}"
   local probe_gpu_name probe_gpu_count
   probe_gpu_name="$(docker run --rm --gpus all "${probe_ref}" \
-    nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | tr -d '[:space:]')" \
+    nvidia-smi --query-gpu=name --format=csv,noheader | head -n1)" \
     || fail "digest-pinned CUDA probe could not run nvidia-smi inside the container"
   probe_gpu_count="$(docker run --rm --gpus all "${probe_ref}" \
     nvidia-smi --list-gpus | wc -l | tr -d '[:space:]')"
   [ "${probe_gpu_count}" = "1" ] \
     || fail "GPU probe expected exactly 1 GPU, found ${probe_gpu_count}"
-  case "${probe_gpu_name}" in
-    *"${GPU_PROBE_EXPECTED_GPU}"*) ;;
-    *) fail "GPU probe observed '${probe_gpu_name}', expected ${GPU_PROBE_EXPECTED_GPU}" ;;
-  esac
+  if ! gpu_probe_name_matches "${probe_gpu_name}" "${GPU_PROBE_EXPECTED_GPU}"; then
+    fail "GPU probe observed '${probe_gpu_name}', expected ${GPU_PROBE_EXPECTED_GPU}"
+  fi
   mark_done container-runtime
   log "container runtime ready (docker + nvidia-container-toolkit; digest-pinned CUDA probe passed: ${probe_gpu_name})"
 }

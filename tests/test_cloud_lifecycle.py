@@ -465,6 +465,34 @@ class TestApply:
         # Clean reconciliation clears the pending record.
         assert not paths.pending_path.is_file()
 
+    def test_apply_with_provider_lookup_failure_writes_dirty_ledger_and_blocks_pilot(
+        self, paths, tf_dir
+    ):
+        meta, runner = make_plan(paths, tf_dir)
+
+        def failing_fetch(path, token=None):
+            raise RuntimeError("provider api unavailable account-id-999")
+
+        with pytest.raises(LifecycleError, match="NOT clean"):
+            lifecycle.apply(
+                RUN_TAG,
+                apply_phrase(meta),
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                environ={},
+                fetch=failing_fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert ledger["reconciled"] is False
+        assert ledger["reconciliation"]["provider_checked"] is False
+        assert ledger["reconciliation"]["provider_lookup_failed"] is True
+        assert "recovery" in ledger
+        assert "account-id-999" not in json.dumps(ledger)
+        assert lifecycle.pilot_blockers(ledger, pending=True)
+
     def test_failed_apply_still_reconciles_and_keeps_recovery_records(self, paths, tf_dir):
         meta, _ = make_plan(paths, tf_dir)
         runner = FakeRunner(apply_rc=1, show_state=state_json([INSTANCE_STATE]))
@@ -547,6 +575,31 @@ class TestReconcile:
         ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
         assert ledger["reconciled"] is False
         assert "recovery" in ledger
+
+    def test_provider_lookup_failure_writes_dirty_ledger_and_retains_pending(self, paths, tf_dir):
+        lifecycle.write_pending(paths, run_tag=RUN_TAG, operation="apply", plan_sha256="x")
+
+        def failing_fetch(path, token=None):
+            raise RuntimeError("provider api unavailable account-id-999")
+
+        report = lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(show_state=state_json()),
+            fetch=failing_fetch,
+            token="t",
+        )
+        assert report["reconciled"] is False
+        assert report["provider_checked"] is False
+        assert paths.pending_path.is_file()
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert ledger["reconciled"] is False
+        assert ledger["reconciliation"]["provider_lookup_failed"] is True
+        assert "recovery" in ledger
+        dumped = json.dumps(ledger)
+        assert "account-id-999" not in dumped
+        assert lifecycle.pilot_blockers(ledger, pending=True)
 
     def test_report_is_sanitized_no_provider_ids(self, paths, tf_dir):
         report = lifecycle.reconcile(

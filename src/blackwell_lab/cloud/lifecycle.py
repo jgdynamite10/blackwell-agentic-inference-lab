@@ -706,20 +706,22 @@ def reconcile(
             instances = _paginated(fetch, "/linode/instances", token)
             firewalls = _paginated(fetch, "/networking/firewalls", token)
         except Exception:
-            raise LifecycleError(
-                "the read-only provider reconciliation sweep failed (token "
-                "scope, expiry, or connectivity); no error payload is echoed"
-            ) from None
-        reconciliation["provider_checked"] = True
-        run_tag_label = f"run:{run_tag}"
-        provider_ids = {
-            str(item.get("id", ""))
-            for item in [*instances, *firewalls]
-            if run_tag_label in (item.get("tags") or [])
-        }
-        state_ids = {r["provider_id"] for r in resources if r["provider_id"]}
-        reconciliation["untracked_billable"] = sorted(provider_ids - state_ids)
-        reconciliation["missing_from_provider"] = sorted(state_ids - provider_ids)
+            reconciliation["provider_lookup_failed"] = True
+            reconciliation["provider_note"] = (
+                "the provider reconciliation sweep failed (token scope, expiry, "
+                "or connectivity); reconciliation cannot be marked clean"
+            )
+        else:
+            reconciliation["provider_checked"] = True
+            run_tag_label = f"run:{run_tag}"
+            provider_ids = {
+                str(item.get("id", ""))
+                for item in [*instances, *firewalls]
+                if run_tag_label in (item.get("tags") or [])
+            }
+            state_ids = {r["provider_id"] for r in resources if r["provider_id"]}
+            reconciliation["untracked_billable"] = sorted(provider_ids - state_ids)
+            reconciliation["missing_from_provider"] = sorted(state_ids - provider_ids)
 
     incomplete = [r["address"] for r in resources if not r["provider_id"]]
     clean = (
@@ -760,12 +762,21 @@ def reconcile(
         if paths.pending_path.is_file():
             with contextlib.suppress(OSError, json.JSONDecodeError):
                 pending = json.loads(paths.pending_path.read_text(encoding="utf-8"))
-        ledger["recovery"] = {
-            "note": (
+        if reconciliation.get("provider_lookup_failed"):
+            recovery_note = (
+                "the provider reconciliation sweep failed after Terraform state "
+                "was read. Resources MAY have been created and MAY be billing. "
+                "Fix token scope, expiry, or connectivity locally, then re-run "
+                "reconciliation before any pilot execution."
+            )
+        else:
+            recovery_note = (
                 "the provider API was not successfully checked; reconciliation "
-                "cannot be marked clean. Set a read-only LINODE_TOKEN locally "
-                "and re-run reconciliation before any pilot execution."
-            ),
+                "cannot be marked clean. Set LINODE_TOKEN locally and re-run "
+                "reconciliation before any pilot execution."
+            )
+        ledger["recovery"] = {
+            "note": recovery_note,
             "pending_operation": pending,
         }
     write_private_json(paths.ledger_path, ledger)
