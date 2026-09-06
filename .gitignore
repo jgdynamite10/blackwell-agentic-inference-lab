@@ -56,9 +56,10 @@ override.tf.json
 .docker/
 
 # --- Benchmark artifacts and experimental results ---
-# Results stay private until validated, reviewed, and intentionally released.
-# Only the placeholder README is tracked; genuine results are written outside
-# the repository entirely (LAB_RESULTS_DIR) — .gitignore is not the boundary.
+# The repository's source is public, but genuine results stay private and
+# external: they are written outside the repository entirely (LAB_RESULTS_DIR)
+# and enter Git only via an explicitly approved sanitized release.
+# Only the placeholder README is tracked — .gitignore is not the boundary.
 results/*
 !results/README.md
 runs/

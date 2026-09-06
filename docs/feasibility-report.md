@@ -192,11 +192,12 @@ during the Phase 3 baseline and the Phase 6 AWS preflight.]**
   retrieved 2026-09-05). The license permits redistribution of
   quantized/derived artifacts.
 - **Important distinction:** OpenMDW-1.1 governs the **third-party model
-  artifacts only**. It says nothing about this repository, whose own
-  licensing and publication rights are under review — no license is granted
-  for this project's code, documentation, or data, and any release of
-  experiment artifacts would still require the owner's explicit
-  authorization regardless of what the model license permits.
+  artifacts only**. It says nothing about this repository, whose original
+  source code and documentation are licensed under Apache-2.0 (see
+  [../LICENSE](../LICENSE)). Genuine benchmark datasets and results are not
+  included in the Apache-2.0 grant, and any release of experiment artifacts
+  still requires the owner's explicit approval regardless of what the model
+  license permits.
 - **[VERIFIED]** NVIDIA's model cards list supported hardware as Blackwell
   (DGX Spark/GB10, GB200, GeForce RTX 5090), Hopper (H100/H200), and Ampere
   via W4A16. Recommended sampling: temperature 1.0, top_p 0.95. Reasoning mode
@@ -306,7 +307,7 @@ verification** in the owner's local environment before budgeting decisions.
 
 | Phase | Basis | Estimate |
 | --- | --- | --- |
-| Phase 2 (synthetic workload) | No GPU; local dev + GitHub Actions CI (private-repo minutes; small usage) | **≈ $0 cloud** |
+| Phase 2 (synthetic workload) | No GPU; local dev + GitHub Actions CI (small usage; Actions minutes are free once the repository is public) | **≈ $0 cloud** |
 | Phase 3 (Akamai baseline) | ~40–60 GPU-h × $2.50/h officially stated starting price (rate **unresolved pending account-level quote**; higher in EU/Singapore/Jakarta) + storage/egress | **≈ $110–$170** |
 | Phase 4 (optimization) | ~60–100 GPU-h × $2.50/h (same pricing caveat; more cells: precisions × serving paths) | **≈ $160–$270** |
 | Phase 5 (Google Cloud) | ~40–60 GPU-h × ~$4.50/h + Hyperdisk/local SSD | **≈ $190–$290** |
@@ -371,16 +372,19 @@ explicit local owner approval; and post-teardown verification must confirm
 that **no project-created billable resources remain** on the account. No
 teardown tooling is implemented or executed in Phase 1.
 
-## 10. Organizational approvals
+## 10. Ownership and publication approvals
 
-- **[UNRESOLVED — owner action]** Whether organizational approval is needed to
-  use company resources (the Akamai account) and to publish comparative
-  findings involving Akamai Cloud, Google Cloud, and AWS. Publishing
-  cross-provider benchmark comparisons may implicate provider terms of
-  service and employer policy; obtain a written go/no-go before Phase 7. The
-  repository's publication-governance process
-  ([publication-governance.md](publication-governance.md)) blocks any release
-  until this approval is recorded.
+- **[RESOLVED — owner decision D-0007, 2026-09-06]** The owner has determined
+  that this project is independently owned and that no external publication
+  authorization is required. The repository's source and methodology are
+  published under Apache-2.0 (see [decision-log.md](decision-log.md)).
+- **[STILL REQUIRED]** Every release of genuine benchmark results remains
+  gated by the class B process in
+  [publication-governance.md](publication-governance.md): separate explicit
+  owner approval identifying the exact files and scope. Before Phase 7
+  publication of cross-provider comparisons, reverify that the planned
+  content complies with each provider's terms of service, and keep every
+  claim within the evidence.
 
 ## 11. Summary of unresolved questions (blockers and owner actions)
 
@@ -394,7 +398,8 @@ teardown tooling is implemented or executed in Phase 1.
 4. AWS G-instance vCPU quota and G7e regional capacity.
 5. Whether the NIM path requires a Production Branch model / NVIDIA AI
    Enterprise license for this research.
-6. Organizational approval for company-resource use and comparative
-   publication.
+6. ~~Organizational approval for company-resource use and comparative
+   publication~~ — resolved by owner decision D-0007 (independent ownership;
+   see section 10). Result releases still require per-release owner approval.
 7. Empirical validation (Phase 3) of: Nemotron 3.5 Lightning on RTX PRO 6000
    Server Edition, the vLLM NVFP4 pin, and the controlled-resource envelope.

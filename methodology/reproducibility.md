@@ -1,7 +1,7 @@
 # Reproducibility
 
-The lab's claim to credibility is that its methodology is documented and
-reproducible: an authorized party with their own cloud accounts could rerun
+The lab's claim to credibility is that its methodology is documented,
+public, and reproducible: anyone with their own cloud accounts could rerun
 the study and check the findings. This document defines the pinning and
 provenance rules that make that possible.
 
@@ -32,8 +32,8 @@ Every run writes a manifest conforming to
 **before** measurement begins, and finalizes timing-condition fields at run
 end. A run without a complete manifest is invalid. Manifests contain no
 secrets, no account identifiers, and no instance identifiers — they are
-designed to survive sanitization review cleanly if a release is ever
-explicitly authorized.
+designed to survive sanitization review cleanly if a result release is
+approved.
 
 ## Environment capture
 
@@ -55,7 +55,7 @@ a silent substitution.
 
 - Five measured repetitions per cell; report median with min–max range and
   the full per-repetition values (kept in the external private results
-  location; sanitized only if a release is explicitly authorized).
+  location; sanitized only if a result release is approved).
 - Latency distributions reported at p50/p90/p95/p99 plus mean.
 - No selective omission: every valid repetition is reported; invalidation
   rules are in the measurement contract §7.

@@ -7,11 +7,12 @@ approval after validation and review.**
 ## Why is this directory empty?
 
 All genuine benchmark results — raw, normalized, intermediate, or processed —
-live **outside the Git working tree entirely** and remain private. Any release
-would happen only after validation, review, sanitization, and the owner's
-explicit approval, through the process described in
-[docs/publication-governance.md](../docs/publication-governance.md). This
-repository itself is private; merging something here is not a release.
+live **outside the Git working tree entirely** and remain private. Although
+this repository's source and methodology are public, public visibility does
+**not** authorize publication of genuine benchmark data. Any result release
+happens only after validation, review, sanitization, and the owner's explicit
+approval identifying the exact files and scope, through the process described
+in [docs/publication-governance.md](../docs/publication-governance.md).
 
 Benchmark tooling writes genuine results to an external location configured
 via the `LAB_RESULTS_DIR` environment variable (see `.env.example`). The

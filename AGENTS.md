@@ -21,22 +21,27 @@ explicitly revises them in writing.
    the dedicated AWS replication phase (Phase 6) is explicitly authorized.
 6. Follow the spend controls in [docs/cost-guardrails.md](docs/cost-guardrails.md).
 
-## 2. Repository privacy
+## 2. Repository publicity and results privacy
 
-1. **This repository is private and must remain private indefinitely.** Never
-   change its visibility, create a public repository or mirror of it, or
-   publish branches, pull requests, releases, packages, artifacts, benchmark
-   results, reports, documentation, or source code outside this private
-   repository without the project owner's explicit authorization.
-2. Do not describe the project as public, open source, or intended for
-   automatic publication. Describe the methodology as **documented and
-   reproducible**.
-3. Licensing and publication rights are under review. No software,
-   documentation, patent, content, or data license is granted at this time.
-   Do not add a LICENSE file unless the owner explicitly authorizes a specific
-   license.
-4. Do not upload project materials to any external service without the
-   owner's explicit authorization.
+1. **This is the canonical public repository**
+   (`jgdynamite10/blackwell-agentic-inference-lab`). Its source code and
+   documented methodology are intended to be public under the
+   **Apache License 2.0** (see [LICENSE](LICENSE) and [NOTICE](NOTICE)), per
+   owner decision D-0007 in [docs/decision-log.md](docs/decision-log.md). The
+   repository at `github.com/jgdynamite/blackwell-agentic-inference-lab` is a
+   non-synchronized redirect only and will be archived; all development,
+   issues, pull requests, releases, security reporting, and documentation
+   belong here.
+2. **Public visibility does not authorize publication of genuine benchmark
+   results.** Raw and processed benchmark data remain external to Git through
+   `LAB_RESULTS_DIR`; only explicitly approved sanitized summaries may later
+   be published, via the process in
+   [docs/publication-governance.md](docs/publication-governance.md).
+3. Credentials, account identifiers, project IDs, ARNs, private endpoints,
+   provider bills, and infrastructure metadata remain private and are never
+   committed, regardless of repository visibility.
+4. Do not change repository visibility or administrative settings without the
+   owner's explicit instruction.
 
 ## 3. Execution boundary (hosted Cloud Agent vs local operator)
 

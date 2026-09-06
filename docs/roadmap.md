@@ -74,9 +74,9 @@ for the other providers.
 Calculate outcome-level performance and economic measures across Akamai Cloud,
 Google Cloud, and AWS; document limitations; sanitize approved results per
 [publication-governance.md](publication-governance.md); and prepare the
-technical report. Any release of the report or results beyond this private
-repository requires the owner's separate, explicit authorization; none is
-scheduled or automatic.
+technical report. Genuine results remain external and private; any release of
+the report or results requires the owner's separate, explicit approval
+identifying the exact files and scope; none is scheduled or automatic.
 
 ## Phase 8 — Optional Dynamo extension
 

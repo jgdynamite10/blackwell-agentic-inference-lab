@@ -1,37 +1,48 @@
 # Publication Governance
 
-**This repository is private and must remain private. Nothing in it — code,
-documentation, methodology, or results — is published, and no publication is
-scheduled or automatic.** Licensing and publication rights are under review;
-no license is granted at this time.
+This project distinguishes **two publication classes** with entirely different
+rules. Making the repository public covers class A only; it does **not**
+authorize class B.
 
-This document governs the process that would apply **if** the project owner
-ever explicitly authorizes a release of any material.
-[results-privacy.md](results-privacy.md) governs how genuine results are kept
-outside the repository in the meantime.
+## Class A — Repository publication (public)
 
-Note that a private Git branch or pull request is **not** an approved
-publication process: merging material into this private repository does not
-authorize its release anywhere.
+- Source code, schemas, synthetic examples, documentation, and methodology in
+  this repository are public under the **Apache License 2.0** (see
+  [../LICENSE](../LICENSE) and [../NOTICE](../NOTICE)), per owner decision
+  D-0007 in [decision-log.md](decision-log.md).
+- Normal repository changes continue through reviewed pull requests and CI —
+  no special release process applies to ordinary code and documentation.
+- The canonical public repository is
+  `jgdynamite10/blackwell-agentic-inference-lab`; the personal
+  `jgdynamite/blackwell-agentic-inference-lab` repository is a
+  non-synchronized redirect that will be archived.
 
-## Release principles
+## Class B — Benchmark-result publication (restricted)
 
-1. **Deliberate release only.** No result, sanitized summary, chart,
-   comparison, conclusion, or publication artifact may even be *committed to
-   this private repository* without the owner's explicit approval, via a
-   dedicated, separately reviewed pull request containing only approved and
-   sanitized data. Any release *outside* the repository requires a further,
-   separate, explicit owner authorization.
+- **Genuine raw and processed results remain external and private**, in the
+  external `LAB_RESULTS_DIR` location
+  ([results-privacy.md](results-privacy.md)). Public repository visibility
+  changes nothing about this.
+- **Raw provider bills and provider-account information remain private.**
+- **No automatic result-publication process exists.** Every benchmark-result
+  release requires separate, explicit owner approval, and that approval must
+  identify the **exact files and scope** approved.
+
+## Release principles (class B)
+
+1. **Deliberate release only.** No genuine result, sanitized summary, chart,
+   comparison, conclusion, or publication artifact may be committed to this
+   repository without the owner's explicit approval, via a dedicated,
+   separately reviewed pull request containing only approved and sanitized
+   data.
 2. **Owner approval is mandatory at every step.** No result, summary
    statistic, chart, or prose characterization of genuine measurements is
-   shared anywhere without the project owner's explicit written approval.
-3. **Organizational and legal review precede any release.** If organizational
-   approval for comparative publication (see
-   [feasibility-report.md](feasibility-report.md), section 10) and the
-   licensing/IP review have not been recorded in
-   [decision-log.md](decision-log.md), no release process may begin.
+   shared anywhere without the project owner's explicit written approval
+   identifying the exact files and scope approved.
+3. **Claims must not exceed the evidence** — in particular, no
+   provider-superiority claim may exceed what the released data supports.
 
-## Release process
+## Release process (class B)
 
 1. **Validation.** The candidate results are complete per the measurement
    contract (all repetitions, manifests, and integrity checks present) and
@@ -61,11 +72,11 @@ authorize its release anywhere.
    controlled-resource results must never be mixed with provider-native
    results ([../AGENTS.md](../AGENTS.md), section 6).
 6. **Release PR.** A dedicated pull request titled `Release: <scope>` contains
-   only the sanitized artifacts and their documentation. The owner reviews and
-   merges (squash-only). Merging still does not authorize distribution outside
-   this private repository; that requires a separate explicit authorization.
+   only the sanitized artifacts and their documentation, matching exactly the
+   files and scope named in the owner's approval. The owner reviews and merges
+   (squash-only).
 
-## What the repository may contain before any release
+## What the repository may contain before any result release
 
 - Result **schemas** and documentation of the result format.
 - **Synthetic** example results, clearly labeled as examples.

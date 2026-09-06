@@ -40,9 +40,11 @@ GPU across three public clouds.
 
 1. **Safety first.** No cloud resource is created, resized, modified, or
    deleted without explicit owner approval. See [AGENTS.md](../AGENTS.md).
-2. **Privacy.** The repository is private and remains private. Genuine results
-   stay outside the Git working tree entirely, and nothing is released without
-   explicit owner authorization. See [results-privacy.md](results-privacy.md).
+2. **Public source, private results.** The repository's source and
+   methodology are public (Apache-2.0), but genuine results stay outside the
+   Git working tree entirely, and no genuine result is released without
+   explicit owner approval identifying the exact files and scope. See
+   [results-privacy.md](results-privacy.md).
 3. **Phase discipline.** Work proceeds through the phases in
    [roadmap.md](roadmap.md) and stops at the end of the authorized phase.
 4. **Evidence discipline.** Feasibility and analysis documents must
@@ -59,9 +61,9 @@ GPU across three public clouds.
   from provider-native comparisons, and that document every material
   environmental difference.
 - A technical report (Phase 7) containing only validated, reviewed, sanitized
-  results. Whether, where, and under what license any of it is ever released
-  is a separate owner decision; licensing and publication rights are under
-  review and no release is scheduled or automatic.
+  results. Whether, where, and in what scope any genuine result is released
+  remains a separate, per-release owner decision; no result release is
+  scheduled or automatic.
 
 ## Key documents
 

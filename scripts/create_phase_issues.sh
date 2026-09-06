@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Create GitHub milestones and tracking issues for Phases 2-8 in THIS private
-# repository only. It writes nothing anywhere else and includes no
+# Create GitHub milestones and tracking issues for Phases 2-8 in the
+# canonical repository only. It writes nothing anywhere else and includes no
 # credentials, account identifiers, or benchmark data.
 #
 # The Phase 1 hosted working environment had a READ-ONLY GitHub CLI, so these
@@ -32,7 +32,7 @@ declare -a BODIES=(
 "Add approved precision (BF16/NVFP4) and serving-path (vLLM/TensorRT-LLM/NIM) comparisons, operational telemetry (DCGM, Prometheus, Grafana), and selected Nsight profiling. Scope: docs/roadmap.md (Phase 4). Requires explicit owner authorization (AGENTS.md §7)."
 "Reproduce the frozen baseline on a Google Cloud G4 single-GPU configuration (g4-standard-48) while documenting every material environmental difference. Scope: docs/roadmap.md (Phase 5). Requires explicit owner authorization (AGENTS.md §7)."
 "Reproduce the frozen baseline on a single-GPU Amazon EC2 G7e configuration (size selected during feasibility analysis) while documenting every material environmental difference. Scope: docs/roadmap.md (Phase 6). AWS mutation is prohibited until this phase is explicitly authorized (AGENTS.md §1.5)."
-"Calculate outcome-level performance and economic measures across Akamai Cloud, Google Cloud, and AWS; document limitations; sanitize approved results; prepare the technical report. Scope: docs/roadmap.md (Phase 7). Any release beyond this private repository requires separate explicit owner authorization per docs/publication-governance.md."
+"Calculate outcome-level performance and economic measures across Akamai Cloud, Google Cloud, and AWS; document limitations; sanitize approved results; prepare the technical report. Scope: docs/roadmap.md (Phase 7). Genuine results remain external and private; every result release requires separate explicit owner approval identifying the exact files and scope, per docs/publication-governance.md."
 "Investigate multi-GPU or disaggregated prefill/decode serving with NVIDIA Dynamo only if single-GPU findings justify the additional complexity and cost. Scope: docs/roadmap.md (Phase 8). Optional; may be skipped. Requires explicit owner authorization (AGENTS.md §7)."
 )
 

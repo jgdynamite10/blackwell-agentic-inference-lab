@@ -1,10 +1,12 @@
 # Results Privacy
 
-This repository is private, and genuine benchmark results are kept **outside
-the Git working tree entirely** — they are never committed even to this
-private repository, and nothing is released without the explicit approval
-process in [publication-governance.md](publication-governance.md). This
-document defines how that is enforced **by design**, not by discipline alone.
+This repository's source code and methodology are public, but genuine
+benchmark results are kept **outside the Git working tree entirely** — they
+are never committed to this repository, and public repository visibility does
+not authorize their publication. Nothing is released without the explicit
+approval process in
+[publication-governance.md](publication-governance.md). This document defines
+how that is enforced **by design**, not by discipline alone.
 
 ## Rules
 
