@@ -854,11 +854,11 @@ class TestDestroy:
                 ledger,
                 paths=paths,
                 tf_dir=tf_dir,
-            runner=runner,
-            environ={},
-            fetch=_provider_fetch(),
-            token="t",
-            probe=lambda path, token: "present",
+                runner=runner,
+                environ={},
+                fetch=_provider_fetch(),
+                token="t",
+                probe=lambda path, token: "present",
                 monotonic=lambda: float(next(timeline)),
                 sleeper=lambda s: None,
             )
@@ -902,10 +902,10 @@ class TestDestroy:
                 ledger,
                 paths=paths,
                 tf_dir=tf_dir,
-            runner=runner,
-            environ={"GITHUB_ACTIONS": "true"},
-            fetch=_provider_fetch(),
-            token="t",
+                runner=runner,
+                environ={"GITHUB_ACTIONS": "true"},
+                fetch=_provider_fetch(),
+                token="t",
             )
 
 
