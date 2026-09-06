@@ -44,18 +44,21 @@ Planning estimates (details and assumptions in
 | Phase | Estimate | Trigger for owner check-in |
 | --- | --- | --- |
 | 2 — Synthetic workload | ≈ $0 cloud | any cloud spend at all |
-| 3 — Akamai baseline | ≈ $230–$580 (12 cells per D-0012; rate pending account-level quote) | 75% of estimate consumed |
-| 4 — NVIDIA optimization | ≈ $200–$510 (rate pending account-level quote) | 75% of estimate consumed |
+| 3 — Akamai baseline (full 12-cell estimate; **not authorized**) | ≈ $270–$690 before incidental costs at the owner-observed Seattle $3.00/h plan price (D-0014; public advertised starting price remains $2.50/h) | 75% of estimate consumed |
+| 3B — authorized compatibility/headroom pilot only | **$25 total** / six hours maximum on one `us-sea` GPU instance plus its firewall | three elapsed hours (explicit owner decision required to continue) |
+| 4 — NVIDIA optimization (**not authorized**) | ≈ $240–$600 before incidental costs at the same $3.00/h Seattle observed plan price | 75% of estimate consumed |
 | 5 — Google Cloud | ≈ $280–$650 | 75% of estimate consumed |
 | 6 — AWS | ≈ $250–$760 | 75% of estimate consumed |
 
 Reaching a trigger pauses provisioning until the owner reauthorizes. The
-Phase 3–6 ranges reflect the owner-approved D-0010 sample plan (200 balanced
-task instances per measured repetition) and the D-0012 12-cell Phase 3
-matrix (both comparison modes on the same single instance); measured-cell
-hours scale with realized task latency, and a short Phase 3 pilot
-revalidates realized task latency and re-derives the budget before full
-measurement ([feasibility-report.md](feasibility-report.md) §8).
+Phase 3–6 ranges remain **planning estimates**, not authorization. Decision
+D-0014 authorizes only the $25 / six-hour compatibility/headroom pilot; the
+full Phase 3 estimate is not authorized. Akamai figures use the
+owner-observed Seattle **$3.00/h** catalog base price and distinguish it
+from the public **$2.50/h** advertised starting price. The Phase 3–4 ranges
+reflect the D-0010 sample plan and the D-0012 12-cell matrix; measured-cell
+hours scale with realized task latency
+([feasibility-report.md](feasibility-report.md) §8).
 
 ## Automatic shutdown and orphan detection
 

@@ -14,7 +14,8 @@ Subcommands map one-to-one to the separated workflows required by Phase 3A:
 - ``pilot``           the short, owner-approved compatibility/headroom pilot
                       (RunMode.REAL): blocked until reconciliation is clean,
                       provider-native only, live provenance verified first.
-- ``full-baseline``   DISABLED: Phase 3B measurement is not authorized.
+- ``full-baseline``   DISABLED: the full 12-cell baseline remains unauthorized
+                      (only the bounded D-0014 pilot is authorized).
 - ``verify-results``  external verification of persisted genuine results;
                       an empty directory is a FAILURE unless --allow-empty.
 - ``teardown-plan``   identity-verified, saved destroy plan from the ledger.
@@ -56,10 +57,10 @@ from blackwell_lab.workload.validation import (
     validate_result_semantics,
 )
 
-#: Phase 3B full-baseline measurement is NOT authorized. Enabling this
-#: constant requires a separate owner authorization recorded in the decision
-#: log and reviewed in a pull request — never a runtime flag or environment
-#: variable.
+#: The full 12-cell Phase 3 baseline is NOT authorized (D-0014 authorizes
+#: only the bounded compatibility/headroom pilot). Enabling this constant
+#: requires a separate owner authorization recorded in the decision log and
+#: reviewed in a pull request — never a runtime flag or environment variable.
 FULL_BASELINE_AUTHORIZED = False
 
 PILOT_APPROVAL_TEMPLATE = "I approve the short Akamai pilot for run {run_label}"
@@ -657,13 +658,13 @@ def cmd_pilot(args: argparse.Namespace) -> int:
 def cmd_full_baseline(_args: argparse.Namespace) -> int:
     if not FULL_BASELINE_AUTHORIZED:
         print(
-            "DISABLED: the full Akamai baseline (Phase 3B provisioning and "
-            "measurement) is not authorized. It remains disabled until the "
+            "DISABLED: the full 12-cell Akamai baseline is not authorized. "
+            "Decision D-0014 authorizes only the bounded compatibility/"
+            "headroom pilot. The full baseline remains disabled until the "
             "owner grants separate explicit authorization, recorded in "
             "docs/decision-log.md and enabled through a reviewed change to "
-            "FULL_BASELINE_AUTHORIZED. The short pilot must complete first, "
-            "and full-run settings are frozen only after the pilot "
-            "(docs/roadmap.md, Phase 3B).",
+            "FULL_BASELINE_AUTHORIZED. Full-run settings are frozen only "
+            "after the pilot (docs/roadmap.md, Phase 3B).",
             file=sys.stderr,
         )
         return 3
@@ -776,8 +777,8 @@ def build_parser() -> argparse.ArgumentParser:
             "require separate explicit owner approval phrases (naming the "
             "run tag and the reviewed plan digest) and run only in the "
             "owner's local environment. Every lifecycle artifact lives in "
-            "the external private LAB_RESULTS_DIR. The full baseline is "
-            "disabled until Phase 3B is authorized."
+            "the external private LAB_RESULTS_DIR. The full 12-cell baseline "
+            "remains disabled; only the bounded D-0014 pilot is authorized."
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -824,7 +825,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "full-baseline",
-        help="DISABLED until Phase 3B is separately authorized by the owner.",
+        help="DISABLED: the full 12-cell baseline remains unauthorized (D-0014).",
     )
 
     verify_parser = sub.add_parser(

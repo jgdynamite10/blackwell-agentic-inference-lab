@@ -210,7 +210,8 @@ def check_plan_entitlement(token: str, fetch: Fetch | None = None) -> dict:
         print(
             "ENTITLEMENT: NOT VISIBLE — no RTX PRO 6000 Blackwell plan appears "
             "in this account's catalog. The plan is limited-availability: "
-            "request onboarding via Akamai support before Phase 3B."
+            "request onboarding via Akamai support before any authorized "
+            "Phase 3B apply."
         )
         return {"completed": True, "plan_visible": False, "plan": None}
 

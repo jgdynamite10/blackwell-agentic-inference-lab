@@ -70,9 +70,11 @@ committed or pasted into chat, issues, PRs, or CI; see
   documentation and pricing pages fetched from the hosted working environment
   on 2026-09-06 still showed an older table (1–8 GPUs, up to 128 vCPU /
   1408 GB RAM, $3.00–$3.50/hr starting price); the figures above reflect the
-  current official page per the owner's audit. Because of this churn, the
-  exact billed rate is treated as **unresolved pending an account-level
-  quote** obtained in the owner's local environment.
+  current official page per the owner's audit. Decision D-0014 records the
+  owner-observed Seattle catalog base price of **$3.00/hour** for plan
+  `g3-gpu-rtxpro6000-blackwell-1` and uses that rate for planning estimates.
+  The $2.50/hour figure remains the public advertised starting price, not
+  a guaranteed future bill.
 - **[VERIFIED — official page, retrieved 2026-09-06; list subject to change]**
   Limited-availability regions for the RTX PRO 6000 plan (19 data centers):
   Amsterdam, Chennai, Chicago, Frankfurt, Jakarta, London, Los Angeles,
@@ -103,11 +105,23 @@ committed or pasted into chat, issues, PRs, or CI; see
   plus the documented limited-availability gating; it is confirmed only when
   an onboarded account's catalog shows the plan. Either way, onboarding
   (support request) is a documented prerequisite for Phase 3.
-- **[UNRESOLVED — owner action]** Whether the authorized account is already
-  onboarded for the limited-availability plan, which regions are deployable
-  for it, and the account-level quoted rate. Requires the owner to run
-  `scripts/preflight/check_akamai.py` with a read-only `LINODE_TOKEN` in
-  their local environment, or to confirm directly.
+- **[SUPERSEDED for the authorized pilot — decision D-0014, 2026-09-06]**
+  Account onboarding, deployable region, and Seattle catalog price for the
+  exact one-GPU plan are recorded as owner-verified sanitized facts below.
+  Future live capacity remains un-guaranteed.
+- **[VERIFIED — owner-local sanitized observation, 2026-09-06; D-0014]**
+  Exact plan `g3-gpu-rtxpro6000-blackwell-1` (one RTX PRO 6000 Blackwell
+  GPU); selected pilot region `us-sea`; observed catalog base price
+  **$3.00/hour**; Seattle had no observed regional surcharge. An owner-run
+  temporary instance **capability probe** reached running and was
+  subsequently deleted; it created no firewall; a later read-only check
+  found zero matching test instances, firewalls, and volumes; billing is
+  not continuing for those test resources. That probe was **not** a genuine
+  benchmark and collected no model-serving or benchmark results. The direct
+  Seattle create/delete observation is stronger evidence for `us-sea` than
+  an additional `us-ord` connectivity preflight; `us-ord` was only an
+  example and is not the selected pilot region. Live capacity must still be
+  reconfirmed through the saved Terraform plan immediately before apply.
 
 ## 3. Google Cloud — `g4-standard-48`
 
@@ -308,8 +322,9 @@ verification** in the owner's local environment before budgeting decisions.
 | Phase | Basis | Estimate |
 | --- | --- | --- |
 | Phase 2 (synthetic workload) | No GPU; local dev + GitHub Actions CI (small usage; Actions minutes are free once the repository is public) | **≈ $0 cloud** |
-| Phase 3 (Akamai baseline) | ~90–230 GPU-h (12 cells — both comparison modes per D-0012 — plus pilot and setup) × $2.50/h officially stated starting price (rate **unresolved pending account-level quote**; higher in EU/Singapore/Jakarta) + storage/egress | **≈ $230–$580** |
-| Phase 4 (optimization) | ~80–200 GPU-h × $2.50/h (same pricing caveat; more cells: precisions × serving paths) | **≈ $200–$510** |
+| Phase 3 (Akamai baseline, **full 12-cell estimate — not authorized**) | ~90–230 GPU-h (12 cells — both comparison modes per D-0012 — plus setup) × **$3.00/h** owner-observed Seattle catalog base price (D-0014; public advertised starting price remains $2.50/h; higher in EU/Singapore/Jakarta) + storage/egress | **≈ $270–$690** before incidental costs |
+| Phase 3B authorized pilot only | ≤ 6 GPU-h on one `g3-gpu-rtxpro6000-blackwell-1` in `us-sea` | **$25 total ceiling** (six hours × $3.00/h ≈ $18 before incidentals; not authorization of the full Phase 3 estimate) |
+| Phase 4 (optimization, **not authorized**) | ~80–200 GPU-h × **$3.00/h** Seattle observed plan price (same advertised-vs-observed distinction) | **≈ $240–$600** before incidental costs |
 | Phase 5 (Google Cloud) | ~60–140 GPU-h (12 cells: both comparison modes) × ~$4.50/h + Hyperdisk/local SSD | **≈ $280–$650** |
 | Phase 6 (AWS) | ~60–140 GPU-h × ~$4.00/h (4xlarge) or ~$5.27/h (8xlarge) + EBS | **≈ $250–$760** |
 | Storage/network (all) | model artifact downloads (~80 GB/provider), result egress | **≈ $10–$50 total** |
@@ -327,9 +342,12 @@ cells (D-0012: six cells in each of the two comparison modes, run serially
 on the same single instance — the mode factor doubles measured hours, not
 instance count). A **short Phase 3 pilot must revalidate realized task
 latency and re-derive the budget before full measurement**, and the
-cost-guardrails check-in triggers pause provisioning on overrun. Akamai figures use the officially stated $2.50/h starting price
-(retrieved 2026-09-06) and remain **unresolved pending an account-level
-quote**, given documented regional surcharges and recent pricing-page churn.
+cost-guardrails check-in triggers pause provisioning on overrun. Akamai
+planning figures now use the **owner-observed Seattle catalog base price of
+$3.00/h** (decision D-0014). The public advertised starting price remains
+$2.50/h. These remain **estimates, not guaranteed future billing**. The
+authorized Phase 3B pilot is a separate $25 / six-hour ceiling and does
+**not** authorize the full Phase 3 estimate.
 
 **Billing-duration caveat (all providers):** GPU-hour cost accrues for the
 entire life of the *service*, not just active benchmarking. On Akamai,
@@ -399,12 +417,17 @@ teardown tooling is implemented or executed in Phase 1.
 
 ## 11. Summary of unresolved questions (blockers and owner actions)
 
-1. Owner-run local preflight checks for Akamai, Google Cloud, and AWS (see
+1. Owner-run local preflight checks for Google Cloud and AWS (see
    section 1): the read-only scripts in `scripts/preflight/` verify
-   account-level availability, quota, and pricing from the owner's
-   authenticated local environment. The hosted Cloud Agent does not receive
-   credentials and does not run these checks.
-2. Akamai limited-availability onboarding status for the RTX PRO 6000 plan.
+   account-level availability and pricing from the owner's authenticated
+   local environment. The hosted Cloud Agent does not receive credentials
+   and does not run these checks. Akamai plan, Seattle region, and catalog
+   base price for the authorized pilot are recorded in decision D-0014.
+2. ~~Akamai limited-availability onboarding / Seattle price for the exact
+   one-GPU plan~~ — recorded as owner-verified sanitized facts in D-0014
+   (`g3-gpu-rtxpro6000-blackwell-1`, `us-sea`, $3.00/h catalog base, no
+   observed Seattle surcharge). Live capacity remains un-guaranteed and
+   must be reconfirmed by the saved Terraform plan immediately before apply.
 3. Google Cloud `NVIDIA_RTX_PRO_6000_GPUS` quota and consumable regions.
 4. AWS G-instance vCPU quota and G7e regional capacity.
 5. Whether the NIM path requires a Production Branch model / NVIDIA AI

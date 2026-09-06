@@ -23,10 +23,11 @@ please report it immediately (see below).
 
 ## Secret handling rules
 
-1. Credentials are provided to tooling only through environment variables or
-   provider-standard credential files stored outside this repository.
-2. `.env.example` documents variable **names** only. Never commit a `.env`
-   file containing values.
+1. Credentials are provided to tooling only through the owner's local
+   credential store or a temporary process environment — never through a
+   repository-local `.env` file, even if gitignored.
+2. `.env.example` documents variable **names** only. Never commit credential
+   values under any filename.
 3. `.gitignore` excludes common secret and state file patterns, but it is a
    convenience, not a security boundary. Treat any secret that reaches a
    commit — even a deleted one — as compromised: rotate it immediately.

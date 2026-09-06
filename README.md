@@ -15,12 +15,12 @@ one-way mirror of canonical `main`**: it is synchronized only from reviewed
 and merged canonical `main`, and changes must never flow from the mirror back
 to this repository.
 
-**Status:** Phase 1 (repository foundation and feasibility) and Phase 2
-(synthetic workload and evaluator) are **complete**. Phase 3A (Akamai
-baseline **readiness** — cloud-independent preparation only) is **authorized
-and in progress**. Phase 3B (provisioning and measurement) and later phases
-remain **unauthorized** and require separate explicit owner authorization
-([docs/roadmap.md](docs/roadmap.md), decision D-0012).
+**Status:** Phases 1 and 2 are **complete**. Phase 3A (Akamai baseline
+readiness) is **complete**. Phase 3B is authorized **only** for one bounded
+Akamai compatibility/headroom pilot in `us-sea` on plan
+`g3-gpu-rtxpro6000-blackwell-1` (decision D-0014). The full 12-cell Phase 3
+baseline is **not authorized**. Phase 4 and later phases remain
+**unauthorized** ([docs/roadmap.md](docs/roadmap.md)).
 
 - **No genuine benchmarks have been run yet.** No results exist.
 - **All current example files are synthetic** and clearly labeled as such.
@@ -123,16 +123,17 @@ blackwell-bench --profile interactive --concurrency 1 --repetitions 1 \
 (Measurement runs use the D-0010 defaults — 5 repetitions × 200 balanced
 task instances; the reduced values above are for a quick functional smoke.)
 
-Phase 3A readiness validation (offline; no cloud access, no credentials):
+Offline readiness validation (no cloud access, no credentials):
 
 ```bash
 blackwell-cloud readiness
 ```
 
-Provisioning, pilots, and genuine benchmarks (`blackwell-cloud pilot`,
-`apply`, `destroy`) run only in the owner's authenticated local environment
-with explicit approval, and the full baseline stays disabled until Phase 3B
-is authorized. See [infra/akamai/README.md](infra/akamai/README.md).
+The bounded Phase 3B pilot (`blackwell-cloud apply`, `pilot`, `destroy`)
+runs only in the owner's authenticated local environment and still requires
+each command's separate exact approval phrase. The full 12-cell baseline
+stays disabled. See [infra/akamai/README.md](infra/akamai/README.md) and
+decision D-0014.
 
 ## Project governance
 

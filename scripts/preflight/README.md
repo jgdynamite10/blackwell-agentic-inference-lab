@@ -22,7 +22,7 @@ Usage (local machine):
 ```bash
 python3 scripts/preflight/check_akamai.py --help
 python3 scripts/preflight/check_akamai.py --public-only   # catalog only, no token needed
-python3 scripts/preflight/check_akamai.py --region us-ord   # full check, requires LINODE_TOKEN
+python3 scripts/preflight/check_akamai.py --region us-sea   # full check, requires LINODE_TOKEN
 python3 scripts/preflight/check_gcp.py
 python3 scripts/preflight/check_aws.py
 ```
@@ -45,5 +45,7 @@ Behavioral guarantees:
   pricing claims.
 
 Mocked tests (no network, no CLI) live in `tests/test_preflight.py`.
-Credential variable names are documented in `.env.example`; never commit
-values or paste them into chat, issues, PRs, or CI.
+Credential variable names are documented in `.env.example`. Provider
+credentials stay in the owner's local credential store or a temporary
+process environment — never in a repository-local `.env` file, even if
+gitignored. Never paste values into chat, issues, PRs, or CI.

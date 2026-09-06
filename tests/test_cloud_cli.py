@@ -2,7 +2,7 @@
 
 Everything runs offline. Billable verbs are exercised only through their
 refusal paths or injected fakes; the full-baseline command must refuse
-unconditionally (Phase 3B is not authorized).
+unconditionally (the full 12-cell baseline remains unauthorized).
 """
 
 from __future__ import annotations

@@ -4,12 +4,10 @@ Work proceeds phase by phase. **Each phase begins only after the project owner
 explicitly authorizes it, and work stops at the end of the currently
 authorized phase** ([AGENTS.md](../AGENTS.md), section 7).
 
-Phase status: **Phases 1 and 2 are complete.** Currently authorized and in
-progress: **Phase 3A (Akamai baseline readiness) only** — cloud-independent
-preparation with no provisioning, no credentials, and no genuine
-measurement. **Phase 3B (provisioning and measurement) and later phases
-remain unauthorized** and require separate explicit owner authorization
-(decision D-0012).
+Phase status: **Phases 1 and 2 are complete.** **Phase 3A is complete.**
+**Phase 3B is authorized only for one bounded Akamai compatibility/headroom
+pilot** (decision D-0014). The **full Phase 3 baseline is not authorized**.
+**Phase 4 and later phases remain unauthorized.**
 
 ## Phase 1 — Repository foundation and feasibility *(complete)*
 
@@ -52,32 +50,43 @@ portability phases reproduce symmetrically in both modes.
 
 The phase is split into two separately authorized sub-phases:
 
-### Phase 3A — baseline readiness *(authorized, in progress)*
+### Phase 3A — baseline readiness *(complete)*
 
-Cloud-independent preparation only — no cloud resource is created, modified,
-or deleted; no credentials are used; no model weights or large containers are
-downloaded; no genuine benchmark runs. Deliverables: the finalized 12-cell
-experimental design and cost re-derivation; Akamai Terraform for exactly one
-single-GPU instance with plan-by-default lifecycle tooling, an exact resource
-ledger, and an orphan report; an idempotent bootstrap design with pinned
-assumptions, digest verification, and health checks; the provider-neutral
-OpenAI-compatible client extending the Phase 2 benchmark path to real
-endpoints; truthful host/GPU telemetry collection; a sanitized, mock-tested
-authenticated preflight (executed only by the local operator); and the
-`blackwell-cloud` workflows (readiness, gated pilot, disabled full baseline,
-result verification, teardown plan, orphan report).
+Cloud-independent preparation only — no cloud resource was created, modified,
+or deleted by Phase 3A itself. Delivered: the finalized 12-cell experimental
+design and cost re-derivation; Akamai Terraform for exactly one single-GPU
+instance plus its firewall, with external state, reviewed saved plans,
+identity-safe teardown, and an orphan report; an idempotent bootstrap design
+with pinned packages, digest-pinned CUDA GPU probe, and health checks; the
+provider-neutral OpenAI-compatible client; truthful host/GPU telemetry;
+sanitized authenticated preflight; and the `blackwell-cloud` workflows
+(readiness, gated pilot, disabled full baseline, result verification,
+teardown plan, orphan report). Lifecycle-safety policy is recorded as
+decision D-0013.
 
-### Phase 3B — provisioning and measurement *(not authorized)*
+### Phase 3B — provisioning and measurement *(bounded pilot authorized; full baseline not authorized)*
 
-Requires separate explicit owner approval. Begins with one short
-**compatibility/headroom pilot** (bootstrap validation, driver/CUDA and model
-compatibility, BF16 serving bring-up, memory/CPU headroom at concurrency 8,
-realized-latency sampling to re-derive the budget) on one owner-approved
-instance. Full-run settings — model artifact and hash, vLLM container digest,
-BF16 configuration, generation settings, warm-up, timeouts, resource
-allocation, and cgroup enforcement — are **frozen only after the pilot**, and
-the full 12-cell baseline then requires its own explicit authorization.
-Every provisioning action follows [AGENTS.md](../AGENTS.md) §1 and
+Decision D-0014 authorizes **only one** Akamai compatibility/headroom pilot:
+
+- region `us-sea`, plan `g3-gpu-rtxpro6000-blackwell-1`;
+- exactly one GPU instance and its one project/run-tagged firewall;
+- provider-native comparison mode only;
+- intended maximum instance lifetime six hours; maximum session cost $25;
+- owner checkpoint at three elapsed hours;
+- three diagnostic cells only (interactive/1, batch-heavy/4, batch-heavy/8),
+  each with one warm-up pass, one measured repetition, and 20 tasks.
+
+Pilot observations are diagnostic and must not be represented as comparative
+benchmark findings. Apply, pilot, and destroy still require their separate
+exact local approval phrases. Teardown may target only ledger-recorded
+resources; post-destroy provider verification and an orphan report are
+mandatory.
+
+Full-run settings — model artifact and hash, vLLM container digest, BF16
+configuration, generation settings, warm-up, timeouts, resource allocation,
+and cgroup enforcement — are **frozen only after the pilot**. The full
+12-cell baseline then requires its own explicit authorization. Every
+provisioning action follows [AGENTS.md](../AGENTS.md) §1 and
 [cost-guardrails.md](cost-guardrails.md).
 
 ## Phase 4 — NVIDIA optimization

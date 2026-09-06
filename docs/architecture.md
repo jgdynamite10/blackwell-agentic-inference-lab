@@ -1,9 +1,10 @@
 # Architecture
 
 This document describes both the **implemented architecture** (Phases 1–2
-and the Phase 3A readiness layer) and the intended architecture of later
-phases. Components marked with a later phase are built only after that phase
-is explicitly authorized.
+and the completed Phase 3A readiness layer) and the intended architecture of
+later phases. Phase 3B is authorized only for one bounded
+compatibility/headroom pilot (decision D-0014). The full 12-cell baseline
+and later phases remain unauthorized.
 
 ## Overview
 
@@ -217,16 +218,17 @@ memory, storage type, network configuration, virtualization, driver, CUDA
 version, OS, region, and any other material environmental facts, so
 differences are recorded rather than hidden.
 
-## Phase 3 — Akamai deployment architecture (readiness implemented in 3A; execution requires 3B)
+## Phase 3 — Akamai deployment architecture (3A readiness complete; 3B bounded pilot authorized)
 
-Phase 3A implements the **readiness** layer only: Terraform under
+Phase 3A implemented the **readiness** layer: Terraform under
 [../infra/akamai/](../infra/akamai/), the bootstrap design under
 `infra/akamai/bootstrap/`, and the `blackwell-cloud` CLI
-(`src/blackwell_lab/cloud/`). Nothing in Phase 3A provisions, modifies, or
-tears down any cloud resource; every billable or destructive action requires
-separate explicit local owner approval in Phase 3B and refuses to execute in
-hosted/CI environments. There is **no frontend application** — the entire
-workflow is CLI-first.
+(`src/blackwell_lab/cloud/`). Decision D-0014 authorizes one bounded
+compatibility/headroom pilot; every billable or destructive action still
+requires its separate exact local owner approval phrase and refuses to
+execute in hosted/CI environments. The full 12-cell baseline remains
+unauthorized. There is **no frontend application** — the entire workflow is
+CLI-first.
 
 ### Deployment view (single Akamai GPU instance)
 
@@ -266,14 +268,15 @@ flowchart LR
     plan["terraform plan<br/>(default; read-only)"] --> approve1{{"explicit local owner<br/>approval to APPLY"}}
     approve1 --> provision["provision ONE tagged<br/>GPU instance"]
     provision --> bootstrap["idempotent bootstrap:<br/>pins, driver/CUDA checks,<br/>image + model digest verification,<br/>readiness checks, watchdog"]
-    bootstrap --> pilot["short pilot (gated), then<br/>freeze settings; full baseline<br/>only after separate 3B authorization"]
+    bootstrap --> pilot["bounded 3B diagnostic pilot (D-0014),<br/>then freeze settings; full 12-cell<br/>baseline remains unauthorized"]
     pilot --> verify["verify external results:<br/>schemas, semantic invariants,<br/>artifact hashes in LAB_RESULTS_DIR"]
     verify --> approve2{{"explicit local owner<br/>approval to DESTROY"}}
     approve2 --> teardown["delete EXACTLY the ledger's<br/>resources for this run<br/>(never broad cleanup)"]
     teardown --> orphan["read-only orphan report:<br/>confirm no project-tagged<br/>billable resources remain"]
 ```
 
-Key properties, binding on Phase 3B execution:
+Key properties, binding on the authorized Phase 3B pilot and any later
+explicitly authorized measurement:
 
 - **Plan is the default.** `blackwell-cloud plan` and `teardown-plan` are
   read-only; `apply` and `destroy` each require a separate explicit approval

@@ -365,6 +365,13 @@ four defects are corrected before any genuine measurement exists.
 
 ## 2026-09-06 — D-0012: Phase 2 complete; Phase 3A readiness authorized; 12-cell symmetric Akamai baseline matrix; pilot before freeze (extends the D-0002 baseline boundaries with the comparison-mode factor)
 
+**Historical (superseded in part by D-0013 and D-0014, 2026-09-06).** Phase
+3A is now complete. Phase 3B is authorized only for one bounded
+compatibility/headroom pilot (D-0014). Planning estimates now use the
+owner-observed Seattle $3.00/h plan price rather than the $2.50/h advertised
+starting price recorded below. The text of this entry is the 3A authorization
+as written.
+
 **No genuine results predate this change.** No genuine benchmark has been
 executed in any phase.
 
@@ -434,3 +441,135 @@ measurement exists — so the baseline definition cannot drift after results
 are observed; the pilot/freeze split keeps full-run settings from being
 declared frozen before compatibility and headroom are empirically
 validated.
+
+## 2026-09-06 — D-0013: Phase 3A lifecycle-safety corrections (already implemented)
+
+**No genuine results predate this change.** No genuine benchmark has been
+executed in any phase. This entry documents safety behavior already
+implemented and merged with Phase 3A; it does not authorize provisioning.
+
+**Decision.** The Phase 3A lifecycle-safety corrections already in the
+codebase are binding project policy:
+
+1. **Region-availability parsing.** Authenticated preflight parses the live
+   Akamai `GET /v4/regions/{region}/availability` response as a top-level
+   JSON array (with optional paginated-object compatibility). Malformed
+   payloads fail closed and are never treated as empty.
+2. **Provider identity verification before teardown.** `teardown-plan` and
+   `destroy` require successful read-only API verification of every ledger
+   resource (Terraform address, type, provider ID, exact label, project tag,
+   run tag, and region where applicable) **before** any Terraform plan or
+   apply that could delete something. Only an explicit HTTP 404 during
+   post-destroy confirmation means absent.
+3. **Reconciliation cleanliness.** Reconciliation may be marked clean only
+   when Terraform state is readable and complete, the provider API was
+   successfully checked, provider resources and state agree exactly, and no
+   unexpected, untracked, or missing resource exists. Provider lookup
+   failures write a dirty recovery ledger and retain any pending record.
+4. **Pinned toolchain.** Terraform CLI is exactly **1.9.8** in `versions.tf`,
+   CI, lifecycle validation, and documentation. Other local versions are
+   refused.
+5. **Pinned bootstrap and GPU probe.** Bootstrap fails closed before any
+   package mutation unless exact non-empty versions are set for the NVIDIA
+   driver, NVIDIA Container Toolkit, Docker, and required repository/key
+   material. The GPU probe uses a digest-pinned NVIDIA CUDA image and runs
+   `nvidia-smi` inside the container.
+6. **Live provenance before every genuine cell.** The pilot re-observes
+   model digest, container digest, engine version, container CUDA runtime,
+   instance identity, and host/GPU facts immediately before each cell.
+   Configuration values are never manifest facts.
+7. **Creation-only apply plans.** Apply-stage plans reject update, delete,
+   replace, unknown, and unrelated actions. No maintenance/update workflow
+   is authorized.
+8. **Provider-native-only pilot.** Controlled-resource labeling is rejected
+   until the joint 14-vCPU/100-GiB serving-plus-benchmark cgroup envelope
+   is genuinely implemented and observed.
+
+**Rationale.** These controls were implemented during Phase 3A so that any
+later owner-authorized apply, pilot, or destroy cannot silently skip
+identity, reconciliation, provenance, or pin checks. Recording them as
+D-0013 closes the dangling decision reference already present in the
+codebase.
+
+## 2026-09-06 — D-0014: Phase 3B bounded Akamai compatibility/headroom pilot authorized
+
+**No genuine results predate this change.** No genuine benchmark has been
+executed in any phase. The owner-run capability probe recorded below was
+not a benchmark and produced no benchmark results.
+
+**Decision.** Phase 3A is **complete**. Phase 3B is authorized **only** for
+one bounded Akamai compatibility/headroom pilot. The full 12-cell Akamai
+baseline remains unauthorized. Phase 4 and later phases remain
+unauthorized.
+
+### Sanitized owner-verified Akamai validation
+
+Recorded from the owner's local authenticated environment. No provider
+resource IDs, account IDs, IP addresses, credentials, raw API responses, or
+AWS/GCP quota values are recorded:
+
+- exact plan: `g3-gpu-rtxpro6000-blackwell-1`;
+- hardware: one RTX PRO 6000 Blackwell GPU;
+- selected pilot region: `us-sea`;
+- observed catalog base price: $3.00/hour;
+- Seattle had no observed regional surcharge;
+- an owner-run temporary instance capability probe successfully reached
+  running;
+- that temporary instance was subsequently deleted;
+- the capability probe created no firewall;
+- a later read-only check found zero matching test instances, firewalls,
+  and volumes;
+- billing is not continuing for those test resources;
+- no genuine benchmark, model serving, or benchmark-result collection
+  occurred during that capability probe.
+
+The direct Seattle create/delete observation establishes stronger evidence
+for `us-sea` than an additional `us-ord` connectivity preflight. `us-ord`
+was only an example and is not the selected pilot region. Future live
+capacity is still not guaranteed and must be reconfirmed through the saved
+Terraform plan immediately before the authorized apply.
+
+### Authorized pilot envelope
+
+| Constraint | Bound |
+| --- | --- |
+| Provider | Akamai Cloud |
+| Region | `us-sea` |
+| Plan | `g3-gpu-rtxpro6000-blackwell-1` |
+| Maximum resources | exactly one GPU instance and its one project/run-tagged firewall |
+| Comparison mode | provider-native only |
+| Intended maximum instance lifetime | six hours |
+| Maximum authorized pilot-session cost | $25 total |
+| Owner checkpoint | three elapsed hours; continuing requires an explicit owner decision |
+| Billing stop | the instance must be **deleted**; shutdown is insufficient |
+| Apply / destroy | retain separate digest-bearing approval phrases |
+| Teardown | may target only the exact recorded lifecycle-ledger resources |
+| After destroy | provider verification and an orphan report are mandatory |
+| Results | genuine results remain external and private |
+| Publication | no automatic publication is authorized |
+
+Pilot observations are **diagnostic**. They may not be represented as
+comparative benchmark findings.
+
+### Authorized diagnostic cells only
+
+For every cell: one warm-up pass, one measured repetition, 20 tasks per
+repetition, and live provenance rechecked immediately before execution.
+
+1. interactive profile, concurrency 1;
+2. batch-heavy profile, concurrency 4;
+3. batch-heavy profile, concurrency 8.
+
+These counts are deliberately too small for publishable p95/p99 claims.
+They exist only to validate model/runtime compatibility, BF16 serving,
+GPU-memory and CPU headroom, concurrency-8 behavior, telemetry, result
+persistence, and realized task latency.
+
+Terraform apply, the pilot command, and destroy continue to require their
+separate exact local approval phrases. This decision authorizes the
+envelope; it does not execute any provider operation.
+
+**Rationale.** Owner Phase 3B pilot-authorization instruction (2026-09-06).
+A bounded compatibility/headroom session is the next authorized step after
+Phase 3A readiness. The full 12-cell baseline and later phases stay
+unauthorized until a further owner decision.

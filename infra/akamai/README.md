@@ -2,9 +2,11 @@
 
 Terraform configuration for **exactly one** single-GPU NVIDIA RTX PRO 6000
 Blackwell Server Edition instance plus its run-tagged Cloud Firewall, used for
-one owner-approved benchmark session at a time. Everything here is Phase 3A
-*readiness* material: nothing is provisioned until the owner separately
-authorizes Phase 3B and approves an apply.
+one owner-approved session at a time. Phase 3A readiness is **complete**.
+Decision D-0014 authorizes **only** one bounded Phase 3B
+compatibility/headroom pilot. The full 12-cell baseline remains unauthorized.
+Actual apply, pilot, and destroy still require their separate exact local
+approval phrases.
 
 ## Safety contract (do not weaken)
 
@@ -29,6 +31,35 @@ authorizes Phase 3B and approves an apply.
 charges; the in-instance watchdog limits runaway workload only. The session
 ends by exporting and verifying results, then running the owner-approved
 teardown (deletion), deletion confirmation, and the orphan report.
+
+## Authorized Phase 3B pilot (decision D-0014)
+
+Sanitized owner-verified facts (no resource IDs, account IDs, IPs, or raw
+API payloads):
+
+- exact plan `g3-gpu-rtxpro6000-blackwell-1` (one RTX PRO 6000 Blackwell GPU);
+- selected region `us-sea`; observed catalog base price $3.00/hour; Seattle
+  had no observed regional surcharge;
+- an owner-run temporary capability probe reached running and was deleted;
+  it created no firewall; a later read-only check found zero matching test
+  instances, firewalls, and volumes; billing is not continuing for those
+  test resources;
+- that probe was **not** a genuine benchmark and collected no serving or
+  result data.
+
+The Seattle create/delete observation is stronger evidence for `us-sea` than
+an additional `us-ord` connectivity preflight. `us-ord` was only an example
+and is not the selected pilot region. Live capacity is still not guaranteed
+and must be reconfirmed through the saved Terraform plan immediately before
+apply.
+
+Authorized envelope: provider-native only; one GPU instance plus its one
+project/run-tagged firewall; six hours maximum instance lifetime; **$25
+total** session ceiling; owner checkpoint at three elapsed hours.
+Diagnostic cells only: interactive/1, batch-heavy/4, batch-heavy/8 (one
+warm-up, one measured repetition, 20 tasks each). Pilot observations must
+not be represented as comparative benchmark findings. The full 12-cell
+baseline is not authorized.
 
 ## Credentials and API access
 
@@ -71,7 +102,7 @@ confirmed deployability in the selected region, deployment capability, and the
 applicable regional price:
 
 ```bash
-python scripts/preflight/check_akamai.py --region us-ord
+python scripts/preflight/check_akamai.py --region us-sea
 # exit 0 only when every decision passed; writes a sanitized receipt under
 # $LAB_RESULTS_DIR/preflight-receipts/ (path not printed)
 ```
@@ -94,8 +125,8 @@ Write `$LAB_RESULTS_DIR/infra-lifecycle/<run-tag>/terraform.tfvars`, for example
 
 ```hcl
 run_tag            = "p3-pilot-20260907a"
-region             = "us-ord"
-gpu_instance_type  = "<exact plan id from authenticated preflight>"
+region             = "us-sea"
+gpu_instance_type  = "g3-gpu-rtxpro6000-blackwell-1"
 authorized_ssh_key = "ssh-ed25519 AAAA... operator"
 management_cidr    = "203.0.113.10/32"   # operator management IP only
 ttl_hours          = 6
@@ -219,7 +250,7 @@ billing may continue — escalate and retry.
 
 ```bash
 blackwell-cloud orphan-report --run-tag p3-pilot-20260907a
-blackwell-cloud session-summary --run-tag p3-pilot-20260907a --hourly-price 3.50
+blackwell-cloud session-summary --run-tag p3-pilot-20260907a --hourly-price 3.00
 ```
 
 The orphan report is read-only and never deletes anything.

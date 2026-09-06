@@ -75,9 +75,10 @@ explicitly revises them in writing.
    files containing values.
 2. Never request that credentials be committed to the repository, or add them
    to source files, GitHub issues, or pull-request text.
-3. Credentials enter the environment only through environment variables or
-   provider-standard credential files outside the repository. `.env.example`
-   documents variable names only, never values.
+3. Credentials enter the environment only through the owner's local
+   credential store or a temporary process environment. Do **not** store a
+   provider token in a repository-local `.env` file, even if that file is
+   gitignored. `.env.example` documents variable names only, never values.
 4. Treat `.gitignore` as a convenience, not a security boundary.
 
 ## 5. Data and results integrity
@@ -118,12 +119,14 @@ explicitly revises them in writing.
 1. **Stop at the end of the currently authorized phase.** The roadmap is in
    [docs/roadmap.md](docs/roadmap.md). Work on a later phase begins only after
    the project owner explicitly authorizes it.
-2. Phase status: **Phases 1 and 2 are complete.** Currently authorized and in
-   progress: **Phase 3A (Akamai baseline readiness) only** — cloud-independent
-   preparation with no provisioning, no credentials, and no genuine
-   measurement. **Phase 3B (provisioning and measurement) and later phases
-   remain unauthorized** and require separate explicit owner authorization
-   (decision D-0012).
+2. Phase status: **Phases 1 and 2 are complete.** **Phase 3A is complete.**
+   **Phase 3B is authorized only for one bounded Akamai compatibility/headroom
+   pilot** (decision D-0014): provider-native, `us-sea`, plan
+   `g3-gpu-rtxpro6000-blackwell-1`, one GPU instance plus its firewall, six
+   hours / $25 maximum. The **full Phase 3 baseline is not authorized**.
+   **Phase 4 and later phases remain unauthorized** and require separate
+   explicit owner authorization. Actual apply, pilot, and destroy commands
+   still require their separate exact local approval phrases.
 
 ## 8. Repository hygiene
 
