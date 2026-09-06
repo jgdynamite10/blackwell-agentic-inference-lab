@@ -19,11 +19,14 @@ warm-up per the [measurement contract](measurement-contract.md).
 ## Comparison modes (strict separation)
 
 1. **Controlled-resource mode.** A documented common CPU and system-memory
-   limit is applied to the benchmark and serving containers identically on all
-   three providers (proposed: 14 vCPUs / 100 GiB — provisional, see
-   [../docs/feasibility-report.md](../docs/feasibility-report.md) §7).
-   Purpose: reduce host-resource differences while comparing the GPU and
-   serving stack. CPU architecture differences remain and are recorded.
+   envelope is applied on all three providers as a **joint total across the
+   serving and benchmark workload combined** — not independently per
+   container (provisional: 14 vCPUs / 100 GiB joint total, see
+   [../docs/feasibility-report.md](../docs/feasibility-report.md) §7). The
+   exact allocation between the two containers and the cgroup enforcement
+   mechanism are frozen only after Phase 3 headroom validation. Purpose:
+   reduce host-resource differences while comparing the GPU and serving
+   stack. CPU architecture differences remain and are recorded.
 2. **Provider-native mode.** The provider's normal purchasable instance
    configuration with no artificial caps. Purpose: evaluate the operational
    experience and economics a customer actually receives.

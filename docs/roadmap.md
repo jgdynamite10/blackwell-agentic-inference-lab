@@ -29,6 +29,11 @@ benchmark runner — all runnable **without a GPU** (for example against a mock
 or small CPU model endpoint). Includes unit tests, scenario validation, and
 synthetic fixture data only.
 
+Phase 2 must also define the **minimum task/sample counts required for
+meaningful p95 and p99 latency reporting**, before any GPU measurement
+begins: tail percentiles from undersized samples are noise, so the scenario
+and repetition counts must be justified against the reported percentiles.
+
 ## Phase 3 — Akamai Cloud baseline
 
 Run **one validated model and serving configuration** on **one Akamai RTX PRO

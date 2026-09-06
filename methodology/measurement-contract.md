@@ -54,7 +54,9 @@ container-network path is recorded in the manifest.
     latency target.
 
 Latency measures are reported as p50 / p90 / p95 / p99 plus mean; no measure
-is reported as a bare mean alone.
+is reported as a bare mean alone. Phase 2 must define, before GPU measurement
+begins, the minimum task/sample counts needed for p95 and p99 to be
+meaningful; percentiles are not reported for samples below those minimums.
 
 ## 4. SLO definitions
 

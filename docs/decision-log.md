@@ -43,9 +43,12 @@ provider-native mode reflects what a customer actually buys.
 
 ## 2026-09-05 — D-0004: Proposed controlled-resource envelope (provisional)
 
-**Decision.** Propose 14 vCPUs / 100 GiB RAM as the common container envelope,
-derived from the smallest candidate host (`g7e.4xlarge`: 16 vCPU / 128 GiB).
-**Provisional** — finalized only after Phase 3 empirically confirms headroom
+**Decision.** Propose 14 vCPUs / 100 GiB RAM as the provisional
+controlled-resource envelope — a **joint total across the serving and
+benchmark workload combined**, not per container — derived from the smallest
+candidate host (`g7e.4xlarge`: 16 vCPU / 128 GiB). **Provisional** — the
+exact allocation between containers and the cgroup enforcement mechanism are
+frozen only after Phase 3 headroom validation empirically confirms headroom
 for model loading, serving, telemetry, and benchmark execution.
 
 **Rationale.** See [feasibility-report.md](feasibility-report.md), section 7.

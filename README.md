@@ -48,9 +48,10 @@ cost per successful task. The full measurement contract is in
 | Telemetry | NVIDIA DCGM, Prometheus, Grafana; selected Nsight Systems profiling |
 | Optional | NVIDIA Dynamo multi-GPU extension (Phase 8, only if justified) |
 
-All product, version, quota, licensing, and compatibility claims are verified
-against current official documentation before implementation. Current findings
-are in [docs/feasibility-report.md](docs/feasibility-report.md).
+The [feasibility report](docs/feasibility-report.md) distinguishes verified
+facts from assumptions, estimates, and inferences, and time-sensitive claims
+(pricing, availability, compatibility) are reverified before execution rather
+than treated as settled.
 
 ## Repository layout
 
