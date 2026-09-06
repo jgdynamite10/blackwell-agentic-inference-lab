@@ -65,6 +65,26 @@ variable "instance_image" {
   }
 }
 
+variable "management_cidr" {
+  description = <<-EOT
+    Owner-supplied IPv4 management CIDR. SSH (TCP/22) is permitted ONLY from
+    this range by the run's Cloud Firewall; every other inbound flow is
+    dropped, and the model-serving port is never exposed publicly (serving
+    binds to loopback on the instance). 0.0.0.0/0, ::/0, and any /0 prefix
+    are refused: a public instance protected only by an SSH key is not an
+    acceptable posture for this project.
+  EOT
+  type        = string
+
+  validation {
+    condition = (
+      can(cidrhost(var.management_cidr, 0)) &&
+      can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/([1-9]|[12][0-9]|3[0-2])$", var.management_cidr))
+    )
+    error_message = "management_cidr must be a specific IPv4 CIDR with prefix /1-/32; 0.0.0.0/0 and ::/0 are refused."
+  }
+}
+
 variable "authorized_ssh_key" {
   description = <<-EOT
     ONE SSH public key (never a private key) granting the operator access.

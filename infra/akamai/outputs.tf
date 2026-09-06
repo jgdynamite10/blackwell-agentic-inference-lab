@@ -32,3 +32,13 @@ output "instance_ipv4" {
   value       = linode_instance.gpu_baseline.ipv4
   sensitive   = true
 }
+
+output "firewall_id" {
+  description = "Provider id of the run's Cloud Firewall (ledger key for exact teardown)."
+  value       = linode_firewall.gpu_baseline.id
+}
+
+output "firewall_label" {
+  description = "Firewall label (bwlab-fw-<run_tag>)."
+  value       = linode_firewall.gpu_baseline.label
+}

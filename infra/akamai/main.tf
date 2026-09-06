@@ -1,6 +1,8 @@
 # Exactly ONE single-GPU RTX PRO 6000 Blackwell instance for one benchmark
-# session. No other resources are defined: no volumes, no load balancers, no
-# firewall-managed fleets, nothing that could silently keep billing.
+# session, plus its dedicated run-tagged Cloud Firewall (a supporting network
+# control, not a second billable compute resource). No other resources are
+# defined: no volumes, no load balancers, nothing that could silently keep
+# billing.
 #
 # Lifecycle rules (cost-guardrails.md; docs/decision-log.md D-0012):
 # - plan is the default verb; apply and destroy each require a separate
@@ -44,4 +46,27 @@ resource "linode_instance" "gpu_baseline" {
     prevent_destroy = false
     ignore_changes  = []
   }
+}
+
+# Run-tagged Cloud Firewall: the instance is never deployed as a public host
+# protected only by an SSH key. Inbound default-drop; SSH is accepted ONLY
+# from the owner-supplied management CIDR; the model-serving port is never
+# exposed (serving binds to loopback on the instance). This firewall is part
+# of the run's exact resource ledger and of the exact-resource teardown.
+resource "linode_firewall" "gpu_baseline" {
+  label = "bwlab-fw-${var.run_tag}"
+  tags  = local.tags
+
+  inbound_policy  = "DROP"
+  outbound_policy = "ACCEPT"
+
+  inbound {
+    label    = "allow-ssh-management-cidr"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "22"
+    ipv4     = [var.management_cidr]
+  }
+
+  linodes = [linode_instance.gpu_baseline.id]
 }
