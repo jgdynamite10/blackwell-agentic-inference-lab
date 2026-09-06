@@ -18,6 +18,9 @@ dependencies = [
     "jsonschema[format-nongpl]>=4.21",
 ]
 
+[project.scripts]
+blackwell-bench = "blackwell_lab.workload.runner:main"
+
 [project.urls]
 Homepage = "https://github.com/jgdynamite10/blackwell-agentic-inference-lab"
 Repository = "https://github.com/jgdynamite10/blackwell-agentic-inference-lab"
