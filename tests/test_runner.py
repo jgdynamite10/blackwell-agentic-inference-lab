@@ -315,6 +315,35 @@ class TestConcurrencyTruthfulness:
         assert concurrency["achieved_max"] == 1
         assert 0.0 <= concurrency["mean_in_flight"] <= 1.0
 
+    def test_submission_is_stamped_at_slot_claim_not_preloaded(self):
+        """Regression (owner blocker 1): three 85 ms elevated-latency tasks at
+        concurrency 1 under a 100 ms timeout must ALL complete. A genuine
+        bounded closed-loop scheduler stamps each submission only when its
+        slot becomes available, so unslotted tasks consume no timeout budget;
+        pre-stamping every task at enqueue would time out tasks 2 and 3."""
+        record = fast_cell(
+            repetitions=1,
+            warmup_passes=0,
+            concurrency=1,
+            tasks_per_repetition=3,
+            scenario_ids=["elevated-latency-001"],
+            timeout_ms=100.0,
+        )[0]
+        tasks = record.result["tasks"]
+        assert tasks["attempted"] == 3
+        assert tasks["succeeded"] == 3
+        assert tasks["timed_out"] == 0
+        observations = record.measured_observations["observations"]
+        offsets = [o["submitted_offset_ms"] for o in observations]
+        # Submission offsets advance rather than all being zero: each task is
+        # submitted only after the previous 85 ms task released the slot.
+        assert offsets[0] < offsets[1] < offsets[2]
+        assert offsets[1] >= 85.0
+        assert offsets[2] >= 170.0
+        for observation in observations:
+            assert observation["e2e_ms"] == pytest.approx(85.0)
+            assert observation["queue_wait_ms"] == pytest.approx(0.0)
+
 
 class TestTimingSemantics:
     def test_cell_wall_time_includes_the_85ms_fixed_tool_total(self):

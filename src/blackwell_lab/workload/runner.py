@@ -2,9 +2,10 @@
 
 CLI-first and fully offline: no GPU, no model download, no external API, no
 network. The runner executes cells of (profile x concurrency) with a single
-truthful **bounded closed-loop scheduler**: every task is stamped at actual
-driver submission, at most ``concurrency`` tasks are ever in flight (no
-pre-submitted unbounded backlog), and requested/achieved-max/mean in-flight
+truthful **bounded closed-loop scheduler**: at most ``concurrency`` slots
+exist, a worker claims the next task and stamps its submission only when a
+slot becomes available (no pre-submitted unbounded backlog; unslotted tasks
+consume no timeout budget), and requested/achieved-max/mean in-flight
 concurrency are all recorded. Profiles are differentiated by context/input
 size, output budget, timeout, and SLO — not by unimplemented arrival
 algorithms.
@@ -45,7 +46,6 @@ import hashlib
 import json
 import os
 import platform
-import queue
 import shutil
 import subprocess
 import sys
@@ -183,10 +183,11 @@ PROFILES: dict[str, Profile] = {
 
 #: One truthful scheduler for Phase 2 (recorded in manifests).
 SCHEDULER_DESCRIPTION = (
-    "bounded closed-loop: all task instances are stamped at driver submission "
-    "and pulled by at most `concurrency` workers; in-flight work is bounded "
-    "above by the requested concurrency but is not claimed to be exactly "
-    "enforced during ramp-up and drain"
+    "bounded closed-loop: at most `concurrency` slots exist, and a worker "
+    "claims the next task and stamps its submission only when a slot becomes "
+    "available (a task that has not entered a slot consumes no timeout "
+    "budget); in-flight work is bounded above by the requested concurrency "
+    "but is not claimed to be exactly enforced during ramp-up and drain"
 )
 
 
@@ -283,32 +284,31 @@ def _run_pass(
 ) -> RepetitionData:
     """One bounded closed-loop pass over the instance schedule.
 
-    Every instance is stamped at **driver submission** (enqueue time, before
-    any worker dequeues it); exactly ``concurrency`` workers pull from the
-    bounded queue, so no unbounded backlog is ever pre-submitted to an
-    executor. Each terminal record is handed to the evaluator immediately in
-    the same worker.
+    At most ``concurrency`` slots exist. A worker **claims** the next task
+    and stamps its submission only when its slot becomes available — no
+    unbounded backlog is ever pre-submitted, and a task that has not entered
+    a slot consumes none of its timeout budget. Each terminal record is
+    handed to the evaluator immediately in the same worker.
     """
     pass_start = clock.monotonic()
-    work: queue.SimpleQueue = queue.SimpleQueue()
-    for task_index, instance in enumerate(instances):
-        # Actual driver submission instant (task timing starts here).
-        work.put((task_index, instance, clock.monotonic(), _utc_now()))
-
     outcomes: list[TaskOutcome | None] = [None] * len(instances)
     lock = threading.Lock()
-    state = {"in_flight": 0, "achieved_max": 0, "busy_s": 0.0}
+    state = {"next_index": 0, "in_flight": 0, "achieved_max": 0, "busy_s": 0.0}
 
     def _worker() -> None:
         while True:
-            try:
-                task_index, instance, submitted_at, submitted_utc = work.get_nowait()
-            except queue.Empty:
-                return
-            started = clock.monotonic()
             with lock:
+                task_index = state["next_index"]
+                if task_index >= len(instances):
+                    return
+                state["next_index"] += 1
                 state["in_flight"] += 1
                 state["achieved_max"] = max(state["achieved_max"], state["in_flight"])
+            instance = instances[task_index]
+            # Actual driver submission instant: the slot was just claimed, so
+            # task timing — and the timeout budget — starts here.
+            submitted_at = clock.monotonic()
+            submitted_utc = _utc_now()
             scenario = scenarios_by_id[instance.template_id]
             toolbox = SimulatedToolbox(
                 scenario,
@@ -334,7 +334,7 @@ def _run_pass(
             ended = clock.monotonic()
             with lock:
                 state["in_flight"] -= 1
-                state["busy_s"] += max(0.0, ended - started)
+                state["busy_s"] += max(0.0, ended - submitted_at)
             outcomes[task_index] = TaskOutcome(
                 task_index=task_index,
                 instance=instance,
