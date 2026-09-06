@@ -48,7 +48,10 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"] # asserts are the point of tests
+"tests/*" = [
+    "S101", # asserts are the point of tests
+    "S106", # injected fake tokens ("t") exercise credential-handling paths
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

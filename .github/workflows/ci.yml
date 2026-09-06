@@ -15,6 +15,10 @@ permissions:
 # Secret detection uses the open-source Gitleaks CLI pinned to an exact
 # release with a verified SHA-256 checksum (no gitleaks-action, no
 # GITLEAKS_LICENSE, no artifact upload of findings).
+# Terraform validation installs the exact pinned Terraform CLI release
+# directly from releases.hashicorp.com with a verified SHA-256 checksum (no
+# third-party setup action), and NEVER contacts Akamai APIs: init runs with
+# -backend=false and no provider credentials exist in CI.
 
 jobs:
   lint:
@@ -89,6 +93,48 @@ jobs:
         run: pip install -e ".[dev]" -c constraints.txt
       - name: Test results-privacy path guard
         run: pytest tests/test_paths.py -v
+
+  terraform-validation:
+    name: Terraform validation (credential-free)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TERRAFORM_VERSION: "1.9.8"
+      TERRAFORM_SHA256: "186e0145f5e5f2eb97cbd785bc78f21bae4ef15119349f6ad4fa535b83b10df8"
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Download and verify Terraform CLI (pinned release + checksum)
+        run: |
+          set -euo pipefail
+          curl -sSL -o terraform.zip \
+            "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          echo "${TERRAFORM_SHA256}  terraform.zip" | sha256sum --check --strict
+          unzip -o terraform.zip terraform
+          rm terraform.zip
+          sudo install -m 0755 terraform /usr/local/bin/terraform
+          terraform version
+      - name: terraform fmt -check -recursive
+        working-directory: infra/akamai
+        run: terraform fmt -check -recursive
+      - name: terraform init -backend=false (no credentials, no Akamai API)
+        working-directory: infra/akamai
+        env:
+          TF_IN_AUTOMATION: "1"
+        run: terraform init -backend=false -input=false
+      - name: terraform validate
+        working-directory: infra/akamai
+        env:
+          TF_IN_AUTOMATION: "1"
+        run: terraform validate -no-color
+      - name: Install package with dev extras (pinned via constraints)
+        run: pip install -e ".[dev]" -c constraints.txt
+      - name: Lifecycle unit tests (terraform required, skips forbidden)
+        env:
+          BWLAB_REQUIRE_TERRAFORM: "1"
+        run: pytest tests/test_cloud_lifecycle.py tests/test_terraform.py -v
 
   secret-detection:
     name: Secret detection (gitleaks)
