@@ -1,0 +1,7 @@
+# Rendered by bootstrap.sh (idle minutes substituted from bootstrap.env).
+[Unit]
+Description=Blackwell Lab workload watchdog (NOT a billing control)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bwlab-watchdog @IDLE_MINUTES@

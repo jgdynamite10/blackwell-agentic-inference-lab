@@ -1,0 +1,12 @@
+# Terraform state, variable values, and plugin caches stay OUTSIDE Git:
+# state and tfvars contain resource ids, addresses, and operator data.
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+# .terraform.lock.hcl IS committed: it pins provider hashes.
+.terraform/
+crash.log
+crash.*.log
+*.tfplan
+plan.out
