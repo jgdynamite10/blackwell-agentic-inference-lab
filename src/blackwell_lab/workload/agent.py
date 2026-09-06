@@ -8,8 +8,9 @@ terminal recommendation, errs, or times out.
 Timing semantics (decision D-0010; measurement contract §1/§2):
 
 - **Start boundary** — the driver's actual submission instant
-  (``submitted_at``, stamped when the driver enqueues the task, before any
-  worker dequeues it). Queue wait inside the driver is part of task duration.
+  (``submitted_at``, stamped the moment a bounded-scheduler slot becomes
+  available and the worker claims the task). A task that has not entered a
+  slot has not been submitted and consumes none of its timeout budget.
 - **End boundary** — the terminal outcome stamp taken as the task record is
   completed; the runner hands that record to the evaluator synchronously and
   immediately, with no buffering in between, so the documented boundary and
@@ -18,6 +19,9 @@ Timing semantics (decision D-0010; measurement contract §1/§2):
   occupy task duration, timeout budget, and wall time.
 - The per-task deadline is ``submitted_at + timeout_s`` and is propagated to
   the model client, which must honor it (returning close to the deadline).
+  The remaining deadline is also checked **before and after every tool
+  execution, including the terminal tool**: tool latency that reaches or
+  crosses the deadline yields ``task_timeout``, never a completion.
 
 Retry policy: ``RETRIES = 0`` for measurement runs — failures are visible,
 not hidden (measurement contract §7).
@@ -350,15 +354,17 @@ def run_task(
             )
         )
 
+        # The deadline is enforced after EVERY tool, including the terminal
+        # one: tool latency that reaches or crosses the deadline is a
+        # task_timeout, never a completion.
+        if clock.monotonic() >= deadline:
+            return finish("timeout", "task_timeout")
+
         if result.tool == TERMINAL_TOOL:
             execution.diagnosis_id = call["arguments"]["diagnosis_id"]
             execution.rationale = call["arguments"]["rationale"]
             execution.remediation_id = call["arguments"]["remediation_id"]
             return finish("completed")
-
-        # Tool execution consumed simulated latency; the deadline applies.
-        if clock.monotonic() >= deadline:
-            return finish("timeout", "task_timeout")
 
         messages.append(
             Message("tool", json.dumps({"tool": result.tool, "result": result.payload}))

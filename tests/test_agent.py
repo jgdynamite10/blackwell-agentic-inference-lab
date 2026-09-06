@@ -216,6 +216,37 @@ class TestTimeouts:
         assert execution.status == "timeout"
         assert execution.error_category == "task_timeout"
 
+    def test_reference_path_cannot_complete_under_an_83ms_timeout(self):
+        """Regression (owner blocker 3): the 85 ms reference path fits its
+        first five tools (80 ms) under an 83 ms deadline, but the 5 ms
+        terminal tool crosses it. The deadline is enforced after EVERY tool,
+        including the terminal one, so this is a task_timeout — never a
+        completion."""
+        scenario = catalog()["elevated-latency-001"]
+        execution = execute(scenario=scenario, timeout_s=0.083)
+        assert execution.status == "timeout"
+        assert execution.error_category == "task_timeout"
+        # The terminal tool ran (its latency is what crossed the deadline)
+        # but its recommendation is never credited.
+        assert execution.tools_used[-1] == "recommend_remediation"
+        assert execution.e2e_ms == pytest.approx(85.0)
+        assert execution.diagnosis_id is None
+        assert execution.remediation_id is None
+
+    def test_terminal_latency_reaching_the_deadline_exactly_is_a_timeout(self):
+        """`reaches or crosses`: a deadline landing exactly on the terminal
+        tool's completion instant is a timeout, not a completion. The exact
+        instant is reproduced by replaying the clock's own float accumulation
+        from a zero start (0.0 + timeout is always exact)."""
+        scenario = catalog()["elevated-latency-001"]
+        exact_deadline = 0.0
+        for step in scenario.reference_tool_sequence:
+            exact_deadline += TOOL_LATENCY_MS[step["tool"]] / 1000.0
+        exact_deadline += TOOL_LATENCY_MS["recommend_remediation"] / 1000.0
+        execution = execute(scenario=scenario, clock=FakeClock(start=0.0), timeout_s=exact_deadline)
+        assert execution.status == "timeout"
+        assert execution.error_category == "task_timeout"
+
 
 class TestInstancePrompting:
     def test_instance_surface_variant_reaches_the_prompt(self):
