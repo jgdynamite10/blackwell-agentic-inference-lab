@@ -362,3 +362,75 @@ task timeouts; JSON-serialization substring matching allowed echoed
 arguments and not-found responses to count as evidence; the terminal tool
 escaped the deadline; and non-positive limits/windows were accepted. All
 four defects are corrected before any genuine measurement exists.
+
+## 2026-09-06 — D-0012: Phase 2 complete; Phase 3A readiness authorized; 12-cell symmetric Akamai baseline matrix; pilot before freeze (extends the D-0002 baseline boundaries with the comparison-mode factor)
+
+**No genuine results predate this change.** No genuine benchmark has been
+executed in any phase.
+
+**Decision.** Per the owner's Phase 3A authorization memo (2026-09-06):
+
+1. **Phase status.** Phase 2 (synthetic workload and evaluator) is
+   **complete**. **Phase 3A — Akamai baseline readiness** is authorized:
+   cloud-independent preparation only, with no provisioning, modification,
+   or deletion of cloud resources, no provider credentials, no authenticated
+   preflight execution in hosted contexts, no model-weight or large-container
+   downloads, no genuine benchmark, and no genuine-result publication.
+   **Phase 3B — provisioning and measurement — remains unauthorized** and
+   requires separate explicit owner approval.
+2. **Symmetric 12-cell Phase 3 matrix (reconciliation).** The original
+   Phase 3 definition (six cells, no comparison-mode factor) was
+   inconsistent with Phases 5–6, which run both controlled-resource and
+   provider-native modes (12 cells per provider). Phase 3 now runs **both
+   comparison modes** on the single Akamai instance: 2 modes × 2 workload
+   profiles × 3 concurrency levels = **12 cells / 60 measured repetitions /
+   12,000 measured task observations**, giving every later portability cell
+   an exact same-mode Akamai counterpart. Modes run serially on the same
+   instance, so the factor doubles measured GPU-hours, not instance count.
+3. **Cost re-derivation.** Phase 3 planning estimates become ≈ 90–230
+   GPU-hours (setup/validation 15–25 h, pilot 2–4 h, measured cells
+   ≈ 70–200 h under the D-0010 sample plan) ≈ **$230–$580** at the
+   officially stated $2.50/h starting price — still a preliminary,
+   non-authoritative estimate pending an account-level quote
+   (feasibility report §8; cost-guardrails budget table updated).
+4. **Pilot before freeze.** A short owner-approved compatibility/headroom
+   pilot (reduced task count; bootstrap, driver/CUDA and model
+   compatibility, BF16 bring-up, headroom at concurrency 8,
+   realized-latency sampling) precedes and is separate from the full
+   baseline. The full-run settings — model artifact and hash, vLLM
+   container digest, BF16 configuration, generation settings, warm-up,
+   timeouts, resource allocation, and cgroup enforcement — are **frozen
+   only after the pilot**, with a decision-log entry; the full 12-cell
+   baseline then requires its own explicit authorization.
+5. **Readiness deliverables.** Phase 3A delivers: Akamai Terraform for
+   exactly one RTX PRO 6000 Blackwell single-GPU instance (pinned provider
+   4.1.0, validated variables, unique project/run tags, state and tfvars
+   outside Git); plan-by-default lifecycle tooling whose apply and destroy
+   each require separate explicit local owner approval and refuse hosted
+   execution, with an exact per-run resource ledger, exact-resource
+   teardown plan, and read-only orphan report (never broad cleanup); an
+   idempotent bootstrap design (pinned OS/container/runtime assumptions,
+   NVIDIA driver/CUDA compatibility checks, pinned vLLM BF16 candidate,
+   model-artifact digest verification before serving, health/readiness
+   checks, and a workload watchdog documented as **not** a billing
+   control on Akamai); a provider-neutral OpenAI-compatible client for
+   configurable local serving endpoints that preserves the Phase 2 timing,
+   evaluator, accounting, and evidence contracts, never counts transport
+   chunks as tokens, uses authoritative usage and engine queue telemetry
+   only when genuinely available, and fails visibly when required
+   measurements are unavailable; truthful host/GPU telemetry and manifest
+   collection (never fabricated; unavailable data carries an explicit
+   reason); a sanitized, mock-tested authenticated read-only preflight for
+   exact plan entitlement, eligible regions, and account-visible price
+   (local operator only); and separate `blackwell-cloud` workflows for
+   readiness validation, the gated pilot, the **disabled** full baseline,
+   external result verification, and teardown plan / orphan report.
+   Genuine output uses `RunMode.REAL` and the external `LAB_RESULTS_DIR`
+   guard exclusively.
+
+**Rationale.** Owner instruction (Phase 3A authorization memo, 2026-09-06).
+The matrix reconciliation and cost re-derivation happen now — before any
+measurement exists — so the baseline definition cannot drift after results
+are observed; the pilot/freeze split keeps full-run settings from being
+declared frozen before compatibility and headroom are empirically
+validated.

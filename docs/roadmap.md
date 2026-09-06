@@ -4,9 +4,12 @@ Work proceeds phase by phase. **Each phase begins only after the project owner
 explicitly authorizes it, and work stops at the end of the currently
 authorized phase** ([AGENTS.md](../AGENTS.md), section 7).
 
-Phase status: **Phase 1 is complete.** Currently authorized and in progress:
-**Phase 2 only.** Phase 3 and later phases require separate explicit owner
-authorization.
+Phase status: **Phases 1 and 2 are complete.** Currently authorized and in
+progress: **Phase 3A (Akamai baseline readiness) only** — cloud-independent
+preparation with no provisioning, no credentials, and no genuine
+measurement. **Phase 3B (provisioning and measurement) and later phases
+remain unauthorized** and require separate explicit owner authorization
+(decision D-0012).
 
 ## Phase 1 — Repository foundation and feasibility *(complete)*
 
@@ -21,7 +24,7 @@ measurement contract and experiment matrix are defined; feasibility findings
 for Akamai Cloud, Google Cloud, and AWS are documented with verified facts
 separated from assumptions; a pull request is open for owner review.
 
-## Phase 2 — Synthetic workload and evaluator *(authorized, in progress)*
+## Phase 2 — Synthetic workload and evaluator *(complete)*
 
 Implement the Cloud Operations Agent, simulated tools
 (`get_service_health()`, `query_metrics()`, `search_logs()`,
@@ -39,12 +42,43 @@ and repetition counts must be justified against the reported percentiles.
 ## Phase 3 — Akamai Cloud baseline
 
 Run **one validated model and serving configuration** on **one Akamai RTX PRO
-6000 Blackwell GPU** using **two workload profiles** and **concurrency levels
-1, 4, and 8**, with five measured repetitions per cell per the measurement
-contract. This phase establishes the frozen baseline (model artifact and hash,
-container digest, serving configuration, generation parameters, workload) that
-all later portability phases reproduce. Requires explicit owner approval to
-provision the instance.
+6000 Blackwell GPU** using **both comparison modes (controlled-resource and
+provider-native)**, **two workload profiles**, and **concurrency levels
+1, 4, and 8** — the 12-cell baseline matrix of decision D-0012, with five
+measured repetitions per cell per the measurement contract. This phase
+establishes the frozen baseline (model artifact and hash, container digest,
+serving configuration, generation parameters, workload) that all later
+portability phases reproduce symmetrically in both modes.
+
+The phase is split into two separately authorized sub-phases:
+
+### Phase 3A — baseline readiness *(authorized, in progress)*
+
+Cloud-independent preparation only — no cloud resource is created, modified,
+or deleted; no credentials are used; no model weights or large containers are
+downloaded; no genuine benchmark runs. Deliverables: the finalized 12-cell
+experimental design and cost re-derivation; Akamai Terraform for exactly one
+single-GPU instance with plan-by-default lifecycle tooling, an exact resource
+ledger, and an orphan report; an idempotent bootstrap design with pinned
+assumptions, digest verification, and health checks; the provider-neutral
+OpenAI-compatible client extending the Phase 2 benchmark path to real
+endpoints; truthful host/GPU telemetry collection; a sanitized, mock-tested
+authenticated preflight (executed only by the local operator); and the
+`blackwell-cloud` workflows (readiness, gated pilot, disabled full baseline,
+result verification, teardown plan, orphan report).
+
+### Phase 3B — provisioning and measurement *(not authorized)*
+
+Requires separate explicit owner approval. Begins with one short
+**compatibility/headroom pilot** (bootstrap validation, driver/CUDA and model
+compatibility, BF16 serving bring-up, memory/CPU headroom at concurrency 8,
+realized-latency sampling to re-derive the budget) on one owner-approved
+instance. Full-run settings — model artifact and hash, vLLM container digest,
+BF16 configuration, generation settings, warm-up, timeouts, resource
+allocation, and cgroup enforcement — are **frozen only after the pilot**, and
+the full 12-cell baseline then requires its own explicit authorization.
+Every provisioning action follows [AGENTS.md](../AGENTS.md) §1 and
+[cost-guardrails.md](cost-guardrails.md).
 
 ## Phase 4 — NVIDIA optimization
 
@@ -89,6 +123,7 @@ and cost. This phase may be skipped entirely.
 ## Replication scope guard
 
 Google Cloud and AWS are **later replication providers**. The initial baseline
-is limited to Akamai Cloud, one GPU, one validated serving configuration, two
-workload profiles, concurrency 1/4/8, and five measured repetitions per cell.
-The baseline is not expanded without a decision-log entry and owner approval.
+is limited to Akamai Cloud, one GPU, one validated serving configuration, both
+comparison modes, two workload profiles, concurrency 1/4/8, and five measured
+repetitions per cell (12 cells; decision D-0012). The baseline is not expanded
+without a decision-log entry and owner approval.

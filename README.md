@@ -15,10 +15,12 @@ one-way mirror of canonical `main`**: it is synchronized only from reviewed
 and merged canonical `main`, and changes must never flow from the mirror back
 to this repository.
 
-**Status:** Phase 1 (repository foundation and feasibility) is **complete**.
-Phase 2 (synthetic workload and evaluator) is **authorized and in progress**.
-Phase 3 and later phases require separate explicit owner authorization
-([docs/roadmap.md](docs/roadmap.md)).
+**Status:** Phase 1 (repository foundation and feasibility) and Phase 2
+(synthetic workload and evaluator) are **complete**. Phase 3A (Akamai
+baseline **readiness** — cloud-independent preparation only) is **authorized
+and in progress**. Phase 3B (provisioning and measurement) and later phases
+remain **unauthorized** and require separate explicit owner authorization
+([docs/roadmap.md](docs/roadmap.md), decision D-0012).
 
 - **No genuine benchmarks have been run yet.** No results exist.
 - **All current example files are synthetic** and clearly labeled as such.
@@ -78,6 +80,8 @@ schemas/                     JSON Schemas for run manifests and benchmark result
 examples/                    Synthetic example manifest and result files (NOT real data)
 src/blackwell_lab/           Python package (schema validation, results-path guard)
 src/blackwell_lab/workload/  Synthetic Cloud Ops Agent, simulated tools, evaluator, offline runner
+src/blackwell_lab/cloud/     Phase 3 readiness: lifecycle, telemetry, preflight, real-bench assembly, CLI
+infra/akamai/                Akamai Terraform (single GPU instance) and idempotent bootstrap design
 tests/                       Automated tests
 scripts/preflight/           Read-only cloud feasibility checks (run locally by the operator)
 results/                     Placeholder only — genuine results are never committed here
@@ -118,6 +122,17 @@ blackwell-bench --profile interactive --concurrency 1 --repetitions 1 \
 
 (Measurement runs use the D-0010 defaults — 5 repetitions × 200 balanced
 task instances; the reduced values above are for a quick functional smoke.)
+
+Phase 3A readiness validation (offline; no cloud access, no credentials):
+
+```bash
+blackwell-cloud readiness
+```
+
+Provisioning, pilots, and genuine benchmarks (`blackwell-cloud pilot`,
+`apply`, `destroy`) run only in the owner's authenticated local environment
+with explicit approval, and the full baseline stays disabled until Phase 3B
+is authorized. See [infra/akamai/README.md](infra/akamai/README.md).
 
 ## Project governance
 

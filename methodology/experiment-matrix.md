@@ -40,17 +40,49 @@ claim may combine them.
 
 ## Phase 3 — frozen baseline (Akamai)
 
-The initial baseline is deliberately small and is **not expanded** without a
+**Reconciliation (decision D-0012).** The original Phase 3 definition ran
+six cells without a comparison-mode factor, while Phases 5–6 run both
+controlled-resource and provider-native modes (12 cells per provider). That
+asymmetry would have left the later portability comparisons without an
+Akamai counterpart for one of the two modes. Phase 3 therefore runs **both
+comparison modes on the Akamai baseline**, producing the symmetric 12-cell
+matrix that Phases 5 and 6 reproduce.
+
+The baseline is deliberately small and is **not expanded** without a
 decision-log entry and owner approval:
 
 - 1 cloud (Akamai), 1 GPU (RTX PRO 6000 Blackwell SE, 96 GB), 1 validated
   serving configuration (candidate: vLLM + BF16; final choice frozen after
-  validation), 2 workload profiles, concurrency {1, 4, 8}, 5 measured
-  repetitions per cell.
-- Cells: 1 × 1 × 1 × 1 × 2 × 3 = **6 cells / 30 measured repetitions**.
+  the pilot), 2 comparison modes (controlled-resource; provider-native),
+  2 workload profiles, concurrency {1, 4, 8}, 5 measured repetitions per
+  cell.
+- Cells: 1 × 2 × 1 × 1 × 2 × 3 = **12 cells / 60 measured repetitions /
+  12,000 measured task observations**.
+- Both modes run on the **same single instance** (controlled-resource mode
+  applies the documented joint cgroup envelope; provider-native mode removes
+  the artificial caps), so the matrix doubles measured GPU-hours but not
+  instance count.
 - Output: the frozen baseline definition — model artifact + hash, container
   digest, serving configuration, generation parameters, workload version —
   reused verbatim in Phases 5 and 6.
+
+### Phase 3 pilot (precedes and is separate from the full baseline)
+
+Before any full-baseline measurement, one short owner-approved
+**compatibility/headroom pilot** runs on a single instance:
+
+- Purpose: validate bootstrap, driver/CUDA compatibility, model-artifact
+  digest verification, BF16 serving bring-up, memory/CPU headroom at the
+  maximum requested concurrency (8), and realized task latency — the input
+  that dominates the measured-hour and cost estimates.
+- Scope: a **reduced task count** (indicatively ~20–25 tasks per profile at
+  one or two concurrency levels), explicitly labeled a pilot; pilot output is
+  never mixed with baseline results and never published.
+- Freeze point: model artifact and hash, vLLM container digest, BF16
+  configuration, generation settings, warm-up criterion, timeouts, resource
+  allocation, and cgroup enforcement are **frozen only after the pilot**
+  (with a decision-log entry). The full 12-cell baseline requires its own
+  separate authorization after the freeze.
 
 ## Phase 4 — optimization (Akamai)
 
@@ -67,8 +99,9 @@ Adds precision and serving-path factors on the same hardware:
 - Reproduce the frozen Phase 3 baseline exactly (same artifact hash, container
   digest, serving config, workload, generation parameters, measurement
   contract) on `g4-standard-48` and the selected G7e size.
-- Each provider runs both comparison modes: 6 baseline cells × 2 modes =
-  **12 cells per provider**.
+- Each provider runs both comparison modes — **12 cells per provider**,
+  symmetric with the 12 Akamai baseline cells, so every later-provider cell
+  has an exact Akamai counterpart in the same mode.
 - Every material environmental difference (CPU, memory, storage, network,
   virtualization, driver, region) is recorded in manifests and the phase
   report.

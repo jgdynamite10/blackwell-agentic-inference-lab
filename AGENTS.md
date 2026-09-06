@@ -118,9 +118,12 @@ explicitly revises them in writing.
 1. **Stop at the end of the currently authorized phase.** The roadmap is in
    [docs/roadmap.md](docs/roadmap.md). Work on a later phase begins only after
    the project owner explicitly authorizes it.
-2. Phase status: **Phase 1 is complete.** Currently authorized and in
-   progress: **Phase 2 (synthetic workload and evaluator) only.** Phase 3 and
-   later phases require separate explicit owner authorization.
+2. Phase status: **Phases 1 and 2 are complete.** Currently authorized and in
+   progress: **Phase 3A (Akamai baseline readiness) only** — cloud-independent
+   preparation with no provisioning, no credentials, and no genuine
+   measurement. **Phase 3B (provisioning and measurement) and later phases
+   remain unauthorized** and require separate explicit owner authorization
+   (decision D-0012).
 
 ## 8. Repository hygiene
 

@@ -1,8 +1,9 @@
 # Architecture
 
-This document describes both the **implemented architecture** (Phases 1–2)
-and the intended architecture of later phases. Components marked with a later
-phase are built only after that phase is explicitly authorized.
+This document describes both the **implemented architecture** (Phases 1–2
+and the Phase 3A readiness layer) and the intended architecture of later
+phases. Components marked with a later phase are built only after that phase
+is explicitly authorized.
 
 ## Overview
 
@@ -216,34 +217,84 @@ memory, storage type, network configuration, virtualization, driver, CUDA
 version, OS, region, and any other material environmental facts, so
 differences are recorded rather than hidden.
 
-## Infrastructure-as-code (Phases 3+; deferred, not implemented in Phase 2)
+## Phase 3 — Akamai deployment architecture (readiness implemented in 3A; execution requires 3B)
 
-Provider deployment diagrams and infrastructure-as-code are deferred to their
-authorized phases: Phase 3 (Akamai Cloud baseline deployment and lifecycle),
-Phase 5 (Google Cloud replication), and Phase 6 (AWS replication). Nothing in
-Phase 2 provisions, modifies, or tears down any cloud resource.
+Phase 3A implements the **readiness** layer only: Terraform under
+[../infra/akamai/](../infra/akamai/), the bootstrap design under
+`infra/akamai/bootstrap/`, and the `blackwell-cloud` CLI
+(`src/blackwell_lab/cloud/`). Nothing in Phase 3A provisions, modifies, or
+tears down any cloud resource; every billable or destructive action requires
+separate explicit local owner approval in Phase 3B and refuses to execute in
+hosted/CI environments. There is **no frontend application** — the entire
+workflow is CLI-first.
 
-Provisioning will use Terraform with per-provider modules; state and `.tfvars`
-stay outside the repository. `terraform apply`/`destroy` require explicit
-owner approval per [../AGENTS.md](../AGENTS.md).
+### Deployment view (single Akamai GPU instance)
 
-The future infrastructure workflow must support, in order:
+```mermaid
+flowchart TB
+    subgraph operator["Owner's authenticated local environment (never the hosted Cloud Agent)"]
+        cli["blackwell-cloud CLI<br/>readiness / plan / apply (gated) /<br/>pilot (gated) / verify-results /<br/>teardown-plan / destroy (gated) /<br/>orphan-report"]
+        tf["Terraform (pinned CLI + linode provider 4.1.0)<br/>state + tfvars OUTSIDE Git"]
+        preflight["Authenticated read-only preflight<br/>plan entitlement, regions, price<br/>(sanitized output; local only)"]
+    end
+    subgraph akamai["Akamai Cloud — ONE tagged instance (project + unique run tag + ttl)"]
+        subgraph inst["RTX PRO 6000 Blackwell SE GPU Linode (1 GPU / 96 GB)"]
+            serving["Model-serving container<br/>vLLM pinned by immutable digest,<br/>BF16, model artifact digest-verified<br/>BEFORE serving; health/readiness checks"]
+            driver["Benchmark driver<br/>Phase 2 runner + OpenAI-compatible<br/>client (local endpoint only,<br/>RunMode.REAL)"]
+            telem["Telemetry collection<br/>host/CPU/memory/OS/driver/CUDA facts,<br/>nvidia-smi GPU sampling —<br/>unavailable is reported, never fabricated"]
+            limits["Resource controls<br/>cgroup joint envelope<br/>(controlled-resource mode) or<br/>no caps (provider-native mode)"]
+            watchdog["Workload watchdog (systemd timer)<br/>limits idle workload only —<br/>NOT an Akamai billing control"]
+        end
+    end
+    external[("LAB_RESULTS_DIR<br/>external + PRIVATE, outside Git:<br/>manifests, results,<br/>raw task observations, ledger")]
 
-1. plan →
-2. explicit owner approval →
-3. provision →
-4. deploy →
-5. benchmark →
-6. verify external result export (to `LAB_RESULTS_DIR`) →
-7. explicit teardown approval →
-8. remove **only** resources created for the exact run →
-9. verify no project-created billable resources remain.
+    cli --> tf
+    tf -- "apply only with explicit<br/>owner approval (3B)" --> inst
+    cli --> preflight
+    driver -- "OpenAI-compatible HTTP<br/>(localhost / private only)" --> serving
+    telem --> driver
+    limits -.-> serving
+    limits -.-> driver
+    driver -- "verified export" --> external
+    tf -- "exact resource ledger" --> external
+```
 
-Billing-safety design constraint: on Akamai, powering off a Linode does not
-stop billing — compute billing stops only when the service is deleted from
-the account — and on AWS/GCP, disks, addresses, and snapshots may continue
-billing while an instance is stopped. Run tooling therefore treats "export
-and verify results, then owner-approved deletion of exactly the run's tagged
-resources, then verify nothing billable remains" as the normal end-of-session
-sequence. Automatic-shutdown, teardown, and orphan-detection controls are
-described in [cost-guardrails.md](cost-guardrails.md).
+### Lifecycle: plan → approval → provision → … → orphan check
+
+```mermaid
+flowchart LR
+    plan["terraform plan<br/>(default; read-only)"] --> approve1{{"explicit local owner<br/>approval to APPLY"}}
+    approve1 --> provision["provision ONE tagged<br/>GPU instance"]
+    provision --> bootstrap["idempotent bootstrap:<br/>pins, driver/CUDA checks,<br/>image + model digest verification,<br/>readiness checks, watchdog"]
+    bootstrap --> pilot["short pilot (gated), then<br/>freeze settings; full baseline<br/>only after separate 3B authorization"]
+    pilot --> verify["verify external results:<br/>schemas, semantic invariants,<br/>artifact hashes in LAB_RESULTS_DIR"]
+    verify --> approve2{{"explicit local owner<br/>approval to DESTROY"}}
+    approve2 --> teardown["delete EXACTLY the ledger's<br/>resources for this run<br/>(never broad cleanup)"]
+    teardown --> orphan["read-only orphan report:<br/>confirm no project-tagged<br/>billable resources remain"]
+```
+
+Key properties, binding on Phase 3B execution:
+
+- **Plan is the default.** `blackwell-cloud plan` and `teardown-plan` are
+  read-only; `apply` and `destroy` each require a separate explicit approval
+  phrase from the local owner and refuse hosted execution.
+- **Exact resource ledger.** Every applied resource is recorded (from
+  `terraform show -json`) in a per-run ledger outside Git; teardown targets
+  only the ledger's resources, matched by the run's unique tags. No broad
+  cleanup command exists.
+- **Billing safety.** On Akamai, powering off a Linode does not stop
+  billing — compute billing stops only when the service is deleted from the
+  account. The watchdog limits runaway workload only. The normal
+  end-of-session sequence is: export and verify results, then owner-approved
+  deletion of exactly the run's tagged resources, then the read-only orphan
+  check confirming nothing billable remains
+  ([cost-guardrails.md](cost-guardrails.md)).
+- **Truthful measurement.** The real benchmark path preserves the Phase 2
+  timing, evaluator, accounting, and evidence contracts; transport chunks
+  are never tokens; usage and engine queue telemetry are collected only when
+  genuinely available; required-but-unavailable measurements fail the run
+  visibly; genuine output uses `RunMode.REAL` and the external
+  `LAB_RESULTS_DIR` guard.
+
+Google Cloud (Phase 5) and AWS (Phase 6) replication reuse this workflow with
+per-provider Terraform modules once those phases are authorized.
