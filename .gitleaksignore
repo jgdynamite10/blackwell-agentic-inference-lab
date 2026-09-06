@@ -1,0 +1,8 @@
+# Known-safe findings that gitleaks may report from repository history.
+#
+# The fingerprint below is a FABRICATED test vector ("AKIA" followed by the
+# first sixteen letters of the alphabet) that briefly existed in
+# tests/test_safety.py as a self-test of the fixture safety scanner. It was
+# never a real credential. The test now constructs the sample at runtime so
+# the literal pattern no longer appears anywhere in the working tree.
+257d9b19b6df14305224983318136eccacec4800:tests/test_safety.py:aws-access-token:140

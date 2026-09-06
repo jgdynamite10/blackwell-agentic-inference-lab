@@ -136,8 +136,12 @@ class TestGeneratedOutputSafety:
 
     def test_safety_scan_actually_detects_violations(self):
         """Guard the guard: each forbidden pattern must trip the scanner."""
+        # The fake access-key sample is concatenated at runtime so the literal
+        # pattern never appears in the repository (it would trip gitleaks,
+        # which is exactly the duplication of coverage we want to avoid).
+        fake_akia = "AKIA" + "ABCDEFGHIJKLMNOP"
         bad_samples = [
-            "leaked AKIAABCDEFGHIJKLMNOP key",
+            f"leaked {fake_akia} key",
             "arn:aws:iam::000000000000:role/x",
             "account 123456789012 affected",
             "host ip 10.1.2.3 unreachable",
