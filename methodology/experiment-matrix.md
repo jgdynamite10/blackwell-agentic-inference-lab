@@ -3,7 +3,10 @@
 Defines the experimental cells for every phase. A **cell** is the unit of
 measurement: provider × comparison mode × serving path × precision × workload
 profile × concurrency. Every cell receives **five measured repetitions** plus
-warm-up per the [measurement contract](measurement-contract.md).
+warm-up per the [measurement contract](measurement-contract.md); each
+measured repetition contains **200 balanced task instances**
+(decision D-0010), so a full cell yields **1,000 task observations** — enough
+for the separately labeled cell-level p99 analysis in Phase 7.
 
 ## Factors
 
@@ -14,7 +17,7 @@ warm-up per the [measurement contract](measurement-contract.md).
 | Serving path | vLLM; TensorRT-LLM; NVIDIA NIM | vLLM is the baseline; others added in Phase 4 |
 | Precision | BF16; NVFP4 | Subject to compatibility findings |
 | Workload profile | interactive; batch-heavy | Defined in [workload-definition.md](workload-definition.md) |
-| Concurrency | 1; 4; 8 | Simultaneous agent tasks |
+| Concurrency | 1; 4; 8 | Requested in-flight agent tasks (bounded closed-loop scheduler; requested/achieved-max/mean in-flight are all recorded) |
 
 ## Comparison modes (strict separation)
 
@@ -76,13 +79,19 @@ To prevent post-hoc methodology drift, the following are fixed and recorded
 before Phase 3 measurement starts (decision-log entries required to change):
 
 1. SLO latency targets and quality threshold (measurement contract §4, §8).
-   Phase 2 proposals (pending owner approval, decision D-0009): interactive
-   T_task 60,000 ms and T_ttft 2,500 ms per turn; batch-heavy T_task
-   300,000 ms with no TTFT target; quality threshold S_min 0.85.
-2. Per-profile task timeout values. Phase 2 values (D-0009): interactive
+   **Owner-approved (decision D-0010)**: interactive T_task 60,000 ms and
+   T_ttft 2,500 ms per turn; batch-heavy T_task 300,000 ms with no TTFT
+   target; quality threshold **S_min = 1.0** (all mandatory evaluator gates
+   must pass — success is deterministic and gate-based).
+2. Per-profile task timeout values. **Owner-approved (D-0010)**: interactive
    120,000 ms; batch-heavy 600,000 ms.
-3. Warm-up criterion.
-4. Generation settings (candidate: temperature 1.0, top_p 0.95 — the model
+3. The sample plan (D-0010): 200 balanced task instances per measured
+   repetition; per-repetition p95 at n ≥ 200; per-repetition p99 suppressed
+   below 1,000 observations; cell-level p99 from the pooled 1,000 raw
+   observations is a separately labeled Phase 7 analysis.
+4. Warm-up criterion (warm-up observations retained separately, labeled, and
+   excluded from measured summaries).
+5. Generation settings (candidate: temperature 1.0, top_p 0.95 — the model
    card's recommended sampling — with a fixed max-token budget; reasoning mode
    setting per workload profile).
-5. The five-repetition count and median-with-range summary rule.
+6. The five-repetition count and median-with-range summary rule.

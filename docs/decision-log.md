@@ -209,3 +209,106 @@ The workload, evaluator, statistical rules, and schema representation follow
 the measurement contract and workload definition; SLO targets and the quality
 threshold are highlighted as unapproved proposals so measurement cannot begin
 on values the owner never reviewed.
+
+*Note: the proposals in items 3–6 and the sample plan implied by item 2 are
+superseded by D-0010; the entry is retained unaltered as the historical
+record.*
+
+## 2026-09-06 — D-0010: Owner-approved methodology — gate-based success, attainable sample plan, truthful timing/concurrency/streaming semantics (supersedes the affected D-0009 proposals)
+
+**No genuine results predate this change.** No genuine benchmark has been
+executed in any phase; every document produced so far is synthetic or
+functional-validation output, so this revision cannot retroactively affect
+any real measurement.
+
+**Decision.** Per the owner's Phase 2 final correction instruction of
+2026-09-06:
+
+1. **SLO targets and timeouts are owner-approved** (no longer proposals,
+   superseding D-0009 item 6 and the timeout values in item 5):
+   interactive — T_task ≤ 60,000 ms, per-turn TTFT ≤ 2,500 ms, per-task
+   timeout 120,000 ms; batch-heavy — T_task ≤ 300,000 ms, **no** TTFT
+   target, per-task timeout 600,000 ms.
+2. **Deterministic gate-based task success; S_min = 1.0** (superseding the
+   weighted keyword scoring of D-0009 items 3–4). A task succeeds only when
+   **all mandatory gates** pass: the task completed; the submitted
+   `diagnosis_id` is exactly an accepted diagnosis (candidates are published
+   in the synthetic task/tool evidence — the model never guesses a hidden
+   string); the submitted `remediation_id` is in the accepted set; and every
+   mandatory machine-checkable **evidence predicate** declared by the
+   scenario is satisfied by the recorded tool trace (permitted alternative
+   evidence paths are declared per scenario). Component scores
+   (diagnosis/remediation/evidence) are retained as **diagnostics only** and
+   never define success. The evaluator is version **3.0.0**; the workload
+   catalog (structured diagnosis candidates, evidence predicates,
+   alternative paths) is version **2.1.0**.
+3. **Attainable sample plan.** Each measured repetition contains
+   **200 balanced task instances** (`tasks_per_repetition`, measurement
+   default 200), deterministically balanced across the ten incident
+   templates with seeded per-instance surface variants. Per-repetition p95
+   is reported at n ≥ 200; per-repetition p99 remains suppressed below
+   1,000 observations. The five repetitions provide 1,000 task observations
+   per cell for a **separately labeled cell-level p99** calculated in
+   Phase 7 from the retained raw observations. Every repetition draws a
+   distinct seed; **byte-identical repetitions are never represented as
+   independent quality cases**, and independent quality cases are bounded by
+   the unique-template count, which is recorded in every result
+   (`sample_design`).
+4. **Timing and timeout semantics.** Task timing starts at **actual driver
+   submission** (not worker dequeue); the terminal record is handed to the
+   evaluator immediately (the documented end boundary and the implementation
+   agree); simulated tool delays are consumed through the injectable
+   monotonic clock and therefore occupy task duration, timeout budget,
+   request pacing, and cell wall time; the model client receives and honors
+   a deadline; unexpected client/tool/runtime exceptions are contained and
+   sanitized as `agent_runtime_error` (one task can never abort a
+   repetition); retries remain 0. The error taxonomy of D-0009 item 9 gains
+   `agent_runtime_error`.
+5. **One truthful scheduler.** Phase 2 uses a single **bounded closed-loop
+   scheduler** (no pre-submitted unbounded backlog); requested concurrency,
+   achieved maximum concurrency, and measured mean in-flight work are all
+   recorded, and concurrency is not claimed to be exactly enforced during
+   ramp-up and drain. The "queue-full arrival" phrasing of D-0009 item 5 is
+   withdrawn: profiles are differentiated by context/input size, output
+   budget, timeout, and SLO — not by unimplemented arrival algorithms.
+   Measurement configurations with fewer tasks than the requested
+   concurrency are rejected.
+6. **Streaming metrics and mock validity.** Model turns are typed event
+   streams distinguishing transport text chunks, true token events,
+   authoritative usage/token counts, and optional serving-queue telemetry.
+   TTFT uses the first non-empty content event; ITL exists only with true
+   per-token timing; token counts come only from authoritative usage data or
+   the exact model tokenizer — transport chunks are never counted as tokens.
+   Mock execution is **functional-only**: mock host-clock latency,
+   throughput, and production SLO attainment are represented as
+   null/unavailable with explicit reasons (host-clock timings live only in
+   the clearly separated `mock_diagnostics` namespace); mock quality and
+   evaluator validation remain valid; mock Python replay speed is never
+   reported as model tokens/sec.
+7. **Raw, auditable observations.** A versioned task-observation schema
+   (1.0.0) records every warm-up and measured task — identifiers, timing,
+   sanitized status, per-turn metadata, tool traces, terminal
+   recommendation, and evaluator gates — persisted **outside Git** under
+   `LAB_RESULTS_DIR` promptly per repetition with atomic
+   temp-file-plus-rename writes, private permissions, and SHA-256 references
+   from the result. Warm-up observations are labeled separately and excluded
+   from measured summaries; summary metrics are derived from the raw
+   observations. CLI output never prints absolute private paths.
+8. **Schema and accounting invariants.** Manifest and result schemas are
+   version **2.0.0**: unambiguous task accounting
+   (`attempted = succeeded + quality_failed + errored + timed_out`, with
+   quality failure separate from the execution-error taxonomy);
+   available/unavailable measure branches; mock mode requires the mock
+   engine and forbids GPU host fields, the container digest, and the model
+   block, and uses the truthful `not-applicable` comparison classification;
+   gpu mode requires a non-mock engine, GPU fields, the container digest,
+   and the model block. The workload catalog digest lives in its own
+   `workload.catalog_digest` field and is never represented as a model
+   artifact hash. Semantic validation beyond JSON Schema enforces exact
+   sums, rate/count agreement, matching run ids, truthful concurrency
+   bounds, observation counts, and safe relative artifact references.
+
+**Rationale.** Owner instruction (Phase 2 final correction memo,
+2026-09-06), approving the previously highlighted proposals and correcting
+the evaluator, sample plan, timing, concurrency, streaming, and accounting
+semantics before any genuine measurement exists.

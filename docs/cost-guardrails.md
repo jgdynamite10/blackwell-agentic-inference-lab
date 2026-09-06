@@ -44,12 +44,17 @@ Planning estimates (details and assumptions in
 | Phase | Estimate | Trigger for owner check-in |
 | --- | --- | --- |
 | 2 — Synthetic workload | ≈ $0 cloud | any cloud spend at all |
-| 3 — Akamai baseline | ≈ $110–$170 (rate pending account-level quote) | 75% of estimate consumed |
-| 4 — NVIDIA optimization | ≈ $160–$270 (rate pending account-level quote) | 75% of estimate consumed |
-| 5 — Google Cloud | ≈ $190–$290 | 75% of estimate consumed |
-| 6 — AWS | ≈ $170–$330 | 75% of estimate consumed |
+| 3 — Akamai baseline | ≈ $130–$320 (rate pending account-level quote) | 75% of estimate consumed |
+| 4 — NVIDIA optimization | ≈ $200–$510 (rate pending account-level quote) | 75% of estimate consumed |
+| 5 — Google Cloud | ≈ $280–$650 | 75% of estimate consumed |
+| 6 — AWS | ≈ $250–$760 | 75% of estimate consumed |
 
-Reaching a trigger pauses provisioning until the owner reauthorizes.
+Reaching a trigger pauses provisioning until the owner reauthorizes. The
+Phase 3–6 ranges reflect the owner-approved D-0010 sample plan (200 balanced
+task instances per measured repetition), whose measured-cell hours scale with
+realized task latency; a short Phase 3 pilot revalidates realized task
+latency and re-derives the budget before full measurement
+([feasibility-report.md](feasibility-report.md) §8).
 
 ## Automatic shutdown and orphan detection
 

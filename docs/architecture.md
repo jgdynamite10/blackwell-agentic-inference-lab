@@ -41,16 +41,19 @@ The entry point is the `blackwell-bench` console script
 ```mermaid
 flowchart LR
     subgraph repo["Repository (public, synthetic only)"]
-        catalog["Scenario catalog<br/>scenarios.py<br/>10 incident classes,<br/>versioned + content-addressed"]
-        runner["Benchmark runner<br/>runner.py<br/>profiles, concurrency 1/4/8,<br/>warm-up, 5 repetitions"]
-        agent["Cloud Operations Agent<br/>agent.py<br/>multi-turn loop, retries=0,<br/>timeouts, error taxonomy"]
-        tools["Simulated tools<br/>tools.py<br/>6 tools, fixed latencies"]
-        client["Model-client interface<br/>model_client.py<br/>DeterministicMockClient (Phase 2)<br/>vLLM / TRT-LLM / NIM (Phases 3+)"]
-        evaluator["Evaluator + metrics<br/>evaluator.py, stats.py<br/>versioned scoring,<br/>p95/p99 suppression"]
+        catalog["Scenario catalog<br/>scenarios.py<br/>10 incident classes,<br/>diagnosis candidates +<br/>evidence predicates,<br/>versioned + content-addressed"]
+        sampling["Task-instance sampler<br/>sampling.py<br/>seeded, balanced<br/>200 instances/repetition"]
+        runner["Benchmark runner<br/>runner.py<br/>bounded closed-loop scheduler,<br/>profiles, concurrency 1/4/8,<br/>warm-up, 5 repetitions"]
+        agent["Cloud Operations Agent<br/>agent.py<br/>multi-turn loop, retries=0,<br/>submission-based timing,<br/>deadlines, error taxonomy"]
+        tools["Simulated tools<br/>tools.py<br/>6 tools, fixed latencies<br/>consumed through the clock"]
+        client["Model-client interface<br/>model_client.py<br/>typed stream events, deadlines<br/>DeterministicMockClient (Phase 2)<br/>vLLM / TRT-LLM / NIM (Phases 3+)"]
+        evaluator["Evaluator + metrics<br/>evaluator.py, stats.py<br/>mandatory gates (S_min = 1.0),<br/>p95/p99 suppression"]
+        validation["Validation<br/>validation.py<br/>config rejection +<br/>semantic invariants"]
     end
     external[("LAB_RESULTS_DIR<br/>external, absolute,<br/>outside the repository<br/>(unset = no persistence)")]
 
-    catalog --> runner
+    catalog --> sampling
+    sampling --> runner
     runner --> agent
     agent --> client
     agent --> tools
@@ -58,17 +61,26 @@ flowchart LR
     client --> agent
     agent --> evaluator
     evaluator --> runner
-    runner -- "schema-valid manifest<br/>+ result per repetition" --> external
+    runner --> validation
+    validation --> runner
+    runner -- "manifest + result +<br/>raw task observations<br/>per repetition (atomic, private)" --> external
 ```
 
-The runner validates every manifest against
-[../schemas/run-manifest.schema.json](../schemas/run-manifest.schema.json) and
-every result against
-[../schemas/benchmark-result.schema.json](../schemas/benchmark-result.schema.json)
-**before** reporting or persisting it, and persists only through the
-`LAB_RESULTS_DIR` guard (`src/blackwell_lab/paths.py`) in explicit synthetic
-mode: unset means no persistence anywhere, and no output can fall back into
-the repository.
+The runner validates every document — the manifest against
+[../schemas/run-manifest.schema.json](../schemas/run-manifest.schema.json),
+the result against
+[../schemas/benchmark-result.schema.json](../schemas/benchmark-result.schema.json),
+and the raw observations against
+[../schemas/task-observation.schema.json](../schemas/task-observation.schema.json) —
+plus the **semantic invariants** JSON Schema cannot express (exact task
+accounting, rate/count agreement, matching run ids, truthful concurrency
+bounds, safe relative references) **before** reporting or persisting it, and
+persists only through the `LAB_RESULTS_DIR` guard
+(`src/blackwell_lab/paths.py`) in explicit synthetic mode: unset means no
+persistence anywhere, and no output can fall back into the repository. Every
+repetition is persisted promptly when it completes, with atomic
+temp-file-plus-rename writes and private permissions; CLI output reports safe
+relative filenames and counts only, never absolute private paths.
 
 ### One multi-turn task: sequence and measurement boundaries
 
@@ -80,31 +92,36 @@ sequenceDiagram
     participant T as Simulated tools
     participant E as Evaluator
 
-    R->>A: submit task (start E2E clock, monotonic)
+    R->>A: driver submission (E2E clock starts HERE,<br/>before any queueing; deadline = submission + timeout)
     loop each turn (until terminal tool, error, or timeout)
-        A->>M: model request (start TTFT + serving clocks)
-        M-->>A: first streamed token (TTFT boundary)
-        M-->>A: remaining tokens (inter-token gaps)
-        Note over A,M: serving time = dispatch to final token
+        A->>M: model request with deadline (TTFT + serving clocks)
+        M-->>A: typed stream events (content chunks;<br/>token/usage/queue events when the client has them)
+        Note over A,M: TTFT = first non-empty content event;<br/>chunks are never tokens
         A->>A: parse + validate tool call (retries=0)
         A->>T: execute simulated tool
-        T-->>A: deterministic result (fixed latency, recorded not slept)
+        T-->>A: deterministic result (fixed latency<br/>CONSUMED through the clock: it spends<br/>task duration and timeout budget)
     end
-    A->>T: recommend_remediation (terminal tool)
-    A-->>R: task execution record
-    R->>E: evaluate (root cause, evidence, remediation)
-    E-->>R: deterministic score + success
-    R->>R: build manifest + result, validate schemas
-    R-->>R: persist via LAB_RESULTS_DIR guard (or no persistence)
+    A->>T: recommend_remediation (diagnosis_id,<br/>rationale, remediation_id)
+    A->>E: terminal record handed to evaluator immediately
+    E-->>R: mandatory gates (diagnosis, remediation,<br/>evidence predicates) -> binary success
+    R->>R: build manifest + result + raw observations,<br/>validate schemas + semantic invariants
+    R-->>R: persist promptly + atomically via<br/>LAB_RESULTS_DIR guard (or no persistence)
 ```
 
 Measurement boundaries follow the measurement contract §2: end-to-end task
-time runs from driver submission to evaluator receipt of the final answer;
-TTFT and inter-token latency are measured at the driver around the token
-stream; tool-execution time uses the fixed, documented simulated latencies so
-it is separable from model-serving time. Mock runs record GPU telemetry as
-**unavailable with an explicit reason** and queue time as an explicitly empty
-series — no measurement is fabricated.
+time runs from actual driver submission to the terminal hand-off to the
+evaluator; TTFT is the first non-empty content event; ITL exists only with
+true per-token timing (transport chunks are never tokens); tool-execution
+time uses the fixed, documented simulated latencies — consumed through the
+injectable clock so they occupy task duration and timeout budget — and is
+separable from model-serving time. Unexpected exceptions are contained as a
+sanitized `agent_runtime_error`, so one task never aborts a repetition.
+
+Mock execution is **functional-only**: GPU telemetry, primary latency,
+throughput, and SLO attainment are recorded as **unavailable with explicit
+reasons** (host-clock replay timings live only in the separated
+`mock_diagnostics` namespace) — no measurement is fabricated, and mock Python
+replay speed is never reported as model tokens/sec.
 
 ### Phase 7 reporting interface (design only)
 
@@ -133,9 +150,12 @@ time.
 Deterministic incident definitions (elevated latency, pod failures, memory
 pressure, GPU saturation, storage latency, failed deployments, unhealthy
 upstreams, DNS failures, rate limiting, capacity exhaustion) with
-machine-checkable success criteria. Scenarios are deterministic; model outputs
-are not assumed to be. Runs use fixed generation settings, record seeds when
-supported, and include repeated measurements (see
+machine-checkable success criteria: published diagnosis candidates, accepted
+remediation sets, and evidence predicates with permitted alternative paths.
+Success is gate-based (S_min = 1.0, decision D-0010); component scores are
+diagnostics only. Scenarios are deterministic; model outputs are not assumed
+to be. Runs use fixed generation settings, record seeds when supported, and
+include repeated measurements over seeded, balanced task instances (see
 [../methodology/measurement-contract.md](../methodology/measurement-contract.md)).
 
 ### Serving stack (Phases 3–4)
@@ -159,9 +179,13 @@ privately with the run results.
   resolve **outside** the repository; the runner refuses to start otherwise.
   The guard is implemented in `src/blackwell_lab/paths.py` (Phase 1).
 - Every run writes a manifest conforming to
-  [../schemas/run-manifest.schema.json](../schemas/run-manifest.schema.json)
-  and results conforming to
-  [../schemas/benchmark-result.schema.json](../schemas/benchmark-result.schema.json).
+  [../schemas/run-manifest.schema.json](../schemas/run-manifest.schema.json),
+  results conforming to
+  [../schemas/benchmark-result.schema.json](../schemas/benchmark-result.schema.json),
+  and raw per-task observations conforming to
+  [../schemas/task-observation.schema.json](../schemas/task-observation.schema.json)
+  (warm-up observations labeled and retained separately; summaries are
+  derived from the raw observations).
 - The repository carries only schemas, synthetic examples, test fixtures,
   methodology, documentation, and code; sanitized results may be added only
   with explicit owner approval (Phase 7).

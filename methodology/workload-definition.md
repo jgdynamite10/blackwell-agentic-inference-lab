@@ -16,13 +16,22 @@ remediation using only its simulated tools:
 | `search_logs()` | Returns synthetic log lines matching a query, seeded per scenario |
 | `retrieve_runbook()` | Returns the synthetic runbook entry for a service or symptom |
 | `check_recent_changes()` | Returns synthetic deploy/config-change events |
-| `recommend_remediation()` | Terminal action: the agent submits its remediation recommendation |
+| `recommend_remediation()` | Terminal action: the agent submits `diagnosis_id`, `rationale`, and `remediation_id` |
+
+The terminal tool takes structured arguments: the agent submits an exact
+`diagnosis_id` (valid candidate ids are published through the task prompt and
+tool evidence — e.g. `retrieve_runbook` returns the scenario's candidate
+list — so the model selects among candidates rather than guessing a hidden
+string), a free-text `rationale` (diagnostic only, never a success gate), and
+a `remediation_id`.
 
 Tool responses are deterministic functions of (scenario, query). Tool
 latencies are simulated with fixed, documented values so tool-execution time
 is separable from model-serving time (measurement contract §2). The fixed
-values (implemented in `src/blackwell_lab/workload/tools.py`, recorded as
-tool-execution time, never slept):
+values (implemented in `src/blackwell_lab/workload/tools.py`) are **consumed
+through the injectable monotonic clock**: they occupy task duration, timeout
+budget, request pacing, and cell wall time, and are recorded per invocation
+in the tool trace:
 
 | Tool | Simulated latency |
 | --- | --- |
@@ -49,12 +58,29 @@ Deterministic incident definitions cover at least these condition classes:
 10. Capacity exhaustion
 
 Each incident definition specifies: the fixture data every tool returns, the
-ground-truth root cause, the accepted remediation set, distractor signals, and
-the success criteria the evaluator applies. Scenarios are versioned; the
-workload version appears in every run manifest. The Phase 2 catalog
-(`src/blackwell_lab/workload/scenarios.py`, workload version 2.0.0) implements
-one scenario per class and is additionally **content-addressed**: the SHA-256
-digest of the canonical catalog JSON is recorded in every run manifest.
+ground-truth root cause with a stable **diagnosis id**, the **accepted and
+distractor diagnosis ids** (published to the agent as candidates), the
+accepted and distractor remediation sets, and **machine-checkable evidence
+predicates** — each with the relevant tool, argument, and result constraints
+and with permitted **alternative evidence paths** (a reference and an
+alternative tool sequence both satisfy every predicate by construction, and
+tests prove it). Scenarios are versioned; the workload version appears in
+every run manifest. The Phase 2 catalog
+(`src/blackwell_lab/workload/scenarios.py`, workload version 2.1.0)
+implements one scenario per class and is additionally **content-addressed**:
+the SHA-256 digest of the canonical catalog JSON is recorded in every run
+manifest under `workload.catalog_digest` (never as a model artifact hash).
+
+## Task instances and sample plan
+
+Each measured repetition contains **200 seeded task instances**
+(decision D-0010), deterministically balanced across the ten templates
+(20 per template). An instance is a prompt-surface variant (synthetic
+tracking id, report offset) of its template with a recorded instance seed;
+variants never change the ground truth or the evidence predicates.
+Byte-identical repetitions are never represented as independent quality
+cases: every repetition uses a distinct seed, and results record the honest
+identity counts (unique templates, unique instances, total attempts).
 
 ## Determinism policy
 
@@ -65,36 +91,47 @@ serving engine supports them, and include five measured repetitions per cell
 
 ## Workload profiles
 
-Two profiles are used in the baseline (their exact parameterization is frozen
-in Phase 2 before any measurement):
+Two profiles are used in the baseline:
 
 | Profile | Intent | Shape |
 | --- | --- | --- |
-| **Interactive** | An on-call engineer working one incident with the agent | Tasks issued one at a time per agent slot; shorter contexts; latency-sensitive SLO (tight TTFT and task-time targets) |
-| **Batch-heavy** | Automated triage sweep across many incidents | Task queue kept full per concurrency slot; longer contexts (more log/metric data per task); throughput-oriented SLO |
+| **Interactive** | An on-call engineer working one incident with the agent | Shorter contexts; smaller output budget; latency-sensitive SLO (tight TTFT and task-time targets) |
+| **Batch-heavy** | Automated triage sweep across many incidents | Longer contexts (more log/metric data per task); larger output budget; throughput-oriented SLO |
 
 Both profiles draw from the same incident catalog so success criteria are
-identical; they differ in arrival pattern, context size, and SLO targets.
+identical. Phase 2 implements **one truthful bounded closed-loop scheduler**
+for both profiles (decision D-0010); the profiles are differentiated by
+context/input size, output budget, timeout, and SLO — **not** by arrival
+algorithms that are not measurably implemented.
 
-The exact Phase 2 parameterization (implemented in
-`src/blackwell_lab/workload/runner.py`; decision D-0009 — SLO targets are
-**proposals pending owner approval**):
+The exact parameterization (implemented in
+`src/blackwell_lab/workload/runner.py`; SLO targets and timeouts are
+**owner-approved**, decision D-0010):
 
 | Parameter | Interactive | Batch-heavy |
 | --- | --- | --- |
-| Arrival | Closed-loop: each slot issues its next task only after its previous task finishes | Queue-full: the task queue is kept full for every slot |
+| Scheduler | Bounded closed-loop (shared) | Bounded closed-loop (shared) |
 | Log-context limit (`search_logs`) | 10 lines | 50 lines |
 | Metric window (`query_metrics`) | 900 s | 3,600 s |
 | `max_tokens` per turn | 1,024 | 4,096 |
 | Per-task timeout | 120,000 ms | 600,000 ms |
-| Proposed task-latency SLO (T_task) | 60,000 ms | 300,000 ms |
-| Proposed TTFT SLO per turn (T_ttft) | 2,500 ms | none (throughput-oriented) |
+| Task-latency SLO (T_task) | 60,000 ms | 300,000 ms |
+| TTFT SLO per turn (T_ttft) | 2,500 ms | none (throughput-oriented) |
+
+The context-size difference is measurable and tested: the same log query
+returns strictly more log context under the batch-heavy limit than under the
+interactive limit.
 
 ## Concurrency
 
-Concurrency levels 1, 4, and 8 denote simultaneous in-flight agent tasks
-against the single serving endpoint. The driver enforces the level exactly;
-arrival behavior within a level is defined per profile.
+Concurrency levels 1, 4, and 8 denote requested simultaneous in-flight agent
+tasks against the single serving endpoint. The scheduler is a **bounded
+closed loop**: every task is stamped at actual driver submission, at most
+the requested number of tasks is ever in flight (no pre-submitted unbounded
+backlog), and in-flight work is **not claimed to be exactly enforced** during
+ramp-up and drain. Every result records the requested concurrency, the
+achieved maximum concurrency, and the measured mean in-flight work; a
+configuration with fewer tasks than the requested concurrency is rejected.
 
 ## Data safety
 

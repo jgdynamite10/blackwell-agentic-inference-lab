@@ -112,8 +112,12 @@ Offline synthetic benchmark smoke run (Phase 2; no GPU, no network, no
 persistence unless `LAB_RESULTS_DIR` points outside the repository):
 
 ```bash
-blackwell-bench --profile interactive --concurrency 1 --repetitions 1
+blackwell-bench --profile interactive --concurrency 1 --repetitions 1 \
+  --warmup-passes 0 --tasks-per-repetition 10
 ```
+
+(Measurement runs use the D-0010 defaults — 5 repetitions × 200 balanced
+task instances; the reduced values above are for a quick functional smoke.)
 
 ## Project governance
 

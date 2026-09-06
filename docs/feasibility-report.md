@@ -308,15 +308,26 @@ verification** in the owner's local environment before budgeting decisions.
 | Phase | Basis | Estimate |
 | --- | --- | --- |
 | Phase 2 (synthetic workload) | No GPU; local dev + GitHub Actions CI (small usage; Actions minutes are free once the repository is public) | **≈ $0 cloud** |
-| Phase 3 (Akamai baseline) | ~40–60 GPU-h × $2.50/h officially stated starting price (rate **unresolved pending account-level quote**; higher in EU/Singapore/Jakarta) + storage/egress | **≈ $110–$170** |
-| Phase 4 (optimization) | ~60–100 GPU-h × $2.50/h (same pricing caveat; more cells: precisions × serving paths) | **≈ $160–$270** |
-| Phase 5 (Google Cloud) | ~40–60 GPU-h × ~$4.50/h + Hyperdisk/local SSD | **≈ $190–$290** |
-| Phase 6 (AWS) | ~40–60 GPU-h × ~$4.00/h (4xlarge) or ~$5.27/h (8xlarge) + EBS | **≈ $170–$330** |
+| Phase 3 (Akamai baseline) | ~50–125 GPU-h × $2.50/h officially stated starting price (rate **unresolved pending account-level quote**; higher in EU/Singapore/Jakarta) + storage/egress | **≈ $130–$320** |
+| Phase 4 (optimization) | ~80–200 GPU-h × $2.50/h (same pricing caveat; more cells: precisions × serving paths) | **≈ $200–$510** |
+| Phase 5 (Google Cloud) | ~60–140 GPU-h (12 cells: both comparison modes) × ~$4.50/h + Hyperdisk/local SSD | **≈ $280–$650** |
+| Phase 6 (AWS) | ~60–140 GPU-h × ~$4.00/h (4xlarge) or ~$5.27/h (8xlarge) + EBS | **≈ $250–$760** |
 | Storage/network (all) | model artifact downloads (~80 GB/provider), result egress | **≈ $10–$50 total** |
 
-Run-hour estimates assume: setup/validation ≈ 15–25 h, measured cells
-(2 profiles × 3 concurrency × 5 repetitions plus warm-ups) ≈ 15–30 h, and
-retry margin. Akamai figures use the officially stated $2.50/h starting price
+Run-hour estimates assume setup/validation ≈ 15–25 h plus measured-cell time
+under the **D-0010 sample plan** (200 balanced task instances per measured
+repetition; 5 measured repetitions + 1 warm-up pass per cell). Measured wall
+time per cell is approximately
+`200 × mean_task_latency × 6 passes ÷ concurrency`, so cell hours are
+dominated by realized task latency, which is unknown before measurement.
+**[ASSUMPTION]** Planning ranges above use mean task latencies of ~15–45 s
+(interactive) and ~60–180 s (batch-heavy, bounded by the 300 s SLO and 600 s
+timeout), giving ≈ 35–100 measured GPU-h for the six Phase 3 baseline cells.
+These ranges are wider than the pre-D-0010 figures because the sample plan
+grew to make per-repetition p95 attainable; a **short Phase 3 pilot must
+revalidate realized task latency and re-derive the budget before full
+measurement**, and the cost-guardrails check-in triggers pause provisioning
+on overrun. Akamai figures use the officially stated $2.50/h starting price
 (retrieved 2026-09-06) and remain **unresolved pending an account-level
 quote**, given documented regional surcharges and recent pricing-page churn.
 
