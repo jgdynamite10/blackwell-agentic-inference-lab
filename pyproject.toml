@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=68"]
+# setuptools >= 77.0.3 is required for PEP 639 metadata (SPDX `license`
+# expression string plus `license-files`).
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,14 +10,18 @@ version = "0.1.0"
 description = "Tooling for the Blackwell Agentic Inference Lab (schemas, results-privacy guards, preflight checks)"
 readme = "README.md"
 requires-python = ">=3.10"
-# No license/license-files metadata and no LICENSE file: ownership and
-# licensing are under review, and no license is currently granted (see
-# README "License and disclaimer").
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
     # format-nongpl provides rfc3339-validator etc. so JSON Schema format
     # checking rejects invalid date/date-time strings.
     "jsonschema[format-nongpl]>=4.21",
 ]
+
+[project.urls]
+Homepage = "https://github.com/jgdynamite10/blackwell-agentic-inference-lab"
+Repository = "https://github.com/jgdynamite10/blackwell-agentic-inference-lab"
+Issues = "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/issues"
 
 [project.optional-dependencies]
 dev = [
