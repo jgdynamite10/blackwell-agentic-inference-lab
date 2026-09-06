@@ -1,17 +1,27 @@
 # Blackwell Agentic Inference Lab
 
-A research lab with a documented and reproducible methodology for measuring
-how inference software, numerical precision, and cloud environment affect the
-ability of an NVIDIA RTX PRO 6000 Blackwell Server Edition system to satisfy
-production-like agentic-AI service-level objectives (SLOs).
+An open-source research project with documented and reproducible methodology
+for measuring agentic AI inference outcomes on NVIDIA RTX PRO 6000 Blackwell
+Server Edition systems across cloud environments — how inference software,
+numerical precision, and cloud environment affect the ability of such a system
+to satisfy production-like agentic-AI service-level objectives (SLOs).
 
-**This repository is private and must remain private.** Do not change its
-visibility, mirror it, or publish any branch, pull request, artifact, result,
-or document from it without the project owner's explicit authorization.
+**Canonical repository:**
+[https://github.com/jgdynamite10/blackwell-agentic-inference-lab](https://github.com/jgdynamite10/blackwell-agentic-inference-lab)
+— all development, issues, pull requests, releases, security reporting, and
+documentation live here. The repository at
+`github.com/jgdynamite/blackwell-agentic-inference-lab` is a non-synchronized
+redirect only and will be archived.
 
-**Status:** Phase 1 — repository foundation and feasibility. No benchmarks
-have been run. No results exist, and any future genuine results are stored
-outside this Git repository entirely (see below).
+**Status:** Phase 1 — repository foundation and feasibility.
+
+- **No genuine benchmarks have been run yet.** No results exist.
+- **All current example files are synthetic** and clearly labeled as such.
+- **Pricing figures are preliminary, non-authoritative planning estimates**
+  requiring account-level verification.
+- **Provider capacity and quota must be verified locally** by the operator.
+- **Genuine results never go into the Git working tree** — they live outside
+  the repository entirely (see below).
 
 ## Research questions
 
@@ -67,16 +77,20 @@ scripts/preflight/           Read-only cloud feasibility checks (run locally by 
 results/                     Placeholder only — genuine results are never committed here
 ```
 
-## Results privacy
+## Results privacy (public source, private results)
 
-**All genuine benchmark results remain external to Git and private.** The
-repository contains only schemas, synthetic examples clearly labeled as such,
-and documentation of the result format. Benchmark tooling writes genuine
-results to a location outside the repository (`LAB_RESULTS_DIR`), fails closed
-if that variable is unset for a real run, and refuses to run if the location
-resolves inside the repository — including through symlinks. Nothing is
-published without the project owner's explicit approval. See
-[docs/results-privacy.md](docs/results-privacy.md) and
+The source code and methodology in this repository are public, but **all
+genuine benchmark results remain external to Git and private** — public
+repository visibility does not authorize publication of genuine benchmark
+data. The repository contains only schemas, synthetic examples clearly
+labeled as such, and documentation of the result format. Benchmark tooling
+writes genuine results to a location outside the repository
+(`LAB_RESULTS_DIR`), fails closed if that variable is unset for a real run,
+and refuses to run if the location resolves inside the repository — including
+through symlinks. Credentials, account identifiers, project IDs, ARNs,
+private endpoints, provider bills, and infrastructure metadata are likewise
+never committed. Only explicitly approved sanitized summaries may later be
+published. See [docs/results-privacy.md](docs/results-privacy.md) and
 [docs/publication-governance.md](docs/publication-governance.md).
 
 ## Getting started (development)
@@ -99,13 +113,23 @@ pytest
 
 ## Licensing
 
-Copyright ownership, publication authorization, and licensing for this project
-are under review. No open-source software or documentation license is granted
-at this time. An approved license may be added only after the required review
-and explicit authorization.
+- Unless otherwise identified, original source code and documentation in this
+  repository are licensed under the
+  [Apache License 2.0](LICENSE) (see also [NOTICE](NOTICE)).
+- Third-party software and model artifacts retain their respective licenses.
+- OpenMDW-1.1 applies only to the identified NVIDIA model artifacts, not to
+  this repository.
+- Genuine benchmark datasets and results are **not** included in the
+  Apache-2.0 grant unless an approved release explicitly states otherwise.
 
 ## Disclaimer
 
+This is an independent project. The findings and views are the author's own
+and do not represent Akamai Technologies, AWS, Google Cloud, NVIDIA, or any
+other provider. Product and company names are the property of their respective
+owners. References do not imply sponsorship or endorsement.
+
 No benchmark findings exist or have been released. Nothing in this repository
 should be interpreted as a performance or superiority claim about any cloud
-provider, GPU, model, or serving stack.
+provider, GPU, model, or serving stack, and no provider-superiority claim may
+ever exceed the evidence.
