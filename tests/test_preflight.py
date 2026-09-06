@@ -1,13 +1,16 @@
 """Mocked tests for the read-only preflight scripts.
 
 These tests never contact any provider: network and CLI lookups are mocked.
-They verify read-only behavior, blocked-path reporting, and that secrets are
-never printed.
+They verify read-only behavior, blocked-path exit codes, and that secrets,
+account identifiers, and raw error payloads are never printed.
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 PREFLIGHT_DIR = Path(__file__).resolve().parents[1] / "scripts" / "preflight"
 
@@ -23,6 +26,25 @@ def load_script(name: str):
 check_akamai = load_script("check_akamai")
 check_gcp = load_script("check_gcp")
 check_aws = load_script("check_aws")
+
+# Synthetic sensitive values injected into mocked errors. None of these are
+# real; all of them must be absent from every line the scripts print.
+SENSITIVE_VALUES = (
+    "123456789012",  # synthetic AWS account id
+    "synthetic-project-84121",  # synthetic GCP project id
+    "arn:aws:iam::123456789012:role/synthetic-role",  # synthetic ARN
+    "AKIAFAKEFAKEFAKEFAKE",  # synthetic access-key-like string
+    "ya29.synthetic-oauth-token-value",  # synthetic OAuth-token-like string
+    "/home/fakeuser/.aws/credentials",  # synthetic credential path
+    "https://internal-10-0-0-5.example.internal:8443/api",  # private endpoint
+)
+SENSITIVE_BLOB = " ".join(SENSITIVE_VALUES)
+
+
+def assert_no_sensitive_output(text: str) -> None:
+    for value in SENSITIVE_VALUES:
+        assert value not in text, f"sensitive value {value!r} leaked into output"
+
 
 FAKE_CATALOG = {
     "data": [
@@ -63,13 +85,33 @@ class TestAkamai:
         assert not check_akamai.report_gpu_catalog(fetch=boom)
         assert "BLOCKED" in capsys.readouterr().out
 
-    def test_missing_token_reports_missing_capability(self, monkeypatch, capsys):
+    def test_catalog_error_text_is_never_printed(self, capsys):
+        def boom(path, token=None):
+            raise OSError(f"connect failed via {SENSITIVE_BLOB}")
+
+        assert not check_akamai.report_gpu_catalog(fetch=boom)
+        assert_no_sensitive_output(capsys.readouterr().out)
+
+    def test_missing_token_is_blocked_and_nonzero(self, monkeypatch, capsys):
         monkeypatch.delenv("LINODE_TOKEN", raising=False)
         monkeypatch.setattr(check_akamai, "report_gpu_catalog", lambda fetch=None: True)
-        assert check_akamai.main([]) == 0
+        assert check_akamai.main([]) == 1
         out = capsys.readouterr().out
         assert "READ-ONLY" in out
+        assert "BLOCKED" in out
         assert "Missing capability" in out
+        assert "--public-only" in out
+
+    def test_public_only_mode_succeeds_without_token(self, monkeypatch, capsys):
+        monkeypatch.delenv("LINODE_TOKEN", raising=False)
+        monkeypatch.setattr(check_akamai, "report_gpu_catalog", lambda fetch=None: True)
+        assert check_akamai.main(["--public-only"]) == 0
+        out = capsys.readouterr().out
+        assert "intentionally skipped" in out
+
+    def test_public_only_mode_still_fails_on_catalog_error(self, monkeypatch):
+        monkeypatch.setattr(check_akamai, "report_gpu_catalog", lambda fetch=None: False)
+        assert check_akamai.main(["--public-only"]) == 1
 
     def test_token_value_is_never_printed(self, monkeypatch, capsys):
         secret = "fake-token-for-test-only"  # noqa: S105 - synthetic test value
@@ -81,15 +123,99 @@ class TestAkamai:
         assert secret not in out
         assert "eu-fake-2" in out
 
-    def test_availability_failure_is_actionable(self, capsys):
+    def test_availability_failure_is_sanitized_actionable_and_nonzero(self, monkeypatch, capsys):
         def boom(path, token=None):
-            raise OSError("403")
+            raise OSError(f"403 forbidden for {SENSITIVE_BLOB}")
 
-        assert not check_akamai.report_account_availability("fake", fetch=boom)
-        assert "token may lack scope" in capsys.readouterr().out
+        monkeypatch.setenv("LINODE_TOKEN", "fake-token-for-test-only")
+        monkeypatch.setattr(check_akamai, "get_json", boom)
+        monkeypatch.setattr(check_akamai, "report_gpu_catalog", lambda fetch=None: True)
+        assert check_akamai.main([]) == 1
+        out = capsys.readouterr().out
+        assert "BLOCKED" in out
+        assert "scope" in out
+        assert_no_sensitive_output(out)
 
 
-class TestGcpBlockedPaths:
+def make_aws_run(offerings_result, quota_result, sts_code=0):
+    def fake_run(cmd):
+        if "sts" in cmd:
+            return (sts_code, "{}")
+        if "describe-instance-type-offerings" in cmd:
+            return offerings_result
+        if "service-quotas" in cmd:
+            return quota_result
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    return fake_run
+
+
+class TestAws:
+    def test_missing_cli_is_blocked_with_actionable_message(self, monkeypatch, capsys):
+        monkeypatch.setattr(check_aws.shutil, "which", lambda name: None)
+        assert check_aws.main([]) == 1
+        out = capsys.readouterr().out
+        assert "READ-ONLY" in out
+        assert "BLOCKED" in out
+        assert "Missing capability" in out
+
+    def test_missing_credentials_is_blocked(self, monkeypatch, capsys):
+        monkeypatch.setattr(check_aws.shutil, "which", lambda name: "/usr/bin/aws")
+        monkeypatch.setattr(check_aws, "run", lambda cmd: (255, ""))
+        assert check_aws.main([]) == 1
+        assert "no working credentials" in capsys.readouterr().out
+
+    def test_full_success_path(self, monkeypatch, capsys):
+        offerings = json.dumps({"InstanceTypeOfferings": [{"InstanceType": "g7e.4xlarge"}]})
+        quota = json.dumps({"Quota": {"Value": 64.0}})
+        monkeypatch.setattr(check_aws.shutil, "which", lambda name: "/usr/bin/aws")
+        monkeypatch.setattr(check_aws, "run", make_aws_run((0, offerings), (0, quota)))
+        assert check_aws.main([]) == 0
+        out = capsys.readouterr().out
+        assert "g7e.4xlarge" in out
+        assert "64.0" in out
+        assert "does not prove immediate/live capacity" in out
+
+    def test_offering_failure_is_sanitized_and_nonzero(self, monkeypatch, capsys):
+        quota = json.dumps({"Quota": {"Value": 64.0}})
+        monkeypatch.setattr(check_aws.shutil, "which", lambda name: "/usr/bin/aws")
+        monkeypatch.setattr(check_aws, "run", make_aws_run((254, SENSITIVE_BLOB), (0, quota)))
+        assert check_aws.main([]) == 1
+        out = capsys.readouterr().out
+        assert "BLOCKED" in out
+        assert_no_sensitive_output(out)
+
+    def test_quota_failure_is_sanitized_and_nonzero(self, monkeypatch, capsys):
+        offerings = json.dumps({"InstanceTypeOfferings": []})
+        monkeypatch.setattr(check_aws.shutil, "which", lambda name: "/usr/bin/aws")
+        monkeypatch.setattr(check_aws, "run", make_aws_run((0, offerings), (254, SENSITIVE_BLOB)))
+        assert check_aws.main([]) == 1
+        out = capsys.readouterr().out
+        assert "BLOCKED" in out
+        assert "servicequotas:GetServiceQuota" in out
+        assert_no_sensitive_output(out)
+
+    def test_no_pricing_api_claim(self, capsys):
+        with pytest.raises(SystemExit):
+            check_aws.main(["--help"])
+        out = capsys.readouterr().out
+        assert "does not query the AWS Pricing API" in out
+
+
+def make_gcp_run(machine_result, quota_result, auth_result=(0, "ACTIVE")):
+    def fake_run(cmd):
+        if "auth" in cmd:
+            return auth_result
+        if "machine-types" in cmd:
+            return machine_result
+        if "regions" in cmd:
+            return quota_result
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    return fake_run
+
+
+class TestGcp:
     def test_missing_cli_is_blocked_with_actionable_message(self, monkeypatch, capsys):
         monkeypatch.setattr(check_gcp.shutil, "which", lambda name: None)
         assert check_gcp.main([]) == 1
@@ -106,21 +232,35 @@ class TestGcpBlockedPaths:
         assert "no active credentials" in out
         assert "never commit them" in out
 
-
-class TestAwsBlockedPaths:
-    def test_missing_cli_is_blocked_with_actionable_message(self, monkeypatch, capsys):
-        monkeypatch.setattr(check_aws.shutil, "which", lambda name: None)
-        assert check_aws.main([]) == 1
+    def test_full_success_path(self, monkeypatch, capsys):
+        monkeypatch.setattr(check_gcp.shutil, "which", lambda name: "/usr/bin/gcloud")
+        monkeypatch.setattr(
+            check_gcp,
+            "run",
+            make_gcp_run((0, "us-fake1-a\nus-fake1-b"), (0, "us-fake1  8")),
+        )
+        assert check_gcp.main([]) == 0
         out = capsys.readouterr().out
-        assert "READ-ONLY" in out
-        assert "BLOCKED" in out
-        assert "Missing capability" in out
+        assert "us-fake1-a" in out
+        assert "quota overview" in out
+        assert "does not prove immediate/live capacity" in out
 
-    def test_missing_credentials_is_blocked(self, monkeypatch, capsys):
-        monkeypatch.setattr(check_aws.shutil, "which", lambda name: "/usr/bin/aws")
-        monkeypatch.setattr(check_aws, "run", lambda cmd: (255, "unable to locate credentials"))
-        assert check_aws.main([]) == 1
-        assert "no working credentials" in capsys.readouterr().out
+    def test_machine_type_failure_is_sanitized_and_nonzero(self, monkeypatch, capsys):
+        monkeypatch.setattr(check_gcp.shutil, "which", lambda name: "/usr/bin/gcloud")
+        monkeypatch.setattr(check_gcp, "run", make_gcp_run((1, SENSITIVE_BLOB), (0, "table")))
+        assert check_gcp.main([]) == 1
+        out = capsys.readouterr().out
+        assert "BLOCKED" in out
+        assert_no_sensitive_output(out)
+
+    def test_quota_failure_is_sanitized_and_nonzero(self, monkeypatch, capsys):
+        monkeypatch.setattr(check_gcp.shutil, "which", lambda name: "/usr/bin/gcloud")
+        monkeypatch.setattr(check_gcp, "run", make_gcp_run((0, "us-fake1-a"), (1, SENSITIVE_BLOB)))
+        assert check_gcp.main([]) == 1
+        out = capsys.readouterr().out
+        assert "BLOCKED" in out
+        assert "compute.regions.list" in out
+        assert_no_sensitive_output(out)
 
 
 class TestReadOnlyByConstruction:
@@ -152,8 +292,6 @@ class TestReadOnlyByConstruction:
             assert 'method="DELETE"' not in source
 
     def test_help_describes_read_only_behavior(self, capsys):
-        import pytest
-
         for module in (check_akamai, check_gcp, check_aws):
             with pytest.raises(SystemExit) as excinfo:
                 module.main(["--help"])

@@ -10,7 +10,13 @@ Safe by construction:
 - Unauthenticated endpoints for the plan-type catalog.
 - With ``LINODE_TOKEN`` (read-only scope recommended), checks account-level
   region availability.
-- Never prints token values or account identifiers.
+- Never prints token values, account identifiers, raw API responses on
+  failure, or raw exception text: failures produce sanitized, generic,
+  actionable messages only.
+
+Exit codes: 0 only when every requested check completed. Without
+``--public-only``, the account-level availability check is required, so a
+missing token or a failed availability lookup exits nonzero.
 """
 
 from __future__ import annotations
@@ -27,7 +33,8 @@ GPU_KEYWORDS = ("rtxpro6000", "rtx-pro-6000", "blackwell")
 READ_ONLY_BANNER = (
     "== Akamai Cloud preflight — READ-ONLY ==\n"
     "This tool only performs GET requests. It cannot provision, update, stop,\n"
-    "or delete resources, and it never prints secrets or account identifiers."
+    "or delete resources, and it never prints secrets, account identifiers,\n"
+    "or raw error payloads."
 )
 
 
@@ -44,8 +51,13 @@ def report_gpu_catalog(fetch=None) -> bool:
     fetch = fetch or get_json
     try:
         types = fetch("/linode/types")["data"]
-    except Exception as exc:
-        print(f"BLOCKED: could not reach the Linode API catalog: {exc}")
+    except Exception:
+        # Deliberately no exception text: it could echo URLs, proxy details,
+        # or response fragments. The message is generic and actionable.
+        print(
+            "BLOCKED: could not retrieve the public Linode plan catalog "
+            "(network error or API unavailable). Check connectivity and retry."
+        )
         return False
 
     gpu_plans = [
@@ -73,8 +85,13 @@ def report_account_availability(token: str, fetch=None) -> bool:
     fetch = fetch or get_json
     try:
         availability = fetch("/account/availability", token)["data"]
-    except Exception as exc:
-        print(f"Account availability check failed (token may lack scope): {exc}")
+    except Exception:
+        print(
+            "BLOCKED: the account availability lookup failed. Likely causes: the "
+            "token lacks account:read_only scope, the token is expired, or the "
+            "API was unreachable. Fix the token locally and retry. (No error "
+            "payload is printed to avoid echoing account details.)"
+        )
         return False
 
     unavailable = [r["region"] for r in availability if "GPU Linodes" in r.get("unavailable", [])]
@@ -89,23 +106,41 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "READ-ONLY Akamai Cloud feasibility preflight. Lists RTX PRO 6000 "
-            "Blackwell GPU plans from the public catalog and, when a read-only "
-            "LINODE_TOKEN is present in the environment, reports account-level "
-            "region availability. Performs no create/update/delete operations "
-            "and never prints secrets. Run locally; not from the hosted Cloud Agent."
+            "Blackwell GPU plans from the public catalog and, unless "
+            "--public-only is given, requires a read-only LINODE_TOKEN in the "
+            "environment to report account-level region availability. Performs "
+            "no create/update/delete operations and never prints secrets or raw "
+            "error payloads. Run locally; not from the hosted Cloud Agent."
         )
     )
-    parser.parse_args(argv)
+    parser.add_argument(
+        "--public-only",
+        action="store_true",
+        help=(
+            "Run only the unauthenticated public-catalog check and treat it as "
+            "the complete requested scope. Without this flag, the account-level "
+            "availability check is required and a missing LINODE_TOKEN fails."
+        ),
+    )
+    args = parser.parse_args(argv)
     print(READ_ONLY_BANNER)
 
     if not report_gpu_catalog():
         return 1
 
+    if args.public_only:
+        print("--public-only: account-level availability check intentionally skipped.")
+        return 0
+
     token = os.environ.get("LINODE_TOKEN")
     if not token:
-        print("LINODE_TOKEN not set: skipping account-level availability check.")
+        print(
+            "BLOCKED: LINODE_TOKEN is not set, so the required account-level "
+            "availability check cannot run. Set a read-only token locally and "
+            "retry, or pass --public-only to request the catalog check alone."
+        )
         print("Missing capability: cannot verify this account's onboarding/eligible regions.")
-        return 0
+        return 1
     return 0 if report_account_availability(token) else 1
 
 
