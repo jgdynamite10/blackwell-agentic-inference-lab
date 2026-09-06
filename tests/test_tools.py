@@ -100,11 +100,34 @@ class TestValidation:
                 {"diagnosis_id": "", "rationale": "r", "remediation_id": "x"},
             )
 
-    def test_boolean_where_integer_required_is_rejected(self, toolbox):
+    @pytest.mark.parametrize(
+        ("name", "arguments"),
+        [
+            ("search_logs", {"query": "audit", "limit": True}),
+            ("query_metrics", {"metric": "latency_p99_ms", "window_s": True}),
+            ("check_recent_changes", {"window_s": False}),
+        ],
+    )
+    def test_boolean_where_integer_required_is_rejected(self, toolbox, name, arguments):
         with pytest.raises(InvalidToolArgumentsError):
-            toolbox.execute("search_logs", {"query": "audit", "limit": True})
+            toolbox.execute(name, arguments)
+
+    @pytest.mark.parametrize(
+        ("name", "arguments"),
+        [
+            ("search_logs", {"query": "audit", "limit": 0}),
+            ("search_logs", {"query": "audit", "limit": -5}),
+            ("query_metrics", {"metric": "latency_p99_ms", "window_s": 0}),
+            ("query_metrics", {"metric": "latency_p99_ms", "window_s": -900}),
+            ("check_recent_changes", {"window_s": 0}),
+            ("check_recent_changes", {"window_s": -1}),
+        ],
+    )
+    def test_zero_and_negative_integers_are_rejected(self, toolbox, name, arguments):
+        """Owner blocker 4: every integer tool argument must be a positive
+        integer — zero and negatives are contract violations, never no-ops."""
         with pytest.raises(InvalidToolArgumentsError):
-            toolbox.execute("check_recent_changes", {"window_s": False})
+            toolbox.execute(name, arguments)
 
 
 class TestToolBehavior:

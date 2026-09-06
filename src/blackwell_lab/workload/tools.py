@@ -97,6 +97,12 @@ def validate_tool_call(name: str, arguments: dict[str, Any]) -> None:
             raise InvalidToolArgumentsError(
                 f"{name}: argument {arg!r} has invalid type {type(value).__name__}"
             )
+        # Every integer tool argument (limits, windows) must be positive:
+        # zero and negative values are contract violations, never no-ops.
+        if expected is int and value <= 0:
+            raise InvalidToolArgumentsError(
+                f"{name}: argument {arg!r} must be a positive integer, got {value}"
+            )
         if expected is str and arg in spec["required"] and not value.strip():
             raise InvalidToolArgumentsError(f"{name}: required argument {arg!r} must not be empty")
 
