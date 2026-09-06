@@ -1,5 +1,5 @@
 {
-  "schema_version": "2.0.0",
+  "schema_version": "2.1.0",
   "run_id": "EXAMPLE-0000-0000-0000-000000000000",
   "is_synthetic_example": true,
   "execution_mode": "gpu",
@@ -20,7 +20,9 @@
     "engine": "vllm",
     "engine_version": "0.0.0-EXAMPLE",
     "container_digest": "docker.io/example/vllm@sha256:0000000000000000000000000000000000000000000000000000000000000000",
-    "launch_flags": ["--example-flag"],
+    "launch_flags": [
+      "--example-flag"
+    ],
     "environment_overrides": {
       "EXAMPLE_BACKEND_SELECTION": "example"
     }
@@ -70,6 +72,6 @@
     "repetition_index": 1,
     "repetitions_planned": 5,
     "clock_source": "client-side monotonic clock",
-    "notes": "SYNTHETIC EXAMPLE FILE — every value on this page is fabricated for schema documentation. This is not a genuine benchmark record."
+    "notes": "SYNTHETIC EXAMPLE FILE \u2014 every value on this page is fabricated for schema documentation. This is not a genuine benchmark record."
   }
 }

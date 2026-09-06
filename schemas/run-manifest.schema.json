@@ -146,6 +146,7 @@
         "vcpu_count": { "type": "integer", "minimum": 1 },
         "system_memory_gib": { "type": "number", "exclusiveMinimum": 0 },
         "storage_description": { "type": "string", "description": "Storage type/layout (no volume identifiers)." },
+        "network_description": { "type": "string", "description": "Advertised network tier/bandwidth of the purchasable configuration (no addresses or interface identifiers)." },
         "virtualization": { "type": "string", "description": "Hypervisor / virtualization notes if known." }
       }
     },

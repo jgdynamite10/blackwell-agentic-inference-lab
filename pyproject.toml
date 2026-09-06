@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 blackwell-bench = "blackwell_lab.workload.runner:main"
+blackwell-cloud = "blackwell_lab.cloud.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/jgdynamite10/blackwell-agentic-inference-lab"

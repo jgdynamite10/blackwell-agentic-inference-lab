@@ -23,7 +23,11 @@ def load_script(name: str):
     return module
 
 
-check_akamai = load_script("check_akamai")
+# The Akamai implementation lives in the package (unit-testable offline);
+# scripts/preflight/check_akamai.py is a thin wrapper around its main().
+from blackwell_lab.cloud import preflight as check_akamai  # noqa: E402
+
+check_akamai_script = load_script("check_akamai")
 check_gcp = load_script("check_gcp")
 check_aws = load_script("check_aws")
 
@@ -68,15 +72,49 @@ FAKE_AVAILABILITY = {
     ]
 }
 
+FAKE_REGIONS = {
+    "data": [
+        {"id": "us-fake-1", "capabilities": ["Linodes", "GPU Linodes"]},
+        {"id": "eu-fake-2", "capabilities": ["Linodes", "GPU Linodes"]},
+        {"id": "ap-fake-3", "capabilities": ["Linodes"]},
+    ]
+}
+
+
+def fake_fetch(path, token=None):
+    if path.startswith("/linode/types"):
+        return FAKE_CATALOG
+    if path.startswith("/regions"):
+        return FAKE_REGIONS
+    if path.startswith("/account/availability"):
+        return FAKE_AVAILABILITY
+    raise AssertionError(f"unexpected path: {path}")
+
 
 class TestAkamai:
+    def test_script_is_a_thin_wrapper_around_the_package_module(self):
+        assert check_akamai_script.main is check_akamai.main
+
     def test_catalog_reports_blackwell_plans(self, capsys):
-        assert check_akamai.report_gpu_catalog(fetch=lambda path, token=None: FAKE_CATALOG)
+        assert check_akamai.report_gpu_catalog(fetch=fake_fetch)
         out = capsys.readouterr().out
         assert "g9-gpu-rtxpro6000-blackwell-1" in out
         assert "16 vCPU" in out
         # Non-Blackwell plans are not reported as matches.
         assert "g1-gpu-rtx6000-1" not in out
+
+    def test_catalog_pagination_is_followed(self, capsys):
+        pages = {
+            1: {"data": FAKE_CATALOG["data"][:1], "pages": 2},
+            2: {"data": FAKE_CATALOG["data"][1:], "pages": 2},
+        }
+
+        def paged(path, token=None):
+            page = int(path.split("page=")[1])
+            return pages[page]
+
+        assert check_akamai.report_gpu_catalog(fetch=paged)
+        assert "1 RTX PRO 6000 Blackwell plan(s)" in capsys.readouterr().out
 
     def test_catalog_handles_unreachable_api(self, capsys):
         def boom(path, token=None):
@@ -91,6 +129,68 @@ class TestAkamai:
 
         assert not check_akamai.report_gpu_catalog(fetch=boom)
         assert_no_sensitive_output(capsys.readouterr().out)
+
+    def test_entitlement_reports_the_exact_single_gpu_plan(self, capsys):
+        assert check_akamai.report_plan_entitlement("tok", fetch=fake_fetch)
+        out = capsys.readouterr().out
+        assert "ENTITLEMENT: 1 RTX PRO 6000 Blackwell plan(s)" in out
+        assert "TARGET PLAN OK: g9-gpu-rtxpro6000-blackwell-1" in out
+        assert "$1.23/hr" in out  # account-visible hourly price
+        assert "tok" not in out
+
+    def test_entitlement_not_visible_requires_onboarding(self, capsys):
+        no_gpu = {"data": [{"id": "g6-standard-2", "class": "standard"}]}
+        assert check_akamai.report_plan_entitlement("tok", fetch=lambda p, t=None: no_gpu)
+        out = capsys.readouterr().out
+        assert "NOT VISIBLE" in out
+        assert "onboarding" in out
+
+    def test_entitlement_rejects_multi_gpu_only_catalogs(self, capsys):
+        multi = {
+            "data": [
+                {
+                    "id": "g9-gpu-rtxpro6000-blackwell-x4",
+                    "class": "gpu",
+                    "gpus": 4,
+                    "vcpus": 64,
+                    "memory": 736 * 1024,
+                    "price": {"hourly": 9.99},
+                }
+            ]
+        }
+        assert check_akamai.report_plan_entitlement("tok", fetch=lambda p, t=None: multi)
+        out = capsys.readouterr().out
+        assert "TARGET PLAN MISSING" in out
+        assert "Do not substitute a larger plan" in out
+
+    def test_entitlement_failure_is_sanitized(self, capsys):
+        def boom(path, token=None):
+            raise OSError(f"403 for {SENSITIVE_BLOB}")
+
+        assert not check_akamai.report_plan_entitlement("tok", fetch=boom)
+        out = capsys.readouterr().out
+        assert "BLOCKED" in out
+        assert_no_sensitive_output(out)
+
+    def test_eligible_regions_cross_reference_capability_and_account(self, capsys):
+        assert check_akamai.report_eligible_regions("tok", fetch=fake_fetch)
+        out = capsys.readouterr().out
+        # us-fake-1: GPU-capable and available -> eligible.
+        assert "Regions eligible for GPU Linodes on this account: 1" in out
+        # eu-fake-2: GPU-capable but account-unavailable.
+        assert "eu-fake-2 (unavailable)" in out
+        # ap-fake-3 has no GPU capability and is never listed as eligible.
+        assert "  - ap-fake-3\n" not in out
+
+    def test_region_failure_is_sanitized_and_actionable(self, capsys):
+        def boom(path, token=None):
+            raise OSError(f"403 forbidden for {SENSITIVE_BLOB}")
+
+        assert not check_akamai.report_eligible_regions("tok", fetch=boom)
+        out = capsys.readouterr().out
+        assert "BLOCKED" in out
+        assert "scope" in out
+        assert_no_sensitive_output(out)
 
     def test_missing_token_is_blocked_and_nonzero(self, monkeypatch, capsys):
         monkeypatch.delenv("LINODE_TOKEN", raising=False)
@@ -116,7 +216,7 @@ class TestAkamai:
     def test_token_value_is_never_printed(self, monkeypatch, capsys):
         secret = "fake-token-for-test-only"  # noqa: S105 - synthetic test value
         monkeypatch.setenv("LINODE_TOKEN", secret)
-        monkeypatch.setattr(check_akamai, "get_json", lambda path, token=None: FAKE_AVAILABILITY)
+        monkeypatch.setattr(check_akamai, "get_json", fake_fetch)
         monkeypatch.setattr(check_akamai, "report_gpu_catalog", lambda fetch=None: True)
         assert check_akamai.main([]) == 0
         out = capsys.readouterr().out
@@ -282,10 +382,17 @@ class TestReadOnlyByConstruction:
     )
 
     def test_no_mutating_operations_in_sources(self):
-        for script in ("check_akamai", "check_gcp", "check_aws"):
-            source = (PREFLIGHT_DIR / f"{script}.py").read_text(encoding="utf-8")
+        sources = [
+            PREFLIGHT_DIR / "check_akamai.py",
+            PREFLIGHT_DIR / "check_gcp.py",
+            PREFLIGHT_DIR / "check_aws.py",
+            # The Akamai implementation module itself.
+            Path(check_akamai.__file__),
+        ]
+        for path in sources:
+            source = path.read_text(encoding="utf-8")
             for token in self.MUTATING_TOKENS[:-1]:
-                assert token not in source, f"{script}.py contains mutating token {token!r}"
+                assert token not in source, f"{path.name} contains mutating token {token!r}"
             # urllib requests must never set an explicit non-GET method.
             assert 'method="POST"' not in source
             assert 'method="PUT"' not in source
