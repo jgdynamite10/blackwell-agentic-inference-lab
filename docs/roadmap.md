@@ -4,9 +4,11 @@ Work proceeds phase by phase. **Each phase begins only after the project owner
 explicitly authorizes it, and work stops at the end of the currently
 authorized phase** ([AGENTS.md](../AGENTS.md), section 7).
 
-Currently authorized: **Phase 1 only.**
+Phase status: **Phase 1 is complete.** Currently authorized and in progress:
+**Phase 2 only.** Phase 3 and later phases require separate explicit owner
+authorization.
 
-## Phase 1 — Repository foundation and feasibility *(current)*
+## Phase 1 — Repository foundation and feasibility *(complete)*
 
 Create the repository foundation, project governance, research methodology,
 schemas, safety controls, CI, and a read-only feasibility assessment. No cloud
@@ -19,7 +21,7 @@ measurement contract and experiment matrix are defined; feasibility findings
 for Akamai Cloud, Google Cloud, and AWS are documented with verified facts
 separated from assumptions; a pull request is open for owner review.
 
-## Phase 2 — Synthetic workload and evaluator
+## Phase 2 — Synthetic workload and evaluator *(authorized, in progress)*
 
 Implement the Cloud Operations Agent, simulated tools
 (`get_service_health()`, `query_metrics()`, `search_logs()`,

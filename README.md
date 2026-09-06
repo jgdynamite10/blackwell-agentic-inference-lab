@@ -15,7 +15,10 @@ one-way mirror of canonical `main`**: it is synchronized only from reviewed
 and merged canonical `main`, and changes must never flow from the mirror back
 to this repository.
 
-**Status:** Phase 1 — repository foundation and feasibility.
+**Status:** Phase 1 (repository foundation and feasibility) is **complete**.
+Phase 2 (synthetic workload and evaluator) is **authorized and in progress**.
+Phase 3 and later phases require separate explicit owner authorization
+([docs/roadmap.md](docs/roadmap.md)).
 
 - **No genuine benchmarks have been run yet.** No results exist.
 - **All current example files are synthetic** and clearly labeled as such.
@@ -73,7 +76,8 @@ docs/                        Charter, roadmap, architecture, feasibility, govern
 methodology/                 Measurement contract, experiment matrix, workload, reproducibility
 schemas/                     JSON Schemas for run manifests and benchmark results
 examples/                    Synthetic example manifest and result files (NOT real data)
-src/blackwell_lab/           Minimal Python package (schema validation, results-path guard)
+src/blackwell_lab/           Python package (schema validation, results-path guard)
+src/blackwell_lab/workload/  Synthetic Cloud Ops Agent, simulated tools, evaluator, offline runner
 tests/                       Automated tests
 scripts/preflight/           Read-only cloud feasibility checks (run locally by the operator)
 results/                     Placeholder only — genuine results are never committed here
@@ -102,6 +106,13 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ruff check . && ruff format --check .
 pytest
+```
+
+Offline synthetic benchmark smoke run (Phase 2; no GPU, no network, no
+persistence unless `LAB_RESULTS_DIR` points outside the repository):
+
+```bash
+blackwell-bench --profile interactive --concurrency 1 --repetitions 1
 ```
 
 ## Project governance

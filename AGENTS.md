@@ -118,7 +118,9 @@ explicitly revises them in writing.
 1. **Stop at the end of the currently authorized phase.** The roadmap is in
    [docs/roadmap.md](docs/roadmap.md). Work on a later phase begins only after
    the project owner explicitly authorizes it.
-2. Currently authorized: **Phase 1 only.**
+2. Phase status: **Phase 1 is complete.** Currently authorized and in
+   progress: **Phase 2 (synthetic workload and evaluator) only.** Phase 3 and
+   later phases require separate explicit owner authorization.
 
 ## 8. Repository hygiene
 
