@@ -1,0 +1,80 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "EXAMPLE-0000-0000-0000-000000000000",
+  "repetition_index": 1,
+  "phase": "measured",
+  "observations": [
+    {
+      "task_index": 0,
+      "template_id": "elevated-latency-001",
+      "instance_id": "elevated-latency-001#0000",
+      "instance_seed": 123456789,
+      "status": "completed",
+      "error_category": null,
+      "submitted_at_utc": "2026-01-01T00:00:00Z",
+      "submitted_offset_ms": 0.0,
+      "started_offset_ms": 0.4,
+      "ended_offset_ms": 41000.5,
+      "e2e_ms": 41000.5,
+      "queue_wait_ms": 0.4,
+      "turns": [
+        {
+          "ttft_ms": 310.2,
+          "serving_time_ms": 9500.0,
+          "chunk_count": 12,
+          "content_chars": 180,
+          "itl_available": true,
+          "itl_unavailable_reason": null,
+          "inter_token_gaps_ms": [11.5, 12.1, 10.9],
+          "output_tokens": 96,
+          "tokens_unavailable_reason": null,
+          "engine_queue_time_ms": 14.0
+        }
+      ],
+      "tool_trace": [
+        {
+          "tool": "get_service_health",
+          "arguments": { "service": "zephyr-cart" },
+          "result": { "services": { "zephyr-cart": { "api": "degraded" } } },
+          "simulated_latency_ms": 5.0
+        },
+        {
+          "tool": "recommend_remediation",
+          "arguments": {
+            "diagnosis_id": "synchronous-audit-logging-cfg-2041",
+            "rationale": "EXAMPLE rationale (synthetic).",
+            "remediation_id": "rollback-config-release-cfg-2041"
+          },
+          "result": {
+            "acknowledged": true,
+            "diagnosis_id": "synchronous-audit-logging-cfg-2041",
+            "rationale": "EXAMPLE rationale (synthetic).",
+            "remediation_id": "rollback-config-release-cfg-2041"
+          },
+          "simulated_latency_ms": 5.0
+        }
+      ],
+      "terminal": {
+        "diagnosis_id": "synchronous-audit-logging-cfg-2041",
+        "rationale": "EXAMPLE rationale (synthetic).",
+        "remediation_id": "rollback-config-release-cfg-2041"
+      },
+      "evaluation": {
+        "evaluator_version": "0.0.0-EXAMPLE",
+        "success": true,
+        "score": 1.0,
+        "gates": [
+          { "gate_id": "task_completed", "passed": true, "detail": "terminal recommendation submitted" },
+          { "gate_id": "diagnosis", "passed": true, "detail": "exact accepted diagnosis id" },
+          { "gate_id": "remediation", "passed": true, "detail": "accepted remediation id" },
+          { "gate_id": "evidence:log-evidence-cfg-2041", "passed": true, "detail": "satisfied by tool trace" },
+          { "gate_id": "evidence:change-correlation-cfg-2041", "passed": true, "detail": "satisfied by tool trace" }
+        ],
+        "diagnosis_component": 1.0,
+        "remediation_component": 1.0,
+        "evidence_component": 1.0,
+        "reason": "all mandatory gates passed"
+      }
+    }
+  ]
+}

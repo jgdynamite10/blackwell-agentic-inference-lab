@@ -13,6 +13,7 @@ import json
 import re
 
 import pytest
+from fakes import FakeClock
 
 from blackwell_lab.workload.runner import run_cell
 from blackwell_lab.workload.scenarios import canonical_catalog_json, catalog
@@ -111,7 +112,9 @@ def generated_record():
         concurrency=1,
         repetitions=1,
         warmup_passes=0,
+        tasks_per_repetition=4,
         scenario_ids=["elevated-latency-001", "dns-failures-001"],
+        clock=FakeClock(),
     )
     return records[0]
 
@@ -133,6 +136,12 @@ class TestGeneratedOutputSafety:
     def test_generated_result_is_safe(self, generated_record):
         text = self._scan_text(generated_record, generated_record.result)
         _assert_text_is_safe(text, context="generated result")
+
+    def test_generated_raw_observations_are_safe(self, generated_record):
+        """The raw task observations (turns, tool traces, terminal
+        recommendations) must scan clean too."""
+        text = self._scan_text(generated_record, generated_record.measured_observations)
+        _assert_text_is_safe(text, context="generated raw observations")
 
     def test_safety_scan_actually_detects_violations(self):
         """Guard the guard: each forbidden pattern must trip the scanner."""

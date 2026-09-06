@@ -1,12 +1,24 @@
 """Deterministic, versioned incident-scenario catalog.
 
 Every scenario is a pure data definition: the fixture data each simulated
-tool returns, the ground-truth root cause, the accepted remediation set,
-distractor signals, and the machine-checkable success criteria the evaluator
-applies. Scenarios contain **only synthetic data**: fictional service names,
-hostnames under the reserved ``.example`` TLD (RFC 2606), and IP addresses
-from the RFC 5737 documentation ranges (192.0.2.0/24, 198.51.100.0/24,
-203.0.113.0/24). Nothing here references a real system, account, or provider.
+tool returns, the ground-truth diagnosis (by **id**, not keyword), the
+accepted remediation set, distractor diagnoses/remediations, and the
+machine-checkable **evidence predicates** the evaluator applies. Scenarios
+contain **only synthetic data**: fictional service names, hostnames under the
+reserved ``.example`` TLD (RFC 2606), and IP addresses from the RFC 5737
+documentation ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24).
+Nothing here references a real system, account, or provider.
+
+Success criteria (evaluator v3, decision D-0010) are structured, not
+keyword-substring based:
+
+- the agent must submit an exact ``diagnosis_id`` drawn from the candidate
+  list surfaced in the task prompt and runbook fixtures (no hidden strings);
+- the agent must submit an accepted ``remediation_id``;
+- every mandatory :class:`EvidencePredicate` must be satisfied by the task's
+  recorded tool trace. A predicate is satisfied by **any one** of its
+  alternatives (permitted alternative evidence paths), each of which
+  constrains the tool name, relevant arguments, and the returned result.
 
 The catalog is versioned via ``WORKLOAD_VERSION`` and content-addressed via
 ``catalog_digest()``; both appear in every run manifest so results are
@@ -20,7 +32,7 @@ import json
 from dataclasses import asdict, dataclass, field
 
 WORKLOAD_NAME = "cloud-ops-agent"
-WORKLOAD_VERSION = "2.0.0"
+WORKLOAD_VERSION = "2.1.0"
 
 #: The ten incident condition classes required by
 #: methodology/workload-definition.md ("Incident catalog").
@@ -81,16 +93,56 @@ def _noise_logs(service: str, start_index: int, count: int) -> list[dict]:
 
 
 @dataclass(frozen=True)
+class EvidenceAlternative:
+    """One permitted way to satisfy an evidence predicate.
+
+    A recorded tool-trace entry matches this alternative when:
+
+    - its tool name equals ``tool``;
+    - for every ``(argument, substring)`` pair in ``argument_contains``, the
+      trace entry's validated argument value contains the substring
+      (case-insensitively);
+    - if ``result_contains`` is set, the canonical JSON serialization of the
+      tool's returned payload contains the substring (case-insensitively).
+
+    Constraining both arguments and results means irrelevant queries (right
+    tool, wrong question) cannot satisfy evidence.
+    """
+
+    tool: str
+    argument_contains: tuple[tuple[str, str], ...] = ()
+    result_contains: str | None = None
+
+
+@dataclass(frozen=True)
+class EvidencePredicate:
+    """One mandatory, machine-checkable evidence requirement.
+
+    The predicate is satisfied when **any one** alternative matches at least
+    one entry of the task's tool trace (permitted alternative evidence
+    paths). All of a scenario's predicates are mandatory gates.
+    """
+
+    predicate_id: str
+    description: str
+    alternatives: tuple[EvidenceAlternative, ...]
+
+
+@dataclass(frozen=True)
 class Scenario:
     """One deterministic incident definition.
 
-    ``root_cause_keywords`` are the machine-checkable success criteria for the
-    diagnosis component: the evaluator credits the fraction of keywords that
-    appear (case-insensitively) in the agent's stated root cause.
+    ``accepted_diagnoses`` is the exact-match diagnosis gate;
+    ``distractor_diagnoses`` are plausible-but-wrong diagnosis ids. Both are
+    surfaced to the agent (task prompt candidate list and runbook fixtures) so
+    the model is never asked to guess a hidden string.
     ``accepted_remediations`` is the accepted set; ``distractor_remediations``
     are plausible-but-wrong actions that also appear in runbook fixtures.
-    ``required_evidence`` lists the tools an appropriately-diagnosing agent
-    must consult before recommending.
+    ``evidence_predicates`` are the mandatory machine-checkable evidence gates
+    evaluated against the recorded tool trace.
+    ``reference_tool_sequence`` is the canonical evidence path; the
+    ``alternative_tool_sequence`` exercises each predicate's permitted
+    alternative path and must also satisfy every predicate.
     """
 
     scenario_id: str
@@ -105,11 +157,19 @@ class Scenario:
     recent_changes: list[dict] = field(default_factory=list)
     root_cause_id: str = ""
     root_cause_summary: str = ""
-    root_cause_keywords: tuple[str, ...] = ()
+    accepted_diagnoses: tuple[str, ...] = ()
+    distractor_diagnoses: tuple[str, ...] = ()
     accepted_remediations: tuple[str, ...] = ()
     distractor_remediations: tuple[str, ...] = ()
-    required_evidence: tuple[str, ...] = ()
+    evidence_predicates: tuple[EvidencePredicate, ...] = ()
     reference_tool_sequence: tuple[dict, ...] = ()
+    alternative_tool_sequence: tuple[dict, ...] = ()
+
+    @property
+    def candidate_diagnoses(self) -> tuple[str, ...]:
+        """All diagnosis ids surfaced to the agent, in sorted order so the
+        accepted answer's position leaks nothing."""
+        return tuple(sorted({*self.accepted_diagnoses, *self.distractor_diagnoses}))
 
 
 def _build_scenarios() -> tuple[Scenario, ...]:
@@ -190,15 +250,59 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                 "Config release cfg-2041 enabled synchronous audit logging on request "
                 "threads, blocking the thread pool and inflating p99 latency."
             ),
-            root_cause_keywords=("audit logging", "cfg-2041"),
+            accepted_diagnoses=("synchronous-audit-logging-cfg-2041",),
+            distractor_diagnoses=("upstream-dependency-slowdown", "traffic-spike-overload"),
             accepted_remediations=("rollback-config-release-cfg-2041",),
             distractor_remediations=("scale-out-zephyr-cart-api", "restart-zephyr-cart-pods"),
-            required_evidence=("get_service_health", "search_logs", "check_recent_changes"),
+            evidence_predicates=(
+                EvidencePredicate(
+                    predicate_id="log-evidence-cfg-2041",
+                    description=(
+                        "Log search surfaced the synchronous-audit-logging line "
+                        "attributing the regression to cfg-2041."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "audit"),),
+                            result_contains="cfg-2041",
+                        ),
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "cfg-2041"),),
+                            result_contains="cfg-2041",
+                        ),
+                    ),
+                ),
+                EvidencePredicate(
+                    predicate_id="change-correlation-cfg-2041",
+                    description=(
+                        "The cfg-2041 config release was correlated via the change "
+                        "feed or the service runbook."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="check_recent_changes",
+                            result_contains="cfg-2041",
+                        ),
+                        EvidenceAlternative(
+                            tool="retrieve_runbook",
+                            argument_contains=(("key", "zephyr-cart"),),
+                            result_contains="rollback-config-release-cfg-2041",
+                        ),
+                    ),
+                ),
+            ),
             reference_tool_sequence=(
                 {"tool": "get_service_health", "arguments": {"service": svc}},
                 {"tool": "query_metrics", "arguments": {"metric": "latency_p99_ms"}},
                 {"tool": "search_logs", "arguments": {"query": "audit"}},
                 {"tool": "check_recent_changes", "arguments": {}},
+                {"tool": "retrieve_runbook", "arguments": {"key": svc}},
+            ),
+            alternative_tool_sequence=(
+                {"tool": "get_service_health", "arguments": {"service": svc}},
+                {"tool": "search_logs", "arguments": {"query": "cfg-2041"}},
                 {"tool": "retrieve_runbook", "arguments": {"key": svc}},
             ),
         )
@@ -276,17 +380,61 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                 "Deploy dep-8102 requires the new LEDGER_ENDPOINT_MODE environment "
                 "variable, which was not set, so pods fail at startup and crash-loop."
             ),
-            root_cause_keywords=("environment variable", "dep-8102"),
+            accepted_diagnoses=("missing-env-var-dep-8102",),
+            distractor_diagnoses=("upstream-ledger-outage", "node-resource-exhaustion"),
             accepted_remediations=("rollback-deploy-dep-8102",),
             distractor_remediations=(
                 "increase-quokka-payments-replicas",
                 "restart-quokka-payments-pods",
             ),
-            required_evidence=("get_service_health", "search_logs", "check_recent_changes"),
+            evidence_predicates=(
+                EvidencePredicate(
+                    predicate_id="startup-log-evidence-dep-8102",
+                    description=(
+                        "Log search surfaced the startup failure naming the missing "
+                        "variable introduced in dep-8102."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "startup"),),
+                            result_contains="dep-8102",
+                        ),
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "dep-8102"),),
+                            result_contains="dep-8102",
+                        ),
+                    ),
+                ),
+                EvidencePredicate(
+                    predicate_id="change-correlation-dep-8102",
+                    description=(
+                        "The dep-8102 release was correlated via the change feed or "
+                        "the service runbook."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="check_recent_changes",
+                            result_contains="dep-8102",
+                        ),
+                        EvidenceAlternative(
+                            tool="retrieve_runbook",
+                            argument_contains=(("key", "quokka-payments"),),
+                            result_contains="rollback-deploy-dep-8102",
+                        ),
+                    ),
+                ),
+            ),
             reference_tool_sequence=(
                 {"tool": "get_service_health", "arguments": {"service": svc}},
                 {"tool": "search_logs", "arguments": {"query": "startup failed"}},
                 {"tool": "check_recent_changes", "arguments": {}},
+                {"tool": "retrieve_runbook", "arguments": {"key": svc}},
+            ),
+            alternative_tool_sequence=(
+                {"tool": "get_service_health", "arguments": {"service": svc}},
+                {"tool": "search_logs", "arguments": {"query": "dep-8102"}},
                 {"tool": "retrieve_runbook", "arguments": {"key": svc}},
             ),
         )
@@ -358,18 +506,62 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                 "Config release cfg-3300 removed the cache entry bound, so the "
                 "in-process cache grows unbounded and workers are OOM-killed."
             ),
-            root_cause_keywords=("cache", "cfg-3300", "unbounded"),
+            accepted_diagnoses=("unbounded-cache-cfg-3300",),
+            distractor_diagnoses=("memory-leak-in-worker", "traffic-growth-capacity"),
             accepted_remediations=("rollback-config-release-cfg-3300",),
             distractor_remediations=(
                 "add-memory-to-otter-inventory-nodes",
                 "restart-otter-inventory-workers",
             ),
-            required_evidence=("query_metrics", "search_logs", "check_recent_changes"),
+            evidence_predicates=(
+                EvidencePredicate(
+                    predicate_id="cache-log-evidence-cfg-3300",
+                    description=(
+                        "Log search surfaced the disabled-eviction line attributing "
+                        "unbounded cache growth to cfg-3300."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "cache"),),
+                            result_contains="cfg-3300",
+                        ),
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "cfg-3300"),),
+                            result_contains="cfg-3300",
+                        ),
+                    ),
+                ),
+                EvidencePredicate(
+                    predicate_id="change-correlation-cfg-3300",
+                    description=(
+                        "The cfg-3300 config release was correlated via the change "
+                        "feed or the service runbook."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="check_recent_changes",
+                            result_contains="cfg-3300",
+                        ),
+                        EvidenceAlternative(
+                            tool="retrieve_runbook",
+                            argument_contains=(("key", "otter-inventory"),),
+                            result_contains="rollback-config-release-cfg-3300",
+                        ),
+                    ),
+                ),
+            ),
             reference_tool_sequence=(
                 {"tool": "get_service_health", "arguments": {"service": svc}},
                 {"tool": "query_metrics", "arguments": {"metric": "memory_working_set_gib"}},
                 {"tool": "search_logs", "arguments": {"query": "cache"}},
                 {"tool": "check_recent_changes", "arguments": {}},
+                {"tool": "retrieve_runbook", "arguments": {"key": svc}},
+            ),
+            alternative_tool_sequence=(
+                {"tool": "get_service_health", "arguments": {"service": svc}},
+                {"tool": "search_logs", "arguments": {"query": "cfg-3300"}},
                 {"tool": "retrieve_runbook", "arguments": {"key": svc}},
             ),
         )
@@ -442,19 +634,63 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                 "without a priority cap, saturating the GPUs and starving online "
                 "inference."
             ),
-            root_cause_keywords=("batch job", "gpu", "embed-refresh-44"),
+            accepted_diagnoses=("batch-job-gpu-contention",),
+            distractor_diagnoses=("model-regression-slow-kernels", "traffic-spike-overload"),
             accepted_remediations=("throttle-batch-job-embed-refresh-44",),
             distractor_remediations=(
                 "restart-lynx-inference-serving",
                 "scale-out-lynx-inference",
             ),
-            required_evidence=("query_metrics", "search_logs", "check_recent_changes"),
+            evidence_predicates=(
+                EvidencePredicate(
+                    predicate_id="batch-admission-evidence",
+                    description=(
+                        "Log search surfaced the scheduler line admitting "
+                        "embed-refresh-44 to the online GPU pool."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "batch"),),
+                            result_contains="embed-refresh-44",
+                        ),
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "embed-refresh-44"),),
+                            result_contains="embed-refresh-44",
+                        ),
+                    ),
+                ),
+                EvidencePredicate(
+                    predicate_id="contention-signal",
+                    description=(
+                        "The batch-job start was correlated via the change feed, or "
+                        "queue-depth metrics showed the batch backlog."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="check_recent_changes",
+                            result_contains="embed-refresh-44",
+                        ),
+                        EvidenceAlternative(
+                            tool="query_metrics",
+                            argument_contains=(("metric", "batch_queue_depth"),),
+                            result_contains="batch_queue_depth",
+                        ),
+                    ),
+                ),
+            ),
             reference_tool_sequence=(
                 {"tool": "get_service_health", "arguments": {"service": svc}},
                 {"tool": "query_metrics", "arguments": {"metric": "gpu_util_pct"}},
                 {"tool": "search_logs", "arguments": {"query": "batch"}},
                 {"tool": "check_recent_changes", "arguments": {}},
                 {"tool": "retrieve_runbook", "arguments": {"key": svc}},
+            ),
+            alternative_tool_sequence=(
+                {"tool": "get_service_health", "arguments": {"service": svc}},
+                {"tool": "query_metrics", "arguments": {"metric": "batch_queue_depth"}},
+                {"tool": "search_logs", "arguments": {"query": "embed-refresh-44"}},
             ),
         )
     )
@@ -519,17 +755,60 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                 "The primary's backing volume-7 is degraded (media latency 46 ms vs "
                 "3 ms baseline), inflating read latency while CPU stays normal."
             ),
-            root_cause_keywords=("volume-7", "degraded"),
+            accepted_diagnoses=("degraded-volume-7",),
+            distractor_diagnoses=("cpu-saturation-primary", "network-partition-replica"),
             accepted_remediations=("failover-heron-metadata-to-replica",),
             distractor_remediations=(
                 "increase-heron-metadata-cpu",
                 "restart-heron-metadata-primary",
             ),
-            required_evidence=("get_service_health", "query_metrics", "search_logs"),
+            evidence_predicates=(
+                EvidencePredicate(
+                    predicate_id="volume-latency-evidence",
+                    description=(
+                        "The degraded volume was evidenced by the storage-layer log "
+                        "line or by elevated io-wait metrics."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "volume-7"),),
+                            result_contains="media latency",
+                        ),
+                        EvidenceAlternative(
+                            tool="query_metrics",
+                            argument_contains=(("metric", "disk_io_wait"),),
+                            result_contains="disk_io_wait_pct",
+                        ),
+                    ),
+                ),
+                EvidencePredicate(
+                    predicate_id="volume-context",
+                    description=(
+                        "The degraded volume-7 component was seen in service health, "
+                        "or the failover runbook was consulted."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="get_service_health",
+                            result_contains="volume-7",
+                        ),
+                        EvidenceAlternative(
+                            tool="retrieve_runbook",
+                            argument_contains=(("key", "heron-metadata"),),
+                            result_contains="failover-heron-metadata-to-replica",
+                        ),
+                    ),
+                ),
+            ),
             reference_tool_sequence=(
                 {"tool": "get_service_health", "arguments": {"service": svc}},
                 {"tool": "query_metrics", "arguments": {"metric": "disk_io_wait_pct"}},
                 {"tool": "search_logs", "arguments": {"query": "volume-7"}},
+                {"tool": "retrieve_runbook", "arguments": {"key": svc}},
+            ),
+            alternative_tool_sequence=(
+                {"tool": "query_metrics", "arguments": {"metric": "disk_io_wait_pct"}},
                 {"tool": "retrieve_runbook", "arguments": {"key": svc}},
             ),
         )
@@ -597,14 +876,58 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                 "Deploy dep-9004 requires database schema version 41, but migration "
                 "41 was never applied, so readiness probes fail and the rollout stalls."
             ),
-            root_cause_keywords=("schema", "migration", "dep-9004"),
+            accepted_diagnoses=("missing-migration-dep-9004",),
+            distractor_diagnoses=("bad-image-artifact", "readiness-probe-misconfigured"),
             accepted_remediations=("rollback-deploy-dep-9004",),
             distractor_remediations=("delete-ibis-notify-pods", "restart-ibis-notify-api"),
-            required_evidence=("get_service_health", "search_logs", "check_recent_changes"),
+            evidence_predicates=(
+                EvidencePredicate(
+                    predicate_id="readiness-log-evidence-dep-9004",
+                    description=(
+                        "Log search surfaced the readiness failure naming the schema "
+                        "version required by dep-9004."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "readiness"),),
+                            result_contains="schema_version",
+                        ),
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "migration"),),
+                            result_contains="dep-9004",
+                        ),
+                    ),
+                ),
+                EvidencePredicate(
+                    predicate_id="change-correlation-dep-9004",
+                    description=(
+                        "The dep-9004 release was correlated via the change feed or "
+                        "the service runbook."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="check_recent_changes",
+                            result_contains="dep-9004",
+                        ),
+                        EvidenceAlternative(
+                            tool="retrieve_runbook",
+                            argument_contains=(("key", "ibis-notify"),),
+                            result_contains="rollback-deploy-dep-9004",
+                        ),
+                    ),
+                ),
+            ),
             reference_tool_sequence=(
                 {"tool": "get_service_health", "arguments": {"service": svc}},
                 {"tool": "search_logs", "arguments": {"query": "readiness"}},
                 {"tool": "check_recent_changes", "arguments": {}},
+                {"tool": "retrieve_runbook", "arguments": {"key": svc}},
+            ),
+            alternative_tool_sequence=(
+                {"tool": "get_service_health", "arguments": {"service": svc}},
+                {"tool": "search_logs", "arguments": {"query": "migration"}},
                 {"tool": "retrieve_runbook", "arguments": {"key": svc}},
             ),
         )
@@ -676,16 +999,59 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                 "The heron-auth upstream (token-signer pool) is exhausted and timing "
                 "out; falcon-frontend 5xx responses are collateral."
             ),
-            root_cause_keywords=("heron-auth", "upstream"),
+            accepted_diagnoses=("unhealthy-upstream-heron-auth",),
+            distractor_diagnoses=("frontend-bad-deploy", "edge-lb-misroute"),
             accepted_remediations=("failover-heron-auth-to-standby-pool",),
             distractor_remediations=(
                 "restart-falcon-frontend-pods",
                 "scale-out-falcon-frontend",
             ),
-            required_evidence=("get_service_health", "query_metrics", "search_logs"),
+            evidence_predicates=(
+                EvidencePredicate(
+                    predicate_id="upstream-health-evidence",
+                    description=(
+                        "The unhealthy heron-auth upstream (token-signer) was seen in "
+                        "cluster health or the timeout log line."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="get_service_health",
+                            result_contains="token-signer",
+                        ),
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "heron-auth"),),
+                            result_contains="timed out",
+                        ),
+                    ),
+                ),
+                EvidencePredicate(
+                    predicate_id="upstream-timeout-signal",
+                    description=(
+                        "Upstream auth timeouts were quantified via metrics, or the "
+                        "heron-auth failover runbook was consulted."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="query_metrics",
+                            argument_contains=(("metric", "upstream_auth_timeouts"),),
+                            result_contains="upstream_auth_timeouts",
+                        ),
+                        EvidenceAlternative(
+                            tool="retrieve_runbook",
+                            argument_contains=(("key", "heron-auth"),),
+                            result_contains="failover-heron-auth-to-standby-pool",
+                        ),
+                    ),
+                ),
+            ),
             reference_tool_sequence=(
                 {"tool": "get_service_health", "arguments": {}},
                 {"tool": "query_metrics", "arguments": {"metric": "upstream_auth_timeouts"}},
+                {"tool": "search_logs", "arguments": {"query": "heron-auth"}},
+                {"tool": "retrieve_runbook", "arguments": {"key": "heron-auth"}},
+            ),
+            alternative_tool_sequence=(
                 {"tool": "search_logs", "arguments": {"query": "heron-auth"}},
                 {"tool": "retrieve_runbook", "arguments": {"key": "heron-auth"}},
             ),
@@ -760,15 +1126,59 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                 "Resolver config release cfg-5150 set a misspelled search domain "
                 "('svc.1ab.example'), so service lookups SERVFAIL and jobs fail."
             ),
-            root_cause_keywords=("search domain", "cfg-5150"),
+            accepted_diagnoses=("dns-search-domain-typo-cfg-5150",),
+            distractor_diagnoses=("network-firewall-block", "badger-queue-outage"),
             accepted_remediations=("rollback-config-release-cfg-5150",),
             distractor_remediations=("restart-dns-cache-daemons", "restart-walrus-batch-workers"),
-            required_evidence=("search_logs", "check_recent_changes"),
+            evidence_predicates=(
+                EvidencePredicate(
+                    predicate_id="servfail-evidence-cfg-5150",
+                    description=(
+                        "Log search surfaced either the SERVFAIL lines naming the "
+                        "misspelled search domain or the resolver config line."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "servfail"),),
+                            result_contains="svc.1ab.example",
+                        ),
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "search domain"),),
+                            result_contains="cfg-5150",
+                        ),
+                    ),
+                ),
+                EvidencePredicate(
+                    predicate_id="change-correlation-cfg-5150",
+                    description=(
+                        "The cfg-5150 resolver config release was correlated via the "
+                        "change feed or the DNS runbook."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="check_recent_changes",
+                            result_contains="cfg-5150",
+                        ),
+                        EvidenceAlternative(
+                            tool="retrieve_runbook",
+                            argument_contains=(("key", "dns-resolver"),),
+                            result_contains="rollback-config-release-cfg-5150",
+                        ),
+                    ),
+                ),
+            ),
             reference_tool_sequence=(
                 {"tool": "get_service_health", "arguments": {}},
                 {"tool": "query_metrics", "arguments": {"metric": "dns_servfail_count"}},
                 {"tool": "search_logs", "arguments": {"query": "SERVFAIL"}},
                 {"tool": "check_recent_changes", "arguments": {}},
+                {"tool": "retrieve_runbook", "arguments": {"key": "dns-resolver"}},
+            ),
+            alternative_tool_sequence=(
+                {"tool": "get_service_health", "arguments": {}},
+                {"tool": "search_logs", "arguments": {"query": "search domain"}},
                 {"tool": "retrieve_runbook", "arguments": {"key": "dns-resolver"}},
             ),
         )
@@ -834,19 +1244,63 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                 "Config release cfg-6201 tightened rate-limit rule rl-77 tenfold for "
                 "all clients instead of one abuser, causing widespread 429s."
             ),
-            root_cause_keywords=("rate-limit", "cfg-6201"),
+            accepted_diagnoses=("misconfigured-rate-limit-cfg-6201",),
+            distractor_diagnoses=("backend-capacity-shortfall", "client-abuse-wave"),
             accepted_remediations=("rollback-config-release-cfg-6201",),
             distractor_remediations=(
                 "scale-out-marmot-search-backends",
                 "restart-lynx-gateway-edge",
             ),
-            required_evidence=("query_metrics", "search_logs", "check_recent_changes"),
+            evidence_predicates=(
+                EvidencePredicate(
+                    predicate_id="rate-limit-rule-evidence",
+                    description=(
+                        "Log search surfaced the rl-77 rule change attributing the "
+                        "429s to cfg-6201."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "rate-limit"),),
+                            result_contains="cfg-6201",
+                        ),
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "rl-77"),),
+                            result_contains="cfg-6201",
+                        ),
+                    ),
+                ),
+                EvidencePredicate(
+                    predicate_id="throttle-signal",
+                    description=(
+                        "The cfg-6201 release was correlated via the change feed, or "
+                        "the 429 rate was quantified via metrics."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="check_recent_changes",
+                            result_contains="cfg-6201",
+                        ),
+                        EvidenceAlternative(
+                            tool="query_metrics",
+                            argument_contains=(("metric", "http_429"),),
+                            result_contains="http_429_rate_pct",
+                        ),
+                    ),
+                ),
+            ),
             reference_tool_sequence=(
                 {"tool": "get_service_health", "arguments": {"service": svc}},
                 {"tool": "query_metrics", "arguments": {"metric": "http_429_rate_pct"}},
                 {"tool": "search_logs", "arguments": {"query": "rate-limit"}},
                 {"tool": "check_recent_changes", "arguments": {}},
                 {"tool": "retrieve_runbook", "arguments": {"key": svc}},
+            ),
+            alternative_tool_sequence=(
+                {"tool": "get_service_health", "arguments": {"service": svc}},
+                {"tool": "query_metrics", "arguments": {"metric": "http_429_rate_pct"}},
+                {"tool": "search_logs", "arguments": {"query": "rl-77"}},
             ),
         )
     )
@@ -914,14 +1368,57 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                 "autoscaler ceiling (max_replicas=24), so consumption capacity is "
                 "exhausted and lag grows."
             ),
-            root_cause_keywords=("autoscaler", "ceiling"),
+            accepted_diagnoses=("autoscaler-ceiling-exhausted",),
+            distractor_diagnoses=("consumer-deadlock", "broker-disk-saturation"),
             accepted_remediations=("raise-badger-queue-autoscaler-ceiling",),
             distractor_remediations=("purge-badger-queue-backlog", "restart-badger-queue-broker"),
-            required_evidence=("get_service_health", "query_metrics", "search_logs"),
+            evidence_predicates=(
+                EvidencePredicate(
+                    predicate_id="ceiling-evidence",
+                    description=(
+                        "The capped autoscaler was evidenced by the ceiling log line "
+                        "or the at-ceiling health status."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="search_logs",
+                            argument_contains=(("query", "autoscaler"),),
+                            result_contains="max_replicas=24",
+                        ),
+                        EvidenceAlternative(
+                            tool="get_service_health",
+                            result_contains="at-ceiling",
+                        ),
+                    ),
+                ),
+                EvidencePredicate(
+                    predicate_id="lag-signal",
+                    description=(
+                        "Consumer lag was quantified via metrics, or the capacity "
+                        "runbook was consulted."
+                    ),
+                    alternatives=(
+                        EvidenceAlternative(
+                            tool="query_metrics",
+                            argument_contains=(("metric", "consumer_lag"),),
+                            result_contains="consumer_lag_s",
+                        ),
+                        EvidenceAlternative(
+                            tool="retrieve_runbook",
+                            argument_contains=(("key", "badger-queue"),),
+                            result_contains="raise-badger-queue-autoscaler-ceiling",
+                        ),
+                    ),
+                ),
+            ),
             reference_tool_sequence=(
                 {"tool": "get_service_health", "arguments": {"service": svc}},
                 {"tool": "query_metrics", "arguments": {"metric": "consumer_lag_s"}},
                 {"tool": "search_logs", "arguments": {"query": "autoscaler"}},
+                {"tool": "retrieve_runbook", "arguments": {"key": svc}},
+            ),
+            alternative_tool_sequence=(
+                {"tool": "get_service_health", "arguments": {"service": svc}},
                 {"tool": "retrieve_runbook", "arguments": {"key": svc}},
             ),
         )

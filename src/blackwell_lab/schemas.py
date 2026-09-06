@@ -19,6 +19,7 @@ SCHEMAS_DIR = Path(__file__).resolve().parents[2] / "schemas"
 
 RUN_MANIFEST_SCHEMA = SCHEMAS_DIR / "run-manifest.schema.json"
 BENCHMARK_RESULT_SCHEMA = SCHEMAS_DIR / "benchmark-result.schema.json"
+TASK_OBSERVATION_SCHEMA = SCHEMAS_DIR / "task-observation.schema.json"
 
 REQUIRED_FORMATS = ("date", "date-time")
 
@@ -58,3 +59,7 @@ def validate_run_manifest(document: dict[str, Any]) -> None:
 
 def validate_benchmark_result(document: dict[str, Any]) -> None:
     validate_document(document, BENCHMARK_RESULT_SCHEMA)
+
+
+def validate_task_observations(document: dict[str, Any]) -> None:
+    validate_document(document, TASK_OBSERVATION_SCHEMA)

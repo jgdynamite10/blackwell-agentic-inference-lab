@@ -7,8 +7,10 @@ import pytest
 from blackwell_lab.workload.stats import (
     MIN_SAMPLES_P95,
     MIN_SAMPLES_P99,
+    measure_from_values,
     percentile_nearest_rank,
     summarize_latencies,
+    unavailable_measure,
 )
 
 
@@ -77,3 +79,26 @@ class TestSuppression:
         assert summary["p50"] == 500.0
         assert summary["p95"] == 950.0
         assert summary["p99"] == 990.0
+
+
+class TestAvailabilityMarkers:
+    """Every measure is either available with data or explicitly unavailable
+    with a reason — never fabricated."""
+
+    def test_unavailable_measure_carries_a_reason(self):
+        marker = unavailable_measure("no serving-engine queue telemetry")
+        assert marker == {"available": False, "reason": "no serving-engine queue telemetry"}
+
+    def test_unavailable_measure_rejects_empty_reason(self):
+        with pytest.raises(ValueError):
+            unavailable_measure("")
+
+    def test_measure_from_values_is_available_with_suppression(self):
+        measure = measure_from_values([1.0, 2.0, 3.0])
+        assert measure["available"] is True
+        assert measure["count"] == 3
+        assert measure["p95"] is None and measure["p99"] is None
+
+    def test_measure_from_empty_series_is_unavailable_not_zero_filled(self):
+        measure = measure_from_values([], empty_reason="no observations this repetition")
+        assert measure == {"available": False, "reason": "no observations this repetition"}

@@ -75,3 +75,23 @@ def summarize_latencies(values_ms: list[float]) -> dict:
         "max": round(ordered[-1], 3),
         "count": count,
     }
+
+
+def unavailable_measure(reason: str) -> dict:
+    """An explicitly unavailable measure: a reason, never fabricated values.
+
+    Matches the result schema's ``latency_measure`` unavailable branch. Used
+    whenever a measure cannot be truthfully reported (empty series, missing
+    token granularity, mock execution's host-clock timings, ...).
+    """
+    if not reason:
+        raise ValueError("an unavailable measure requires a non-empty reason")
+    return {"available": False, "reason": reason}
+
+
+def measure_from_values(values_ms: list[float], *, empty_reason: str = "no observations") -> dict:
+    """An available measure (with tail suppression) or an explicit
+    unavailable marker when the series is empty."""
+    if not values_ms:
+        return unavailable_measure(empty_reason)
+    return {"available": True, **summarize_latencies(values_ms)}

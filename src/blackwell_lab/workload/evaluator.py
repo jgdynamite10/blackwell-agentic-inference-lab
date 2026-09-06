@@ -1,42 +1,58 @@
 """Versioned, deterministic task-success evaluator (measurement contract §8).
 
-Scoring components (weights sum to 1.0):
+Evaluator v3 (decision D-0010) replaces keyword-substring scoring with
+**mandatory structured gates**. A task is successful if and only if ALL of
+the following hold:
 
-- **Root-cause diagnosis (weight 0.5).** The fraction of the scenario's
-  ``root_cause_keywords`` that appear, case-insensitively, in the agent's
-  stated root cause. Full credit requires every keyword.
-- **Evidence / appropriate tool use (weight 0.2).** The fraction of the
-  scenario's ``required_evidence`` tools the agent actually consulted before
-  recommending.
-- **Remediation (weight 0.3).** All-or-nothing: the submitted remediation id
-  is in the scenario's accepted set (distractors score zero).
+- ``task_completed`` — the task produced a terminal recommendation (no
+  execution error, no timeout);
+- ``diagnosis`` — the submitted ``diagnosis_id`` exactly matches an accepted
+  diagnosis (candidate ids are published in the task prompt and runbook
+  fixtures, so the model selects, never guesses a hidden string);
+- ``remediation`` — the submitted ``remediation_id`` is in the accepted set
+  (distractors fail);
+- one gate per scenario **evidence predicate** — every mandatory predicate
+  must be satisfied by the recorded tool trace. A predicate is satisfied by
+  any one of its alternatives (permitted alternative evidence paths); each
+  alternative constrains the tool name, relevant validated arguments, and the
+  returned result, so irrelevant queries and repeated tool names cannot
+  satisfy evidence.
 
-Tasks that ended in an error or timeout score 0.0 and are never successful;
-they stay in the denominator of task-success rate (contract §7).
+The overall score is binary: **1.0 when successful, 0.0 otherwise**, and the
+owner-approved quality threshold is ``S_MIN = 1.0``. Component fractions
+(diagnosis, remediation, evidence-predicate satisfaction) are retained as
+**diagnostics only** — they never define success.
 
-``PROPOSED_QUALITY_THRESHOLD`` (S_min) is a **proposal requiring owner
-approval** (decision D-0009): 0.85 requires a fully correct root cause, an
-accepted remediation, and at least a quarter of the required evidence.
+Rationale text is recorded for audit but is **not a gate**: keyword-stuffed
+or negated rationales can neither pass nor fail a task by themselves.
 
 Scoring is machine-checkable and deterministic: identical inputs always
-produce identical scores. Human judgment is not part of scoring.
+produce identical evaluations. Human judgment is not part of scoring.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
-from blackwell_lab.workload.agent import TaskExecution
-from blackwell_lab.workload.scenarios import Scenario
+from blackwell_lab.workload.agent import TaskExecution, ToolTrace
+from blackwell_lab.workload.scenarios import EvidenceAlternative, EvidencePredicate, Scenario
 
-EVALUATOR_VERSION = "2.0.0"
+EVALUATOR_VERSION = "3.0.0"
 
-ROOT_CAUSE_WEIGHT = 0.5
-EVIDENCE_WEIGHT = 0.2
-REMEDIATION_WEIGHT = 0.3
+#: Owner-approved quality threshold (decision D-0010): deterministic task
+#: success requires all mandatory gates, so S_min is exactly 1.0.
+QUALITY_THRESHOLD = 1.0
+S_MIN = QUALITY_THRESHOLD
 
-#: Proposed S_min — NOT owner-approved yet (decision D-0009 review item).
-PROPOSED_QUALITY_THRESHOLD = 0.85
+
+@dataclass(frozen=True)
+class GateResult:
+    """One mandatory gate's outcome (all gates must pass for success)."""
+
+    gate_id: str
+    passed: bool
+    detail: str
 
 
 @dataclass(frozen=True)
@@ -45,62 +61,114 @@ class Evaluation:
 
     scenario_id: str
     evaluator_version: str
-    score: float
-    root_cause_component: float
-    evidence_component: float
-    remediation_component: float
     success: bool
+    score: float  # 1.0 iff success, else 0.0 (S_min = 1.0)
+    gates: tuple[GateResult, ...]
+    # Diagnostic component fractions (never gates, never define success):
+    diagnosis_component: float
+    remediation_component: float
+    evidence_component: float
     reason: str
 
 
-def evaluate(
-    scenario: Scenario,
-    execution: TaskExecution,
-    *,
-    quality_threshold: float = PROPOSED_QUALITY_THRESHOLD,
-) -> Evaluation:
-    """Scores one task attempt against its scenario's success criteria."""
-    if execution.status != "completed":
-        return Evaluation(
-            scenario_id=scenario.scenario_id,
-            evaluator_version=EVALUATOR_VERSION,
-            score=0.0,
-            root_cause_component=0.0,
-            evidence_component=0.0,
-            remediation_component=0.0,
-            success=False,
-            reason=f"task did not complete: {execution.error_category}",
+def _canonical_result_text(trace: ToolTrace) -> str:
+    return json.dumps(trace.result, sort_keys=True, separators=(",", ":")).casefold()
+
+
+def _alternative_matches(alternative: EvidenceAlternative, trace: ToolTrace) -> bool:
+    if trace.tool != alternative.tool:
+        return False
+    for argument, needle in alternative.argument_contains:
+        value = trace.arguments.get(argument)
+        if not isinstance(value, str) or needle.casefold() not in value.casefold():
+            return False
+    if alternative.result_contains is not None:
+        if alternative.result_contains.casefold() not in _canonical_result_text(trace):
+            return False
+    return True
+
+
+def predicate_satisfied(predicate: EvidencePredicate, tool_trace: list[ToolTrace]) -> bool:
+    """True when any alternative matches at least one tool-trace entry."""
+    return any(
+        _alternative_matches(alternative, trace)
+        for alternative in predicate.alternatives
+        for trace in tool_trace
+    )
+
+
+def evaluate(scenario: Scenario, execution: TaskExecution) -> Evaluation:
+    """Applies the mandatory gates of one task attempt (all must pass)."""
+    gates: list[GateResult] = []
+
+    completed = execution.status == "completed"
+    gates.append(
+        GateResult(
+            gate_id="task_completed",
+            passed=completed,
+            detail=(
+                "terminal recommendation submitted"
+                if completed
+                else f"task did not complete: {execution.error_category}"
+            ),
+        )
+    )
+
+    diagnosis_ok = completed and execution.diagnosis_id in scenario.accepted_diagnoses
+    gates.append(
+        GateResult(
+            gate_id="diagnosis",
+            passed=diagnosis_ok,
+            detail=(
+                "exact accepted diagnosis id"
+                if diagnosis_ok
+                else f"submitted diagnosis_id {execution.diagnosis_id!r} is not accepted"
+            ),
+        )
+    )
+
+    remediation_ok = completed and execution.remediation_id in scenario.accepted_remediations
+    gates.append(
+        GateResult(
+            gate_id="remediation",
+            passed=remediation_ok,
+            detail=(
+                "accepted remediation id"
+                if remediation_ok
+                else f"submitted remediation_id {execution.remediation_id!r} is not accepted"
+            ),
+        )
+    )
+
+    satisfied_predicates = 0
+    for predicate in scenario.evidence_predicates:
+        satisfied = predicate_satisfied(predicate, execution.tool_trace)
+        satisfied_predicates += 1 if satisfied else 0
+        gates.append(
+            GateResult(
+                gate_id=f"evidence:{predicate.predicate_id}",
+                passed=satisfied,
+                detail=(
+                    "satisfied by tool trace"
+                    if satisfied
+                    else f"no tool-trace entry satisfies any alternative: {predicate.description}"
+                ),
+            )
         )
 
-    stated = (execution.root_cause or "").casefold()
-    keywords = scenario.root_cause_keywords
-    matched = sum(1 for kw in keywords if kw.casefold() in stated)
-    root_cause_fraction = matched / len(keywords) if keywords else 0.0
-
-    required = set(scenario.required_evidence)
-    consulted = required.intersection(execution.tools_used)
-    evidence_fraction = len(consulted) / len(required) if required else 1.0
-
-    remediation_ok = execution.remediation_id in scenario.accepted_remediations
-
-    root_cause_component = ROOT_CAUSE_WEIGHT * root_cause_fraction
-    evidence_component = EVIDENCE_WEIGHT * evidence_fraction
-    remediation_component = REMEDIATION_WEIGHT * (1.0 if remediation_ok else 0.0)
-    score = round(root_cause_component + evidence_component + remediation_component, 6)
-
-    success = score >= quality_threshold
-    reason = (
-        f"root_cause {matched}/{len(keywords)} keywords; "
-        f"evidence {len(consulted)}/{len(required)} tools; "
-        f"remediation {'accepted' if remediation_ok else 'not accepted'}"
-    )
+    success = all(gate.passed for gate in gates)
+    predicate_count = len(scenario.evidence_predicates)
+    evidence_fraction = satisfied_predicates / predicate_count if predicate_count else 1.0
+    failed_gates = [g.gate_id for g in gates if not g.passed]
+    reason = "all mandatory gates passed" if success else f"failed gates: {', '.join(failed_gates)}"
     return Evaluation(
         scenario_id=scenario.scenario_id,
         evaluator_version=EVALUATOR_VERSION,
-        score=score,
-        root_cause_component=round(root_cause_component, 6),
-        evidence_component=round(evidence_component, 6),
-        remediation_component=round(remediation_component, 6),
         success=success,
+        score=1.0 if success else 0.0,
+        gates=tuple(gates),
+        diagnosis_component=1.0 if diagnosis_ok else 0.0,
+        remediation_component=1.0 if remediation_ok else 0.0,
+        evidence_component=round(evidence_fraction, 6),
         reason=reason,
     )

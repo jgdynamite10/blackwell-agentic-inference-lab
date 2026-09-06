@@ -1,27 +1,44 @@
 {
-  "schema_version": "1.1.0",
+  "schema_version": "2.0.0",
   "run_id": "EXAMPLE-0000-0000-0000-000000000000",
   "is_synthetic_example": true,
+  "execution_mode": "gpu",
   "manifest_ref": "example-run-manifest.json",
   "tasks": {
-    "attempted": 10,
-    "succeeded": 9,
-    "failed": 1,
-    "timed_out": 0,
+    "attempted": 200,
+    "succeeded": 180,
+    "quality_failed": 12,
+    "errored": 6,
+    "timed_out": 2,
     "success_rate": 0.9,
-    "mean_quality_score": 0.87
+    "mean_quality_score": 0.9
+  },
+  "sample_design": {
+    "tasks_per_repetition": 200,
+    "seed": 12345,
+    "unique_template_count": 10,
+    "unique_instance_count": 200,
+    "total_attempts": 200,
+    "quality_independence_note": "EXAMPLE: independent quality cases are bounded by unique_template_count (10), not tasks_per_repetition."
+  },
+  "concurrency": {
+    "requested": 1,
+    "achieved_max": 1,
+    "mean_in_flight": 0.97
   },
   "latency_ms": {
-    "task_completion": { "mean": 42000, "p50": 40000, "p90": 55000, "p95": null, "p99": null, "min": 30000, "max": 67000, "count": 10 },
-    "time_to_first_token": { "mean": 350, "p50": 320, "p90": 480, "p95": null, "p99": null, "min": 250, "max": 610, "count": 42 },
-    "inter_token": { "mean": 12, "p50": 11, "p90": 16, "p95": 18, "p99": 25, "min": 8, "max": 30, "count": 39000 },
-    "queue_time": { "mean": 15, "p50": 10, "p90": 30, "p95": null, "p99": null, "min": 2, "max": 60, "count": 42 },
-    "model_serving_time": { "mean": 9800, "p50": 9200, "p90": 13000, "p95": null, "p99": null, "min": 6800, "max": 16200, "count": 42 },
-    "tool_execution_time": { "mean": 120, "p50": 120, "p90": 130, "p95": null, "p99": null, "min": 100, "max": 141, "count": 63 }
+    "task_completion": { "available": true, "mean": 42000, "p50": 40000, "p90": 55000, "p95": 58000, "p99": null, "min": 30000, "max": 67000, "count": 200 },
+    "time_to_first_token": { "available": true, "mean": 350, "p50": 320, "p90": 480, "p95": 540, "p99": null, "min": 250, "max": 610, "count": 840 },
+    "inter_token": { "available": true, "mean": 12, "p50": 11, "p90": 16, "p95": 18, "p99": 25, "min": 8, "max": 30, "count": 39000 },
+    "queue_time": { "available": true, "mean": 15, "p50": 10, "p90": 30, "p95": 41, "p99": null, "min": 2, "max": 60, "count": 840 },
+    "model_serving_time": { "available": true, "mean": 9800, "p50": 9200, "p90": 13000, "p95": 14400, "p99": null, "min": 6800, "max": 16200, "count": 840 },
+    "tool_execution_time": { "available": true, "mean": 120, "p50": 120, "p90": 130, "p95": 135, "p99": 140, "min": 100, "max": 141, "count": 1200 }
   },
   "throughput": {
+    "available": true,
     "output_tokens_per_second": 85.3,
     "total_output_tokens": 312000,
+    "per_turn_output_tokens_per_second": { "available": true, "mean": 84.1, "p50": 85.0, "p90": 92.4, "p95": 94.8, "p99": null, "min": 61.0, "max": 99.2, "count": 840 },
     "successful_tasks_per_gpu_hour": 8.8
   },
   "gpu": {
@@ -34,18 +51,30 @@
     "energy_per_successful_task_joules": 124000
   },
   "errors": {
-    "error_rate": 0.1,
-    "timeout_rate": 0.0,
+    "error_rate": 0.03,
+    "timeout_rate": 0.01,
     "taxonomy": {
-      "malformed_tool_call": 1
+      "malformed_tool_call": 3,
+      "endpoint_error": 2,
+      "agent_runtime_error": 1,
+      "task_timeout": 2
     }
   },
   "slo": {
     "latency_target_ms": 60000,
-    "ttft_target_ms": 1000,
-    "quality_threshold": 0.8,
-    "slo_attaining_tasks": 8,
+    "ttft_target_ms": 2500,
+    "quality_threshold": 1.0,
+    "slo_attaining_tasks": 170,
     "slo_attaining_throughput_per_gpu_hour": 7.8
+  },
+  "observations": {
+    "persisted": true,
+    "measured_count": 200,
+    "warmup_count": 200,
+    "measured_file": "EXAMPLE-0000-0000-0000-000000000000.observations.json",
+    "measured_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "warmup_file": "EXAMPLE-0000-0000-0000-000000000000.warmup-observations.json",
+    "warmup_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   },
   "economics": {
     "gpu_hours": 1.02,

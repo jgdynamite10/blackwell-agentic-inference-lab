@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/schemas/task-observation.schema.json",
+  "title": "Task Observation File",
+  "description": "Raw, auditable per-task observations for one repetition of one run — one file per (run, phase). These are PRIVATE external artifacts: they are persisted only under LAB_RESULTS_DIR (never inside the Git working tree), written atomically with private file permissions, and referenced from the benchmark result by safe relative filename plus SHA-256. Warm-up observations are labeled with phase='warmup', retained separately, and excluded from every measured summary. Summary metrics are DERIVED from these observations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "repetition_index", "phase", "observations"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 8,
+      "description": "Must match the run_id of the manifest and result of this repetition."
+    },
+    "repetition_index": { "type": "integer", "minimum": 1 },
+    "phase": {
+      "type": "string",
+      "enum": ["measured", "warmup"],
+      "description": "Warm-up files are retained for audit but never enter measured summaries."
+    },
+    "observations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/observation" }
+    }
+  },
+  "$defs": {
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_index",
+        "template_id",
+        "instance_id",
+        "instance_seed",
+        "status",
+        "error_category",
+        "submitted_at_utc",
+        "submitted_offset_ms",
+        "started_offset_ms",
+        "ended_offset_ms",
+        "e2e_ms",
+        "queue_wait_ms",
+        "turns",
+        "tool_trace",
+        "terminal",
+        "evaluation"
+      ],
+      "properties": {
+        "task_index": { "type": "integer", "minimum": 0, "description": "0-based submission order within the repetition." },
+        "template_id": { "type": "string", "minLength": 1, "description": "Incident template (scenario) id." },
+        "instance_id": { "type": "string", "minLength": 1, "description": "Seeded task-instance id (template_id#occurrence)." },
+        "instance_seed": { "type": "integer", "description": "Deterministic per-instance seed derived from the run seed." },
+        "status": { "type": "string", "enum": ["completed", "error", "timeout"] },
+        "error_category": {
+          "type": ["string", "null"],
+          "description": "Sanitized execution-error category from the documented taxonomy; null for completed tasks. Never contains raw exception text."
+        },
+        "submitted_at_utc": { "type": "string", "format": "date-time" },
+        "submitted_offset_ms": { "type": "number", "minimum": 0, "description": "Driver submission instant, monotonic offset from repetition start." },
+        "started_offset_ms": { "type": "number", "minimum": 0, "description": "Worker dequeue/start instant, monotonic offset from repetition start." },
+        "ended_offset_ms": { "type": "number", "minimum": 0, "description": "Terminal stamp (hand-off to evaluator), monotonic offset from repetition start." },
+        "e2e_ms": { "type": "number", "minimum": 0, "description": "ended - submitted: includes driver queue wait, model turns, and consumed simulated tool delays." },
+        "queue_wait_ms": { "type": "number", "minimum": 0, "description": "started - submitted (driver-side slot wait)." },
+        "turns": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/turn" }
+        },
+        "tool_trace": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/tool_trace_entry" }
+        },
+        "terminal": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["diagnosis_id", "rationale", "remediation_id"],
+          "description": "The agent's terminal recommendation; null when the task did not complete.",
+          "properties": {
+            "diagnosis_id": { "type": "string" },
+            "rationale": { "type": "string" },
+            "remediation_id": { "type": "string" }
+          }
+        },
+        "evaluation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["evaluator_version", "success", "score", "gates", "diagnosis_component", "remediation_component", "evidence_component"],
+          "properties": {
+            "evaluator_version": { "type": "string" },
+            "success": { "type": "boolean" },
+            "score": { "type": "number", "enum": [0.0, 1.0], "description": "Binary: 1.0 iff every mandatory gate passed (S_min = 1.0)." },
+            "gates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["gate_id", "passed"],
+                "properties": {
+                  "gate_id": { "type": "string" },
+                  "passed": { "type": "boolean" },
+                  "detail": { "type": "string" }
+                }
+              }
+            },
+            "diagnosis_component": { "type": "number", "minimum": 0, "maximum": 1, "description": "Diagnostic only; never defines success." },
+            "remediation_component": { "type": "number", "minimum": 0, "maximum": 1, "description": "Diagnostic only; never defines success." },
+            "evidence_component": { "type": "number", "minimum": 0, "maximum": 1, "description": "Diagnostic only; never defines success." },
+            "reason": { "type": "string" }
+          }
+        }
+      }
+    },
+    "turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ttft_ms", "serving_time_ms", "chunk_count", "content_chars", "itl_available", "output_tokens"],
+      "description": "Driver-side record of one model turn. Transport chunks are never tokens: output_tokens comes only from authoritative usage data and inter-token gaps only from true token events; otherwise both are null/unavailable with reasons.",
+      "properties": {
+        "ttft_ms": { "type": ["number", "null"], "minimum": 0, "description": "First non-empty content-bearing event; null when the turn produced no content." },
+        "serving_time_ms": { "type": "number", "minimum": 0 },
+        "chunk_count": { "type": "integer", "minimum": 0, "description": "Transport chunks observed (NOT a token count)." },
+        "content_chars": { "type": "integer", "minimum": 0 },
+        "itl_available": { "type": "boolean" },
+        "itl_unavailable_reason": { "type": ["string", "null"] },
+        "inter_token_gaps_ms": {
+          "type": "array",
+          "items": { "type": "number", "minimum": 0 },
+          "description": "Present (non-empty) only when true per-token timing exists."
+        },
+        "output_tokens": { "type": ["integer", "null"], "minimum": 0, "description": "Authoritative usage-based count; null when unavailable." },
+        "tokens_unavailable_reason": { "type": ["string", "null"] },
+        "engine_queue_time_ms": { "type": ["number", "null"], "minimum": 0, "description": "Serving-engine-reported queue time; null when the engine reports none." }
+      }
+    },
+    "tool_trace_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "arguments", "result", "simulated_latency_ms"],
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "arguments": { "type": "object", "description": "The validated arguments as executed." },
+        "result": { "type": "object", "description": "The tool's returned payload (synthetic fixture data only)." },
+        "simulated_latency_ms": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

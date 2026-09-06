@@ -2,20 +2,24 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/schemas/benchmark-result.schema.json",
   "title": "Benchmark Result",
-  "description": "Aggregated results for one run (one repetition of one experimental cell), linked to its run manifest. Genuine results live outside the Git working tree and are never committed to the repository; only synthetic examples (is_synthetic_example=true) may be committed.",
+  "description": "Aggregated results for one run (one repetition of one experimental cell), linked to its run manifest and derived from the repetition's raw task observations. Genuine results live outside the Git working tree and are never committed to the repository; only synthetic examples (is_synthetic_example=true) may be committed. Schema version 2.x: task accounting is unambiguous (attempted = succeeded + quality_failed + errored + timed_out); every latency/throughput measure is either available with data or explicitly unavailable with a reason (never fabricated); mock execution cannot claim production performance or SLO attainment (host-clock diagnostics live in the clearly separated mock_diagnostics namespace).",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "run_id",
     "is_synthetic_example",
+    "execution_mode",
     "manifest_ref",
     "tasks",
+    "sample_design",
+    "concurrency",
     "latency_ms",
     "throughput",
     "gpu",
     "errors",
     "slo",
+    "observations",
     "economics"
   ],
   "properties": {
@@ -32,21 +36,54 @@
       "type": "boolean",
       "description": "True only for synthetic example files committed to the repository."
     },
+    "execution_mode": {
+      "type": "string",
+      "enum": ["gpu", "mock"],
+      "description": "Must match the manifest's execution_mode. Drives the mock-validity conditionals below."
+    },
     "manifest_ref": {
       "type": "string",
-      "description": "Relative filename of the run manifest this result belongs to."
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "description": "Safe relative filename (no path separators, no traversal) of the run manifest this result belongs to."
     },
     "tasks": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["attempted", "succeeded", "failed", "timed_out", "success_rate"],
+      "required": ["attempted", "succeeded", "quality_failed", "errored", "timed_out", "success_rate"],
+      "description": "Unambiguous task accounting: attempted = succeeded + quality_failed + errored + timed_out (semantic validation enforces the sum). quality_failed means the task completed but failed evaluator gates — it is never mixed into the execution-error taxonomy.",
       "properties": {
         "attempted": { "type": "integer", "minimum": 0 },
-        "succeeded": { "type": "integer", "minimum": 0 },
-        "failed": { "type": "integer", "minimum": 0 },
+        "succeeded": { "type": "integer", "minimum": 0, "description": "Completed AND passed every mandatory evaluator gate (score 1.0)." },
+        "quality_failed": { "type": "integer", "minimum": 0, "description": "Completed but failed at least one mandatory evaluator gate." },
+        "errored": { "type": "integer", "minimum": 0, "description": "Execution error (see errors.taxonomy); disjoint from quality failure." },
         "timed_out": { "type": "integer", "minimum": 0 },
-        "success_rate": { "type": "number", "minimum": 0, "maximum": 1 },
-        "mean_quality_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+        "success_rate": { "type": "number", "minimum": 0, "maximum": 1, "description": "succeeded / attempted." },
+        "mean_quality_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Diagnostic only: mean of binary gate scores; success is gate-based, never threshold-on-mean." }
+      }
+    },
+    "sample_design": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tasks_per_repetition", "seed", "unique_template_count", "unique_instance_count", "total_attempts"],
+      "description": "The seeded, balanced sample plan for this repetition (decision D-0010). Independent quality cases are bounded by unique_template_count: prompt-surface variants of one template are never presented as independent quality samples.",
+      "properties": {
+        "tasks_per_repetition": { "type": "integer", "minimum": 1 },
+        "seed": { "type": "integer" },
+        "unique_template_count": { "type": "integer", "minimum": 1 },
+        "unique_instance_count": { "type": "integer", "minimum": 1 },
+        "total_attempts": { "type": "integer", "minimum": 1 },
+        "quality_independence_note": { "type": "string" }
+      }
+    },
+    "concurrency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "achieved_max", "mean_in_flight"],
+      "description": "Truthful concurrency accounting for the bounded closed-loop scheduler: requested slots, the maximum in-flight tasks actually observed, and the time-averaged in-flight work (busy time / wall time). Concurrency is bounded above by 'requested' but is NOT claimed to be exactly enforced during ramp-up and drain.",
+      "properties": {
+        "requested": { "type": "integer", "minimum": 1 },
+        "achieved_max": { "type": "integer", "minimum": 0 },
+        "mean_in_flight": { "type": "number", "minimum": 0 }
       }
     },
     "latency_ms": {
@@ -60,28 +97,45 @@
         "model_serving_time",
         "tool_execution_time"
       ],
+      "description": "Each measure is either an available summary or explicitly unavailable with a reason. inter_token requires true per-token timing (never transport chunks); queue_time requires serving-engine queue telemetry; mock host-clock latencies are not benchmark performance and are therefore unavailable here (see mock_diagnostics).",
       "properties": {
-        "task_completion": { "$ref": "#/$defs/latency_summary" },
-        "time_to_first_token": { "$ref": "#/$defs/latency_summary" },
-        "inter_token": { "$ref": "#/$defs/latency_summary" },
-        "queue_time": { "$ref": "#/$defs/latency_summary" },
-        "model_serving_time": { "$ref": "#/$defs/latency_summary" },
-        "tool_execution_time": { "$ref": "#/$defs/latency_summary" }
+        "task_completion": { "$ref": "#/$defs/latency_measure" },
+        "time_to_first_token": { "$ref": "#/$defs/latency_measure" },
+        "inter_token": { "$ref": "#/$defs/latency_measure" },
+        "queue_time": { "$ref": "#/$defs/latency_measure" },
+        "model_serving_time": { "$ref": "#/$defs/latency_measure" },
+        "tool_execution_time": { "$ref": "#/$defs/latency_measure" }
       }
     },
     "throughput": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["output_tokens_per_second", "successful_tasks_per_gpu_hour"],
-      "properties": {
-        "output_tokens_per_second": { "type": "number", "minimum": 0 },
-        "total_output_tokens": { "type": "integer", "minimum": 0 },
-        "successful_tasks_per_gpu_hour": {
-          "type": ["number", "null"],
-          "minimum": 0,
-          "description": "Null when the run consumed zero GPU-hours (mock execution): the measure is undefined, never fabricated."
+      "description": "Available only when authoritative token accounting exists (usage data or exact tokenizer). Mock execution is always unavailable: Python replay speed is never model tokens/sec.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "output_tokens_per_second", "total_output_tokens", "successful_tasks_per_gpu_hour"],
+          "properties": {
+            "available": { "const": true },
+            "output_tokens_per_second": { "type": "number", "minimum": 0 },
+            "total_output_tokens": { "type": "integer", "minimum": 0 },
+            "per_turn_output_tokens_per_second": { "$ref": "#/$defs/latency_measure", "description": "Per-turn throughput distribution (measurement contract requirement)." },
+            "successful_tasks_per_gpu_hour": {
+              "type": ["number", "null"],
+              "minimum": 0,
+              "description": "Null when the run consumed zero GPU-hours: the measure is undefined, never fabricated."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "reason"],
+          "properties": {
+            "available": { "const": false },
+            "reason": { "type": "string", "minLength": 1 }
+          }
         }
-      }
+      ]
     },
     "gpu": {
       "type": "object",
@@ -121,14 +175,15 @@
     "errors": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["error_rate", "timeout_rate"],
+      "required": ["error_rate", "timeout_rate", "taxonomy"],
+      "description": "Execution errors only (quality failures are counted in tasks.quality_failed, never here).",
       "properties": {
-        "error_rate": { "type": "number", "minimum": 0, "maximum": 1 },
-        "timeout_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "error_rate": { "type": "number", "minimum": 0, "maximum": 1, "description": "errored / attempted." },
+        "timeout_rate": { "type": "number", "minimum": 0, "maximum": 1, "description": "timed_out / attempted." },
         "taxonomy": {
           "type": "object",
           "additionalProperties": { "type": "integer", "minimum": 0 },
-          "description": "Error-category counts (e.g. endpoint_5xx, malformed_tool_call, agent_crash)."
+          "description": "Execution-error category counts (e.g. endpoint_error, malformed_tool_call, agent_runtime_error, task_timeout)."
         }
       }
     },
@@ -140,21 +195,78 @@
         "latency_target_ms": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "End-to-end task latency target for this profile."
+          "description": "End-to-end task latency target for this profile (owner-approved, decision D-0010)."
         },
         "ttft_target_ms": { "type": ["number", "null"], "exclusiveMinimum": 0 },
         "quality_threshold": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "description": "Minimum evaluator score for a task to count as SLO-attaining."
+          "description": "Owner-approved S_min = 1.0: a task attains the SLO only when every mandatory evaluator gate passes."
         },
-        "slo_attaining_tasks": { "type": "integer", "minimum": 0 },
+        "slo_attaining_tasks": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Null when SLO attainment cannot be truthfully measured (mock execution: host-clock replay latency is not production latency)."
+        },
+        "attainment_unavailable_reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required when slo_attaining_tasks is null."
+        },
         "slo_attaining_throughput_per_gpu_hour": {
           "type": ["number", "null"],
           "minimum": 0,
           "description": "Correctly completed tasks per GPU-hour satisfying both the quality threshold and the latency target. Null when the run consumed zero GPU-hours (mock execution)."
         }
+      },
+      "if": { "properties": { "slo_attaining_tasks": { "type": "null" } } },
+      "then": { "required": ["attainment_unavailable_reason"] }
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["persisted", "measured_count", "warmup_count"],
+      "description": "References to the raw task-observation artifacts (task-observation.schema.json) this summary was derived from. File references are safe relative filenames with SHA-256 hashes; raw observations live outside Git next to this result.",
+      "properties": {
+        "persisted": { "type": "boolean", "description": "False when LAB_RESULTS_DIR was unset and nothing was written anywhere." },
+        "measured_count": { "type": "integer", "minimum": 0, "description": "Measured task observations backing this summary (= tasks.attempted)." },
+        "warmup_count": { "type": "integer", "minimum": 0, "description": "Warm-up observations retained separately; excluded from every measured summary." },
+        "measured_file": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "measured_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "warmup_file": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "warmup_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "if": { "properties": { "persisted": { "const": true } } },
+      "then": { "required": ["persisted", "measured_count", "warmup_count", "measured_file", "measured_sha256"] },
+      "else": {
+        "properties": {
+          "measured_file": false,
+          "measured_sha256": false,
+          "warmup_file": false,
+          "warmup_sha256": false
+        }
+      }
+    },
+    "mock_diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["note", "host_clock_task_completion_ms", "wall_time_s"],
+      "description": "Clearly separated FUNCTIONAL diagnostics for mock execution: host-clock replay timings of the offline mock pipeline. These are NOT benchmark performance, NOT model latency, and NOT tokens/sec; they exist only to sanity-check the harness. Forbidden for gpu execution.",
+      "properties": {
+        "note": { "type": "string", "minLength": 1 },
+        "host_clock_task_completion_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mean", "min", "max", "count"],
+          "properties": {
+            "mean": { "type": "number", "minimum": 0 },
+            "min": { "type": "number", "minimum": 0 },
+            "max": { "type": "number", "minimum": 0 },
+            "count": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "wall_time_s": { "type": "number", "minimum": 0 }
       }
     },
     "economics": {
@@ -176,66 +288,95 @@
       "description": "Free-form observations. Must contain no sensitive infrastructure metadata."
     }
   },
-  "$defs": {
-    "latency_summary": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["mean", "p50", "p90", "p95", "p99", "count"],
-      "description": "Per-repetition latency summary with explicit tail suppression: p95 is null below 200 observations and p99 is null below 1,000 (nearest-rank method; see methodology/measurement-contract.md §3 and decision D-0009). An empty series (count 0) reports every statistic as null — values are never fabricated. The conditionals below make suppression machine-checkable.",
-      "properties": {
-        "mean": { "type": ["number", "null"], "minimum": 0 },
-        "p50": { "type": ["number", "null"], "minimum": 0 },
-        "p90": { "type": ["number", "null"], "minimum": 0 },
-        "p95": {
-          "type": ["number", "null"],
-          "minimum": 0,
-          "description": "Null (suppressed) when count < 200."
-        },
-        "p99": {
-          "type": ["number", "null"],
-          "minimum": 0,
-          "description": "Null (suppressed) when count < 1000."
-        },
-        "min": { "type": ["number", "null"], "minimum": 0 },
-        "max": { "type": ["number", "null"], "minimum": 0 },
-        "count": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Number of observations in this repetition's sample; determines which percentiles may be reported."
-        }
+  "allOf": [
+    {
+      "if": {
+        "properties": { "execution_mode": { "const": "mock" } },
+        "required": ["execution_mode"]
       },
-      "allOf": [
-        {
-          "if": { "properties": { "count": { "const": 0 } } },
-          "then": {
+      "then": {
+        "required": ["mock_diagnostics"],
+        "properties": {
+          "latency_ms": {
             "properties": {
-              "mean": { "type": "null" },
-              "p50": { "type": "null" },
-              "p90": { "type": "null" },
-              "min": { "type": "null" },
-              "max": { "type": "null" }
+              "task_completion": { "properties": { "available": { "const": false } } },
+              "time_to_first_token": { "properties": { "available": { "const": false } } },
+              "inter_token": { "properties": { "available": { "const": false } } },
+              "queue_time": { "properties": { "available": { "const": false } } },
+              "model_serving_time": { "properties": { "available": { "const": false } } }
             }
-          }
-        },
+          },
+          "throughput": { "properties": { "available": { "const": false } } },
+          "gpu": { "properties": { "telemetry_available": { "const": false } } },
+          "slo": { "properties": { "slo_attaining_tasks": { "type": "null" } } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "execution_mode": { "const": "gpu" } },
+        "required": ["execution_mode"]
+      },
+      "then": {
+        "properties": {
+          "mock_diagnostics": false,
+          "slo": { "properties": { "slo_attaining_tasks": { "type": "integer" } } }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "latency_measure": {
+      "description": "A latency/throughput distribution that is either available (with per-repetition tail suppression: p95 null below 200 observations, p99 null below 1,000; nearest-rank method; decisions D-0009/D-0010) or explicitly unavailable with a reason. Values are never fabricated.",
+      "oneOf": [
         {
-          "if": { "properties": { "count": { "minimum": 1 } } },
-          "then": {
-            "properties": {
-              "mean": { "type": "number" },
-              "p50": { "type": "number" },
-              "p90": { "type": "number" }
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "mean", "p50", "p90", "p95", "p99", "min", "max", "count"],
+          "properties": {
+            "available": { "const": true },
+            "mean": { "type": "number", "minimum": 0 },
+            "p50": { "type": "number", "minimum": 0 },
+            "p90": { "type": "number", "minimum": 0 },
+            "p95": {
+              "type": ["number", "null"],
+              "minimum": 0,
+              "description": "Null (suppressed) when count < 200."
+            },
+            "p99": {
+              "type": ["number", "null"],
+              "minimum": 0,
+              "description": "Null (suppressed) when count < 1000. Cell-level p99 over pooled repetitions (n >= 1000) is a separately labeled Phase 7 analysis, never a per-repetition value."
+            },
+            "min": { "type": "number", "minimum": 0 },
+            "max": { "type": "number", "minimum": 0 },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Number of observations in this repetition's sample; determines which percentiles may be reported."
             }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "count": { "maximum": 199 } } },
+              "then": { "properties": { "p95": { "type": "null" } } },
+              "else": { "properties": { "p95": { "type": "number" } } }
+            },
+            {
+              "if": { "properties": { "count": { "maximum": 999 } } },
+              "then": { "properties": { "p99": { "type": "null" } } },
+              "else": { "properties": { "p99": { "type": "number" } } }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "reason"],
+          "properties": {
+            "available": { "const": false },
+            "reason": { "type": "string", "minLength": 1 }
           }
-        },
-        {
-          "if": { "properties": { "count": { "maximum": 199 } } },
-          "then": { "properties": { "p95": { "type": "null" } } },
-          "else": { "properties": { "p95": { "type": "number" } } }
-        },
-        {
-          "if": { "properties": { "count": { "maximum": 999 } } },
-          "then": { "properties": { "p99": { "type": "null" } } },
-          "else": { "properties": { "p99": { "type": "number" } } }
         }
       ]
     }
