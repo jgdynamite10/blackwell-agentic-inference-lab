@@ -2,8 +2,7 @@
 
 ## Scope
 
-This is a **private** research repository, and it must remain private. Even
-so, it is treated as if it could be exposed: it intentionally contains **no
+This is a public research repository. It intentionally contains **no
 credentials, no cloud account identifiers, no internal hostnames or IP
 addresses, no instance identifiers, no Terraform state, and no genuine
 benchmark results**. If you find any of these in the repository history,
@@ -11,12 +10,16 @@ please report it immediately (see below).
 
 ## Reporting a vulnerability or data exposure
 
-- Use GitHub's private vulnerability reporting on this repository
-  ("Security" tab → "Report a vulnerability"), or open a GitHub issue that
-  describes only the *category* of the problem (for example, "possible
-  committed secret in file X") without quoting the sensitive value.
-- Do not post secret values, account identifiers, or infrastructure metadata
-  in issues or pull requests, even though the repository is private.
+- Report vulnerabilities and possible data exposures **only** through
+  GitHub's private vulnerability reporting on this repository
+  ("Security" tab → "Report a vulnerability"). Maintainers recommend keeping
+  private vulnerability reporting enabled for this repository.
+- **Never place vulnerability details, secret values, credentials, account
+  identifiers, or sensitive infrastructure metadata in public issues or pull
+  requests.**
+- Public GitHub issues may be used for non-sensitive defects and feature
+  requests.
+- There is no email-based reporting channel; use the GitHub mechanism above.
 
 ## Secret handling rules
 

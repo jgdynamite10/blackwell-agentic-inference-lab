@@ -1,15 +1,25 @@
 # Contributing
 
-**External contributions are not currently being accepted.** Licensing,
-intellectual-property, publication, and contribution policies for this project
-are under review. Until those policies are approved and announced by the
-project owner, only the project owner and explicitly authorized collaborators
-may contribute, and no contribution implies any grant of license in either
-direction.
+This is a public research repository licensed under the
+[Apache License 2.0](LICENSE). External issues and pull requests are welcome,
+subject to maintainer review; acceptance remains at the maintainer's
+discretion.
 
-This is a private research repository with strict safety and integrity rules;
-read [AGENTS.md](AGENTS.md) before making any change. The guidelines below
-apply to authorized collaborators.
+It is also a research project with strict safety and integrity rules; read
+[AGENTS.md](AGENTS.md) before making any change.
+
+## Contribution terms
+
+By intentionally submitting a contribution to this repository, you:
+
+1. represent that you have the right to submit it;
+2. agree that the contribution is provided under the Apache License 2.0
+   (consistent with Section 5 of the license, and with no additional terms);
+3. must not submit credentials, private provider information, customer data,
+   employer-confidential material, or genuine benchmark results;
+4. must use synthetic fixtures in tests;
+5. must follow [AGENTS.md](AGENTS.md) and the measurement and governance
+   policies in `methodology/` and `docs/`.
 
 ## Ground rules
 
@@ -25,6 +35,10 @@ apply to authorized collaborators.
    to `main`. The repository uses squash-only merging.
 5. Respect the phase roadmap in [docs/roadmap.md](docs/roadmap.md). Do not
    open pull requests implementing unauthorized phases.
+6. Do not put personal email addresses in commit metadata, commit messages,
+   co-author trailers, documentation, fixtures, or PR text. Owner-attributed
+   commits use the owner's GitHub no-reply address
+   (`1800971+jgdynamite@users.noreply.github.com`).
 
 ## Development setup
 
