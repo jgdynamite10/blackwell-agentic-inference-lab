@@ -35,8 +35,9 @@ htmlcov/
 .ipynb_checkpoints/
 
 # --- Terraform / OpenTofu ---
+# .terraform.lock.hcl is deliberately tracked: it pins provider versions and
+# hashes (no secrets), so reproducible plans use identical provider builds.
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfvars
