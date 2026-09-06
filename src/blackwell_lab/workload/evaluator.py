@@ -14,9 +14,13 @@ the following hold:
 - one gate per scenario **evidence predicate** — every mandatory predicate
   must be satisfied by the recorded tool trace. A predicate is satisfied by
   any one of its alternatives (permitted alternative evidence paths); each
-  alternative constrains the tool name, relevant validated arguments, and the
-  returned result, so irrelevant queries and repeated tool names cannot
-  satisfy evidence.
+  alternative constrains the tool name, relevant validated arguments, and —
+  through an explicit **typed result constraint** — the tool's structured
+  response fields. Result constraints are never evaluated against a
+  serialization of the whole response, so echoed request arguments,
+  ``available`` listings, unknown-resource responses, ``found: false``
+  responses, irrelevant queries, and repeated tool names cannot satisfy
+  evidence.
 
 The overall score is binary: **1.0 when successful, 0.0 otherwise**, and the
 owner-approved quality threshold is ``S_MIN = 1.0``. Component fractions
@@ -32,13 +36,23 @@ produce identical evaluations. Human judgment is not part of scoring.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
+from typing import Any
 
 from blackwell_lab.workload.agent import TaskExecution, ToolTrace
-from blackwell_lab.workload.scenarios import EvidenceAlternative, EvidencePredicate, Scenario
+from blackwell_lab.workload.scenarios import (
+    ChangeIdEquals,
+    EvidenceAlternative,
+    EvidencePredicate,
+    HealthComponentStatus,
+    LogLineContains,
+    MetricAvailable,
+    ResultConstraint,
+    RunbookHasRemediation,
+    Scenario,
+)
 
-EVALUATOR_VERSION = "3.0.0"
+EVALUATOR_VERSION = "3.1.0"
 
 #: Owner-approved quality threshold (decision D-0010): deterministic task
 #: success requires all mandatory gates, so S_min is exactly 1.0.
@@ -71,8 +85,58 @@ class Evaluation:
     reason: str
 
 
-def _canonical_result_text(trace: ToolTrace) -> str:
-    return json.dumps(trace.result, sort_keys=True, separators=(",", ":")).casefold()
+def _constraint_satisfied(constraint: ResultConstraint, payload: dict[str, Any]) -> bool:
+    """Evaluates one typed result constraint against a tool's structured
+    response fields — never against a serialization of the whole response."""
+    if isinstance(constraint, LogLineContains):
+        # Only the RETURNED log lines count: the echoed query never does,
+        # and a zero-match response never satisfies evidence.
+        total = payload.get("total_matches")
+        if not isinstance(total, int) or total <= 0:
+            return False
+        needle = constraint.text.casefold()
+        return any(
+            isinstance(line, dict)
+            and isinstance(line.get("message"), str)
+            and needle in line["message"].casefold()
+            for line in payload.get("lines", [])
+        )
+    if isinstance(constraint, ChangeIdEquals):
+        # Exact change_id equality on RETURNED changes only.
+        return any(
+            isinstance(change, dict) and change.get("change_id") == constraint.change_id
+            for change in payload.get("changes", [])
+        )
+    if isinstance(constraint, RunbookHasRemediation):
+        # `found` must be exactly True; unknown-key responses (and their
+        # `available` listings, and the echoed key) never satisfy evidence.
+        if payload.get("found") is not True:
+            return False
+        runbook = payload.get("runbook")
+        if not isinstance(runbook, dict):
+            return False
+        remediation_ids = runbook.get("remediation_ids")
+        return isinstance(remediation_ids, list) and constraint.remediation_id in remediation_ids
+    if isinstance(constraint, MetricAvailable):
+        # `found` must be exactly True, the returned name must match exactly
+        # (names in an `available` listing never count), and the relevant
+        # points must be non-empty.
+        return (
+            payload.get("found") is True
+            and payload.get("metric") == constraint.metric
+            and isinstance(payload.get("points"), list)
+            and len(payload["points"]) > 0
+        )
+    if isinstance(constraint, HealthComponentStatus):
+        services = payload.get("services")
+        if not isinstance(services, dict):
+            return False
+        return any(
+            isinstance(components, dict)
+            and components.get(constraint.component) == constraint.status
+            for components in services.values()
+        )
+    return False
 
 
 def _alternative_matches(alternative: EvidenceAlternative, trace: ToolTrace) -> bool:
@@ -82,10 +146,7 @@ def _alternative_matches(alternative: EvidenceAlternative, trace: ToolTrace) -> 
         value = trace.arguments.get(argument)
         if not isinstance(value, str) or needle.casefold() not in value.casefold():
             return False
-    if alternative.result_contains is not None:
-        if alternative.result_contains.casefold() not in _canonical_result_text(trace):
-            return False
-    return True
+    return _constraint_satisfied(alternative.result, trace.result)
 
 
 def predicate_satisfied(predicate: EvidencePredicate, tool_trace: list[ToolTrace]) -> bool:

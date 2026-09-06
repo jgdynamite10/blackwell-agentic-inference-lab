@@ -8,12 +8,13 @@ import re
 import pytest
 from fakes import FakeClock
 
-from blackwell_lab.workload.agent import run_task
+from blackwell_lab.workload.agent import ToolTrace, run_task
 from blackwell_lab.workload.evaluator import (
     EVALUATOR_VERSION,
     QUALITY_THRESHOLD,
     S_MIN,
     evaluate,
+    predicate_satisfied,
 )
 from blackwell_lab.workload.model_client import DeterministicMockClient, GenerationSettings
 from blackwell_lab.workload.scenarios import catalog
@@ -21,6 +22,7 @@ from blackwell_lab.workload.tools import SimulatedToolbox
 
 SETTINGS = GenerationSettings()
 SCENARIO = catalog()["memory-pressure-001"]
+ELEVATED = catalog()["elevated-latency-001"]
 
 
 def executed(behavior: str = "correct", *, timeout_s: float = 30.0, scenario=SCENARIO):
@@ -32,6 +34,27 @@ def executed(behavior: str = "correct", *, timeout_s: float = 30.0, scenario=SCE
 
 def failed_gate_ids(evaluation) -> set[str]:
     return {g.gate_id for g in evaluation.gates if not g.passed}
+
+
+def run_tools(scenario, calls: list[dict]) -> list[ToolTrace]:
+    """Executes tool calls against the real toolbox and records their traces."""
+    toolbox = SimulatedToolbox(scenario, clock=FakeClock())
+    trace = []
+    for call in calls:
+        result = toolbox.execute(call["tool"], call["arguments"])
+        trace.append(
+            ToolTrace(
+                tool=result.tool,
+                arguments=dict(call["arguments"]),
+                result=result.payload,
+                simulated_latency_ms=result.simulated_latency_ms,
+            )
+        )
+    return trace
+
+
+def predicate_by_id(scenario, predicate_id: str):
+    return next(p for p in scenario.evidence_predicates if p.predicate_id == predicate_id)
 
 
 class TestScoringDesign:
@@ -139,6 +162,89 @@ class TestAdversarial:
         assert evaluation.success is False
         assert "remediation" in failed_gate_ids(evaluation)
         assert "remediation" in evaluation.reason
+
+
+class TestTypedResultConstraints:
+    """Evidence is judged only against typed structured response fields —
+    never a serialization of the whole response — so echoed arguments,
+    ``available`` listings, unknown resources, and ``found: false`` responses
+    can never satisfy evidence (owner blocker 2)."""
+
+    def test_expected_text_injected_into_the_query_does_not_pass(self):
+        """search_logs 'audit cfg-2041' matches zero log lines; the echoed
+        query field is the only place cfg-2041 appears, and it never counts."""
+        [trace] = run_tools(
+            ELEVATED, [{"tool": "search_logs", "arguments": {"query": "audit cfg-2041"}}]
+        )
+        assert trace.result["total_matches"] == 0  # the reproduction is real
+        predicate = predicate_by_id(ELEVATED, "log-evidence-cfg-2041")
+        assert predicate_satisfied(predicate, [trace]) is False
+
+    def test_zero_search_matches_never_pass_even_with_a_matching_query(self):
+        [trace] = run_tools(
+            ELEVATED,
+            [{"tool": "search_logs", "arguments": {"query": "audit that never happened"}}],
+        )
+        assert trace.result["total_matches"] == 0
+        predicate = predicate_by_id(ELEVATED, "log-evidence-cfg-2041")
+        assert predicate_satisfied(predicate, [trace]) is False
+
+    def test_found_false_runbook_does_not_pass(self):
+        """retrieve_runbook with the remediation id smuggled into the key
+        returns found=false; the echoed key and the `available` listing never
+        satisfy evidence."""
+        key = "zephyr-cart rollback-config-release-cfg-2041"
+        [trace] = run_tools(ELEVATED, [{"tool": "retrieve_runbook", "arguments": {"key": key}}])
+        assert trace.result["found"] is False
+        predicate = predicate_by_id(ELEVATED, "change-correlation-cfg-2041")
+        assert predicate_satisfied(predicate, [trace]) is False
+
+    def test_metric_name_only_in_available_listing_does_not_pass(self):
+        """query_metrics for an unknown metric echoes the request and lists
+        real metric names under `available`; neither satisfies evidence."""
+        gpu = catalog()["gpu-saturation-001"]
+        [trace] = run_tools(
+            gpu,
+            [{"tool": "query_metrics", "arguments": {"metric": "batch_queue_depth_hourly"}}],
+        )
+        assert trace.result["found"] is False
+        assert "batch_queue_depth" in trace.result["available"]
+        predicate = predicate_by_id(gpu, "contention-signal")
+        assert predicate_satisfied(predicate, [trace]) is False
+
+    def test_owner_reproduction_elevated_latency_must_fail_both_gates(self):
+        """The exact owner reproduction: a completed elevated-latency task
+        whose only evidence is the zero-match search and the found=false
+        runbook must fail BOTH evidence gates and score 0.0."""
+        execution = executed(scenario=ELEVATED)
+        assert execution.status == "completed"
+        execution.tool_trace = run_tools(
+            ELEVATED,
+            [
+                {"tool": "search_logs", "arguments": {"query": "audit cfg-2041"}},
+                {
+                    "tool": "retrieve_runbook",
+                    "arguments": {"key": "zephyr-cart rollback-config-release-cfg-2041"},
+                },
+            ],
+        )
+        evaluation = evaluate(ELEVATED, execution)
+        assert evaluation.success is False
+        assert evaluation.score == 0.0
+        assert {
+            "evidence:log-evidence-cfg-2041",
+            "evidence:change-correlation-cfg-2041",
+        } <= failed_gate_ids(evaluation)
+
+    def test_legitimate_reference_and_alternative_paths_still_pass(self):
+        for scenario in catalog().values():
+            for sequence in (scenario.reference_tool_sequence, scenario.alternative_tool_sequence):
+                trace = run_tools(scenario, list(sequence))
+                for predicate in scenario.evidence_predicates:
+                    assert predicate_satisfied(predicate, trace) is True, (
+                        scenario.scenario_id,
+                        predicate.predicate_id,
+                    )
 
 
 class TestFailureModes:

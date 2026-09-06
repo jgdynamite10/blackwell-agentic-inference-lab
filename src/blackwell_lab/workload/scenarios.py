@@ -18,7 +18,12 @@ keyword-substring based:
 - every mandatory :class:`EvidencePredicate` must be satisfied by the task's
   recorded tool trace. A predicate is satisfied by **any one** of its
   alternatives (permitted alternative evidence paths), each of which
-  constrains the tool name, relevant arguments, and the returned result.
+  constrains the tool name, relevant arguments, and — through an explicit
+  **typed result constraint** — the tool's structured response fields.
+  Result constraints are never evaluated against a serialization of the
+  whole response, so echoed request arguments, ``available`` listings,
+  unknown-resource responses, and ``found: false`` responses can never
+  satisfy evidence.
 
 The catalog is versioned via ``WORKLOAD_VERSION`` and content-addressed via
 ``catalog_digest()``; both appear in every run manifest so results are
@@ -32,7 +37,7 @@ import json
 from dataclasses import asdict, dataclass, field
 
 WORKLOAD_NAME = "cloud-ops-agent"
-WORKLOAD_VERSION = "2.1.0"
+WORKLOAD_VERSION = "2.2.0"
 
 #: The ten incident condition classes required by
 #: methodology/workload-definition.md ("Incident catalog").
@@ -93,6 +98,84 @@ def _noise_logs(service: str, start_index: int, count: int) -> list[dict]:
 
 
 @dataclass(frozen=True)
+class LogLineContains:
+    """Typed result constraint for ``search_logs``.
+
+    Satisfied only when the search actually matched (``total_matches > 0``)
+    and some **returned log line's** ``message`` contains ``text``
+    (case-insensitively). The echoed ``query`` field is never inspected, so
+    injecting expected text into the query cannot satisfy evidence, and a
+    zero-match response never satisfies evidence.
+    """
+
+    text: str
+    kind: str = "log_line_contains"
+
+
+@dataclass(frozen=True)
+class ChangeIdEquals:
+    """Typed result constraint for ``check_recent_changes``.
+
+    Satisfied only when a **returned change's** ``change_id`` equals
+    ``change_id`` exactly (no substring matching).
+    """
+
+    change_id: str
+    kind: str = "change_id_equals"
+
+
+@dataclass(frozen=True)
+class RunbookHasRemediation:
+    """Typed result constraint for ``retrieve_runbook``.
+
+    Satisfied only when the runbook was **found** (``found is true``) and its
+    ``remediation_ids`` list contains ``remediation_id`` exactly. Unknown-key
+    responses (``found: false``), their ``available`` listings, and the
+    echoed ``key`` argument never satisfy evidence.
+    """
+
+    remediation_id: str
+    kind: str = "runbook_has_remediation"
+
+
+@dataclass(frozen=True)
+class MetricAvailable:
+    """Typed result constraint for ``query_metrics``.
+
+    Satisfied only when the metric was **found** (``found is true``), the
+    returned metric name equals ``metric`` exactly, and the returned points
+    are non-empty. Metric names echoed back or listed under ``available`` in
+    a not-found response never satisfy evidence.
+    """
+
+    metric: str
+    kind: str = "metric_available"
+
+
+@dataclass(frozen=True)
+class HealthComponentStatus:
+    """Typed result constraint for ``get_service_health``.
+
+    Satisfied only when some **returned service** reports component
+    ``component`` with exactly ``status``.
+    """
+
+    component: str
+    status: str
+    kind: str = "health_component_status"
+
+
+#: The explicit typed result constraints an alternative may declare.
+ResultConstraint = (
+    LogLineContains
+    | ChangeIdEquals
+    | RunbookHasRemediation
+    | MetricAvailable
+    | HealthComponentStatus
+)
+
+
+@dataclass(frozen=True)
 class EvidenceAlternative:
     """One permitted way to satisfy an evidence predicate.
 
@@ -102,16 +185,18 @@ class EvidenceAlternative:
     - for every ``(argument, substring)`` pair in ``argument_contains``, the
       trace entry's validated argument value contains the substring
       (case-insensitively);
-    - if ``result_contains`` is set, the canonical JSON serialization of the
-      tool's returned payload contains the substring (case-insensitively).
+    - its returned payload satisfies the explicit typed ``result``
+      constraint, which is evaluated against the tool's structured response
+      fields — never against a serialization of the whole response.
 
     Constraining both arguments and results means irrelevant queries (right
-    tool, wrong question) cannot satisfy evidence.
+    tool, wrong question), echoed request arguments, ``available`` listings,
+    and ``found: false`` responses cannot satisfy evidence.
     """
 
     tool: str
+    result: ResultConstraint
     argument_contains: tuple[tuple[str, str], ...] = ()
-    result_contains: str | None = None
 
 
 @dataclass(frozen=True)
@@ -264,13 +349,13 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("cfg-2041"),
                             argument_contains=(("query", "audit"),),
-                            result_contains="cfg-2041",
                         ),
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("cfg-2041"),
                             argument_contains=(("query", "cfg-2041"),),
-                            result_contains="cfg-2041",
                         ),
                     ),
                 ),
@@ -283,12 +368,12 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="check_recent_changes",
-                            result_contains="cfg-2041",
+                            result=ChangeIdEquals("cfg-2041"),
                         ),
                         EvidenceAlternative(
                             tool="retrieve_runbook",
+                            result=RunbookHasRemediation("rollback-config-release-cfg-2041"),
                             argument_contains=(("key", "zephyr-cart"),),
-                            result_contains="rollback-config-release-cfg-2041",
                         ),
                     ),
                 ),
@@ -397,13 +482,13 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("dep-8102"),
                             argument_contains=(("query", "startup"),),
-                            result_contains="dep-8102",
                         ),
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("dep-8102"),
                             argument_contains=(("query", "dep-8102"),),
-                            result_contains="dep-8102",
                         ),
                     ),
                 ),
@@ -416,12 +501,12 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="check_recent_changes",
-                            result_contains="dep-8102",
+                            result=ChangeIdEquals("dep-8102"),
                         ),
                         EvidenceAlternative(
                             tool="retrieve_runbook",
+                            result=RunbookHasRemediation("rollback-deploy-dep-8102"),
                             argument_contains=(("key", "quokka-payments"),),
-                            result_contains="rollback-deploy-dep-8102",
                         ),
                     ),
                 ),
@@ -523,13 +608,13 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("cfg-3300"),
                             argument_contains=(("query", "cache"),),
-                            result_contains="cfg-3300",
                         ),
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("cfg-3300"),
                             argument_contains=(("query", "cfg-3300"),),
-                            result_contains="cfg-3300",
                         ),
                     ),
                 ),
@@ -542,12 +627,12 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="check_recent_changes",
-                            result_contains="cfg-3300",
+                            result=ChangeIdEquals("cfg-3300"),
                         ),
                         EvidenceAlternative(
                             tool="retrieve_runbook",
+                            result=RunbookHasRemediation("rollback-config-release-cfg-3300"),
                             argument_contains=(("key", "otter-inventory"),),
-                            result_contains="rollback-config-release-cfg-3300",
                         ),
                     ),
                 ),
@@ -651,13 +736,13 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("embed-refresh-44"),
                             argument_contains=(("query", "batch"),),
-                            result_contains="embed-refresh-44",
                         ),
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("embed-refresh-44"),
                             argument_contains=(("query", "embed-refresh-44"),),
-                            result_contains="embed-refresh-44",
                         ),
                     ),
                 ),
@@ -670,12 +755,12 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="check_recent_changes",
-                            result_contains="embed-refresh-44",
+                            result=ChangeIdEquals("job-embed-refresh-44"),
                         ),
                         EvidenceAlternative(
                             tool="query_metrics",
+                            result=MetricAvailable("batch_queue_depth"),
                             argument_contains=(("metric", "batch_queue_depth"),),
-                            result_contains="batch_queue_depth",
                         ),
                     ),
                 ),
@@ -772,13 +857,13 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("media latency"),
                             argument_contains=(("query", "volume-7"),),
-                            result_contains="media latency",
                         ),
                         EvidenceAlternative(
                             tool="query_metrics",
+                            result=MetricAvailable("disk_io_wait_pct"),
                             argument_contains=(("metric", "disk_io_wait"),),
-                            result_contains="disk_io_wait_pct",
                         ),
                     ),
                 ),
@@ -791,12 +876,12 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="get_service_health",
-                            result_contains="volume-7",
+                            result=HealthComponentStatus("volume-7", "degraded"),
                         ),
                         EvidenceAlternative(
                             tool="retrieve_runbook",
+                            result=RunbookHasRemediation("failover-heron-metadata-to-replica"),
                             argument_contains=(("key", "heron-metadata"),),
-                            result_contains="failover-heron-metadata-to-replica",
                         ),
                     ),
                 ),
@@ -890,13 +975,13 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("schema_version"),
                             argument_contains=(("query", "readiness"),),
-                            result_contains="schema_version",
                         ),
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("dep-9004"),
                             argument_contains=(("query", "migration"),),
-                            result_contains="dep-9004",
                         ),
                     ),
                 ),
@@ -909,12 +994,12 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="check_recent_changes",
-                            result_contains="dep-9004",
+                            result=ChangeIdEquals("dep-9004"),
                         ),
                         EvidenceAlternative(
                             tool="retrieve_runbook",
+                            result=RunbookHasRemediation("rollback-deploy-dep-9004"),
                             argument_contains=(("key", "ibis-notify"),),
-                            result_contains="rollback-deploy-dep-9004",
                         ),
                     ),
                 ),
@@ -1016,12 +1101,12 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="get_service_health",
-                            result_contains="token-signer",
+                            result=HealthComponentStatus("token-signer", "unhealthy"),
                         ),
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("timed out"),
                             argument_contains=(("query", "heron-auth"),),
-                            result_contains="timed out",
                         ),
                     ),
                 ),
@@ -1034,13 +1119,13 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="query_metrics",
+                            result=MetricAvailable("upstream_auth_timeouts"),
                             argument_contains=(("metric", "upstream_auth_timeouts"),),
-                            result_contains="upstream_auth_timeouts",
                         ),
                         EvidenceAlternative(
                             tool="retrieve_runbook",
+                            result=RunbookHasRemediation("failover-heron-auth-to-standby-pool"),
                             argument_contains=(("key", "heron-auth"),),
-                            result_contains="failover-heron-auth-to-standby-pool",
                         ),
                     ),
                 ),
@@ -1140,13 +1225,13 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("svc.1ab.example"),
                             argument_contains=(("query", "servfail"),),
-                            result_contains="svc.1ab.example",
                         ),
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("cfg-5150"),
                             argument_contains=(("query", "search domain"),),
-                            result_contains="cfg-5150",
                         ),
                     ),
                 ),
@@ -1159,12 +1244,12 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="check_recent_changes",
-                            result_contains="cfg-5150",
+                            result=ChangeIdEquals("cfg-5150"),
                         ),
                         EvidenceAlternative(
                             tool="retrieve_runbook",
+                            result=RunbookHasRemediation("rollback-config-release-cfg-5150"),
                             argument_contains=(("key", "dns-resolver"),),
-                            result_contains="rollback-config-release-cfg-5150",
                         ),
                     ),
                 ),
@@ -1261,13 +1346,13 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("cfg-6201"),
                             argument_contains=(("query", "rate-limit"),),
-                            result_contains="cfg-6201",
                         ),
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("cfg-6201"),
                             argument_contains=(("query", "rl-77"),),
-                            result_contains="cfg-6201",
                         ),
                     ),
                 ),
@@ -1280,12 +1365,12 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="check_recent_changes",
-                            result_contains="cfg-6201",
+                            result=ChangeIdEquals("cfg-6201"),
                         ),
                         EvidenceAlternative(
                             tool="query_metrics",
+                            result=MetricAvailable("http_429_rate_pct"),
                             argument_contains=(("metric", "http_429"),),
-                            result_contains="http_429_rate_pct",
                         ),
                     ),
                 ),
@@ -1382,12 +1467,12 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="search_logs",
+                            result=LogLineContains("max_replicas=24"),
                             argument_contains=(("query", "autoscaler"),),
-                            result_contains="max_replicas=24",
                         ),
                         EvidenceAlternative(
                             tool="get_service_health",
-                            result_contains="at-ceiling",
+                            result=HealthComponentStatus("autoscaler", "at-ceiling"),
                         ),
                     ),
                 ),
@@ -1400,13 +1485,13 @@ def _build_scenarios() -> tuple[Scenario, ...]:
                     alternatives=(
                         EvidenceAlternative(
                             tool="query_metrics",
+                            result=MetricAvailable("consumer_lag_s"),
                             argument_contains=(("metric", "consumer_lag"),),
-                            result_contains="consumer_lag_s",
                         ),
                         EvidenceAlternative(
                             tool="retrieve_runbook",
+                            result=RunbookHasRemediation("raise-badger-queue-autoscaler-ceiling"),
                             argument_contains=(("key", "badger-queue"),),
-                            result_contains="raise-badger-queue-autoscaler-ceiling",
                         ),
                     ),
                 ),

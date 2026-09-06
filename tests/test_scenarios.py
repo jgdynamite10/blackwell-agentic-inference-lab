@@ -12,12 +12,26 @@ from blackwell_lab.workload.evaluator import predicate_satisfied
 from blackwell_lab.workload.scenarios import (
     INCIDENT_CLASSES,
     WORKLOAD_VERSION,
+    ChangeIdEquals,
+    HealthComponentStatus,
+    LogLineContains,
+    MetricAvailable,
+    RunbookHasRemediation,
     Scenario,
     canonical_catalog_json,
     catalog,
     catalog_digest,
 )
 from blackwell_lab.workload.tools import TERMINAL_TOOL, TOOL_SPECS, SimulatedToolbox
+
+#: Each typed result constraint applies to exactly one tool's response shape.
+CONSTRAINT_TOOL = {
+    LogLineContains: "search_logs",
+    ChangeIdEquals: "check_recent_changes",
+    RunbookHasRemediation: "retrieve_runbook",
+    MetricAvailable: "query_metrics",
+    HealthComponentStatus: "get_service_health",
+}
 
 
 class TestCatalogCoverage:
@@ -122,9 +136,21 @@ class TestEvidencePredicates:
                 for alternative in predicate.alternatives:
                     assert alternative.tool in TOOL_SPECS
                     assert alternative.tool != TERMINAL_TOOL
-                    # Every alternative constrains arguments and/or results, so
-                    # merely naming the right tool can never satisfy evidence.
-                    assert alternative.argument_contains or alternative.result_contains
+                    # Every alternative declares an explicit typed result
+                    # constraint, so merely naming the right tool (or echoing
+                    # text through arguments) can never satisfy evidence.
+                    assert type(alternative.result) in CONSTRAINT_TOOL
+
+    def test_every_result_constraint_matches_its_tools_response_shape(self):
+        """A constraint type is only meaningful against the response shape of
+        one tool; mismatched pairings could never be satisfied."""
+        for scenario in catalog().values():
+            for predicate in scenario.evidence_predicates:
+                for alternative in predicate.alternatives:
+                    assert CONSTRAINT_TOOL[type(alternative.result)] == alternative.tool, (
+                        scenario.scenario_id,
+                        predicate.predicate_id,
+                    )
 
     def test_every_scenario_declares_an_alternative_evidence_path(self):
         for scenario in catalog().values():
