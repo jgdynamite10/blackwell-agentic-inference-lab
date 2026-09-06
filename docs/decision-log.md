@@ -66,6 +66,12 @@ controlled-resource design. See
 
 ## 2026-09-05 — D-0006: Governance update — private repository, execution boundary, licensing under review
 
+> **SUPERSEDED (in part) by D-0007 (2026-09-06).** Items (a) and (b) below —
+> the private-repository requirement and the licensing-under-review status —
+> no longer apply. Items (c) and (d) — the credential-free execution boundary
+> and the external-results rule — remain fully in force. This entry is
+> retained unaltered below as the historical record.
+
 **Decision.** Per the owner's governance update: (a) the repository is private
 and remains private indefinitely; no material is published or mirrored
 externally without explicit owner authorization; (b) licensing and publication
@@ -81,3 +87,34 @@ explicit synthetic/test mode.
 **Rationale.** Owner instruction (governance update memo, 2026-09-05). This
 supersedes earlier statements describing the repository or methodology as
 public; the methodology is described as documented and reproducible.
+
+## 2026-09-06 — D-0007: Public Apache-2.0 release of source and methodology (supersedes D-0006 items a–b)
+
+**Decision.** Per the owner's publication-readiness instruction of
+2026-09-06:
+
+1. The owner has determined that this project is **independently owned** and
+   that **no external publication authorization is required**.
+2. The owner **authorizes making the source code and documented methodology
+   public**.
+3. The repository is licensed under the **Apache License 2.0** (root
+   `LICENSE` and `NOTICE` files; `pyproject.toml` carries
+   `license = "Apache-2.0"`).
+4. `jgdynamite10/blackwell-agentic-inference-lab` is the **canonical**
+   repository for all development, issues, pull requests, releases, security
+   reporting, and documentation.
+5. The personal `jgdynamite/blackwell-agentic-inference-lab` repository will
+   become an **archived redirect** (redirect README, then archived); it is
+   not a synchronized mirror.
+6. **Genuine benchmark data and account information remain private**: raw and
+   processed results stay external to Git via `LAB_RESULTS_DIR`; credentials,
+   account identifiers, project IDs, ARNs, private endpoints, provider bills,
+   and infrastructure metadata are never committed.
+7. **Every benchmark-result release still requires separate explicit owner
+   approval** identifying the exact files and scope
+   ([publication-governance.md](publication-governance.md), class B).
+
+**Rationale.** Owner instruction (publication-readiness memo, 2026-09-06),
+superseding D-0006 items (a) and (b). D-0006 items (c) and (d) — the
+credential-free Cloud Agent boundary and the external-results design — are
+unchanged.
