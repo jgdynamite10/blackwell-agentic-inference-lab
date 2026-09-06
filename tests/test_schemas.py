@@ -169,3 +169,144 @@ class TestControlledResourceMode:
         assert document["cloud"]["comparison_mode"] == "provider-native"
         assert "resource_limits" not in document["cloud"]
         validate_run_manifest(document)
+
+
+def as_mock_manifest(document: dict) -> dict:
+    """Converts the GPU example manifest into a well-formed mock-mode one."""
+    document["execution_mode"] = "mock"
+    document["serving"] = {"engine": "mock", "engine_version": "2.0.0"}
+    for gpu_field in ("gpu_model", "gpu_count", "gpu_memory_gb", "driver_version", "cuda_version"):
+        document["host"].pop(gpu_field, None)
+    return document
+
+
+class TestExecutionMode:
+    """Mock runs must not fabricate GPU facts; GPU runs must record them."""
+
+    def test_execution_mode_is_required(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        del document["execution_mode"]
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_unknown_execution_mode_is_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["execution_mode"] = "cpu"
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_mock_manifest_without_gpu_host_fields_is_valid(self):
+        validate_run_manifest(as_mock_manifest(load_json(EXAMPLE_MANIFEST)))
+
+    def test_gpu_mode_requires_gpu_host_fields(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        del document["host"]["gpu_model"]
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_gpu_mode_requires_container_digest(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        del document["serving"]["container_digest"]
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_mock_mode_requires_mock_engine(self):
+        document = as_mock_manifest(load_json(EXAMPLE_MANIFEST))
+        document["serving"]["engine"] = "vllm"
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+
+class TestGpuTelemetryAvailability:
+    """GPU telemetry is either genuinely present or explicitly unavailable."""
+
+    def test_example_gpu_block_declares_telemetry_available(self):
+        document = load_json(EXAMPLE_RESULT)
+        assert document["gpu"]["telemetry_available"] is True
+
+    def test_unavailable_telemetry_requires_a_reason(self):
+        document = load_json(EXAMPLE_RESULT)
+        document["gpu"] = {"telemetry_available": False}
+        with pytest.raises(jsonschema.ValidationError):
+            validate_benchmark_result(document)
+
+    def test_unavailable_telemetry_with_reason_is_valid(self):
+        document = load_json(EXAMPLE_RESULT)
+        document["gpu"] = {
+            "telemetry_available": False,
+            "unavailable_reason": "mock execution mode: no GPU present",
+        }
+        validate_benchmark_result(document)
+
+    def test_unavailable_telemetry_forbids_metric_fields(self):
+        document = load_json(EXAMPLE_RESULT)
+        document["gpu"] = {
+            "telemetry_available": False,
+            "unavailable_reason": "mock execution mode: no GPU present",
+            "utilization_mean_pct": 0.0,
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            validate_benchmark_result(document)
+
+    def test_available_telemetry_requires_metrics(self):
+        document = load_json(EXAMPLE_RESULT)
+        document["gpu"] = {"telemetry_available": True}
+        with pytest.raises(jsonschema.ValidationError):
+            validate_benchmark_result(document)
+
+    def test_zero_gpu_hours_measures_may_be_null(self):
+        document = load_json(EXAMPLE_RESULT)
+        document["throughput"]["successful_tasks_per_gpu_hour"] = None
+        document["slo"]["slo_attaining_throughput_per_gpu_hour"] = None
+        validate_benchmark_result(document)
+
+
+class TestPercentileSuppression:
+    """The schema itself enforces the p95/p99 sample-count rules."""
+
+    def test_p95_with_insufficient_count_is_rejected(self):
+        document = load_json(EXAMPLE_RESULT)
+        summary = document["latency_ms"]["task_completion"]
+        assert summary["count"] < 200
+        summary["p95"] = 60000
+        with pytest.raises(jsonschema.ValidationError):
+            validate_benchmark_result(document)
+
+    def test_p99_with_insufficient_count_is_rejected(self):
+        document = load_json(EXAMPLE_RESULT)
+        summary = document["latency_ms"]["time_to_first_token"]
+        assert summary["count"] < 1000
+        summary["p99"] = 600
+        with pytest.raises(jsonschema.ValidationError):
+            validate_benchmark_result(document)
+
+    def test_sufficient_count_requires_reported_percentiles(self):
+        document = load_json(EXAMPLE_RESULT)
+        summary = document["latency_ms"]["inter_token"]
+        assert summary["count"] >= 1000
+        summary["p99"] = None
+        with pytest.raises(jsonschema.ValidationError):
+            validate_benchmark_result(document)
+
+    def test_count_is_required(self):
+        document = load_json(EXAMPLE_RESULT)
+        del document["latency_ms"]["inter_token"]["count"]
+        with pytest.raises(jsonschema.ValidationError):
+            validate_benchmark_result(document)
+
+    def test_empty_series_must_be_all_null(self):
+        document = load_json(EXAMPLE_RESULT)
+        document["latency_ms"]["queue_time"] = {
+            "mean": None,
+            "p50": None,
+            "p90": None,
+            "p95": None,
+            "p99": None,
+            "min": None,
+            "max": None,
+            "count": 0,
+        }
+        validate_benchmark_result(document)
+        document["latency_ms"]["queue_time"]["mean"] = 5.0
+        with pytest.raises(jsonschema.ValidationError):
+            validate_benchmark_result(document)
