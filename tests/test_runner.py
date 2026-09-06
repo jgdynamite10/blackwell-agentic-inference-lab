@@ -399,7 +399,14 @@ class TestOutputDocuments:
     def test_mock_manifest_fabricates_no_gpu_model_or_container_facts(self, record):
         assert "model" not in record.manifest
         assert "container_digest" not in record.manifest["serving"]
-        for field in ("gpu_model", "gpu_count", "gpu_memory_gb", "driver_version", "cuda_version"):
+        for field in (
+            "gpu_model",
+            "gpu_count",
+            "gpu_memory_gb",
+            "driver_version",
+            "cuda_version",
+            "driver_max_cuda_version",
+        ):
             assert field not in record.manifest["host"]
         assert record.manifest["cloud"]["comparison_mode"] == "not-applicable"
 

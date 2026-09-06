@@ -1,283 +1,786 @@
-"""Mocked lifecycle tests: approval gates, exact ledgers, no broad cleanup.
+"""Adversarial offline tests for the Terraform lifecycle safety model.
 
-No terraform binary and no provider API is ever invoked: every test injects a
-fake command runner or fetcher.
+Every terraform/git invocation is a fake runner; every provider call is a
+fake fetcher/probe. Nothing here touches the network, credentials, or a real
+terraform binary.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import stat
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
+from blackwell_lab.cloud import lifecycle
 from blackwell_lab.cloud.lifecycle import (
     APPLY_APPROVAL_TEMPLATE,
     DESTROY_APPROVAL_TEMPLATE,
-    PROJECT_TAG,
     ApprovalError,
     CommandResult,
     LifecycleError,
-    apply,
-    build_ledger,
-    destroy,
-    load_ledger,
-    orphan_report,
-    plan,
-    teardown_plan,
-    validate_run_tag,
-    write_ledger,
 )
 
 RUN_TAG = "p3-pilot-20260907a"
-LOCAL_ENV: dict = {}  # no hosted markers
+COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
-SHOW_JSON = {
+INSTANCE_STATE = {
+    "address": "linode_instance.gpu_baseline",
+    "type": "linode_instance",
+    "name": "gpu_baseline",
     "values": {
-        "root_module": {
-            "resources": [
-                {
-                    "address": "linode_instance.gpu_baseline",
-                    "type": "linode_instance",
-                    "name": "gpu_baseline",
-                    "values": {
-                        "id": "12345678",
-                        "label": f"bwlab-{RUN_TAG}",
-                        "region": "us-fake-1",
-                        "tags": [PROJECT_TAG, f"run:{RUN_TAG}"],
-                    },
-                }
-            ]
-        }
-    }
+        "id": "12345678",
+        "label": f"bwlab-{RUN_TAG}",
+        "region": "us-ord",
+        "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
+    },
+}
+FIREWALL_STATE = {
+    "address": "linode_firewall.gpu_baseline",
+    "type": "linode_firewall",
+    "name": "gpu_baseline",
+    "values": {
+        "id": "555",
+        "label": f"bwlab-fw-{RUN_TAG}",
+        "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
+    },
 }
 
 
-class RecordingRunner:
-    def __init__(self, results: list[CommandResult]):
-        self.results = list(results)
+def state_json(resources=None):
+    if resources is None:
+        resources = [INSTANCE_STATE, FIREWALL_STATE]
+    return {"values": {"root_module": {"resources": resources}}}
+
+
+def plan_json(changes=None):
+    if changes is None:
+        changes = [
+            ("linode_instance.gpu_baseline", ["create"]),
+            ("linode_firewall.gpu_baseline", ["create"]),
+        ]
+    return {
+        "resource_changes": [
+            {"address": address, "change": {"actions": actions}} for address, actions in changes
+        ]
+    }
+
+
+class FakeRunner:
+    """Scripted terraform/git executor recording every invocation."""
+
+    def __init__(
+        self,
+        *,
+        plan_rc=0,
+        apply_rc=0,
+        init_rc=0,
+        show_state=None,
+        show_plan=None,
+        show_state_rc=0,
+        plan_text="Plan: 2 to add. ip 203.0.113.9 ssh-ed25519 AAAAC3Nza key",
+        commit=COMMIT,
+    ):
+        self.plan_rc = plan_rc
+        self.apply_rc = apply_rc
+        self.init_rc = init_rc
+        self.show_state = show_state if show_state is not None else state_json()
+        self.show_plan = show_plan if show_plan is not None else plan_json()
+        self.show_state_rc = show_state_rc
+        self.plan_text = plan_text
+        self.commit = commit
         self.calls: list[list[str]] = []
+        self.envs: list[dict] = []
 
-    def __call__(self, argv, cwd):
-        self.calls.append(argv)
-        return self.results.pop(0)
+    def __call__(self, argv, cwd, env):
+        self.calls.append(list(argv))
+        self.envs.append(dict(env))
+        if argv[:2] == ["git", "rev-parse"]:
+            return CommandResult(0, self.commit + "\n")
+        if argv[:2] == ["terraform", "version"]:
+            return CommandResult(0, json.dumps({"terraform_version": "1.9.8"}))
+        if argv[1] == "init":
+            return CommandResult(self.init_rc, "")
+        if argv[1] == "plan":
+            out = next(a for a in argv if a.startswith("-out="))[len("-out=") :]
+            Path(out).write_bytes(b"BINARY-PLAN-" + " ".join(argv).encode())
+            return CommandResult(self.plan_rc, "")
+        if argv[1] == "show" and "-json" in argv:
+            if len(argv) > 3:  # terraform show -json <planfile>
+                return CommandResult(0, json.dumps(self.show_plan))
+            return CommandResult(self.show_state_rc, json.dumps(self.show_state))
+        if argv[1] == "show" and "-no-color" in argv:
+            return CommandResult(0, self.plan_text)
+        if argv[1] == "apply":
+            return CommandResult(self.apply_rc, "")
+        raise AssertionError(f"unexpected command: {argv}")
 
 
-class TestRunTag:
-    @pytest.mark.parametrize("tag", ["p3-pilot-20260907a", "run-0001", "abcd"])
-    def test_valid_tags(self, tag):
-        assert validate_run_tag(tag) == tag
+@pytest.fixture()
+def tf_dir(tmp_path):
+    directory = tmp_path / "repo" / "infra" / "akamai"
+    directory.mkdir(parents=True)
+    (directory / "main.tf").write_text("# config v1\n", encoding="utf-8")
+    (directory / "versions.tf").write_text("# versions\n", encoding="utf-8")
+    (directory / ".terraform.lock.hcl").write_text("# lock v1\n", encoding="utf-8")
+    return directory
 
-    @pytest.mark.parametrize("tag", ["", "ab", "UPPER", "has space", "run_tag", "a" * 60, None])
-    def test_invalid_tags_are_rejected(self, tag):
-        with pytest.raises(LifecycleError):
-            validate_run_tag(tag)
+
+@pytest.fixture()
+def external(tmp_path):
+    directory = tmp_path / "external-results"
+    directory.mkdir()
+    return directory
 
 
-class TestPlan:
-    def test_plan_is_the_default_safe_verb(self, tmp_path):
-        runner = RecordingRunner([CommandResult(0, "Plan: 1 to add")])
-        result = plan(RUN_TAG, tf_dir=tmp_path, runner=runner)
-        assert result.returncode == 0
-        argv = runner.calls[0]
-        assert argv[:2] == ["terraform", "plan"]
-        assert f"-var=run_tag={RUN_TAG}" in argv
-        assert "-auto-approve" not in argv
+@pytest.fixture()
+def paths(external):
+    lp = lifecycle.lifecycle_paths(external, RUN_TAG)
+    lp.var_file.write_text('region = "us-ord"\n', encoding="utf-8")
+    return lp
+
+
+def make_plan(paths, tf_dir, runner=None, stage="apply"):
+    runner = runner or FakeRunner()
+    meta = lifecycle.save_plan(RUN_TAG, stage=stage, paths=paths, tf_dir=tf_dir, runner=runner)
+    return meta, runner
+
+
+def apply_phrase(meta):
+    return APPLY_APPROVAL_TEMPLATE.format(run_tag=RUN_TAG, plan_sha256=meta["plan_sha256"])
+
+
+def destroy_phrase(meta):
+    return DESTROY_APPROVAL_TEMPLATE.format(run_tag=RUN_TAG, plan_sha256=meta["plan_sha256"])
+
+
+class TestExternalArtifacts:
+    def test_lifecycle_paths_require_absolute_external_dir(self):
+        with pytest.raises(LifecycleError, match="absolute"):
+            lifecycle.lifecycle_paths(Path("relative/dir"), RUN_TAG)
+
+    def test_every_artifact_lives_under_the_external_dir_not_the_repo(
+        self, paths, tf_dir, external
+    ):
+        meta, _ = make_plan(paths, tf_dir)
+        assert meta["plan_sha256"]
+        repo_root = tf_dir.parents[1]
+        for artifact in repo_root.rglob("*"):
+            assert artifact.suffix not in (".tfplan", ".tfstate"), artifact
+            assert "plan-meta" not in artifact.name, artifact
+        assert paths.plan_path("apply").is_file()
+        assert paths.plan_text_path("apply").is_file()
+        assert paths.plan_meta_path("apply").is_file()
+        assert external in paths.plan_path("apply").parents
+
+    def test_private_modes_0700_dirs_0600_files(self, paths, tf_dir):
+        make_plan(paths, tf_dir)
+        dir_mode = stat.S_IMODE(os.stat(paths.run_dir).st_mode)
+        assert dir_mode == 0o700
+        for name in ("apply.tfplan", "apply.plan-meta.json", "apply.tfplan.redacted.txt"):
+            file_mode = stat.S_IMODE(os.stat(paths.run_dir / name).st_mode)
+            assert file_mode == 0o600, name
+
+    def test_init_configures_external_backend_and_tf_data_dir(self, paths, tf_dir):
+        runner = FakeRunner()
+        report = lifecycle.init_backend(RUN_TAG, paths=paths, tf_dir=tf_dir, runner=runner)
+        assert report["external_state"] is True
+        init_call = runner.calls[0]
+        assert f"-backend-config=path={paths.state_path}" in init_call
+        assert runner.envs[0]["TF_DATA_DIR"] == str(paths.tf_data_dir)
+        assert paths.tf_data_dir.is_dir()
+
+    def test_atomic_writer_reports_private_permissions(self, tmp_path):
+        target = tmp_path / "private" / "artifact.json"
+        lifecycle.write_private_json(target, {"x": 1})
+        assert stat.S_IMODE(os.stat(target).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(target.parent).st_mode) == 0o700
+        # No temp residue.
+        assert [p.name for p in target.parent.iterdir()] == ["artifact.json"]
+
+
+class TestSavedPlan:
+    def test_plan_metadata_records_all_provenance(self, paths, tf_dir):
+        meta, _runner = make_plan(paths, tf_dir)
+        assert meta["run_tag"] == RUN_TAG
+        assert meta["stage"] == "apply"
+        assert len(meta["plan_sha256"]) == 64
+        assert meta["commit_sha"] == COMMIT
+        assert meta["terraform_version"] == "1.9.8"
+        assert len(meta["provider_lock_sha256"]) == 64
+        assert len(meta["config_sha256"]) == 64
+        assert meta["state_sha256"] is None  # no state before first apply
+        assert meta["created_at_utc"]
+        assert {a["classification"] for a in meta["actions"]} == {"create"}
+        assert sorted(meta["resource_addresses"]) == [
+            "linode_firewall.gpu_baseline",
+            "linode_instance.gpu_baseline",
+        ]
+
+    def test_plan_requires_external_var_file(self, external, tf_dir):
+        lp = lifecycle.lifecycle_paths(external, RUN_TAG)  # no var file written
+        with pytest.raises(LifecycleError, match=r"terraform\.tfvars.*missing"):
+            lifecycle.save_plan(
+                RUN_TAG, stage="apply", paths=lp, tf_dir=tf_dir, runner=FakeRunner()
+            )
+
+    def test_redacted_text_strips_addresses_and_key_material(self, paths, tf_dir):
+        make_plan(paths, tf_dir)
+        text = paths.plan_text_path("apply").read_text(encoding="utf-8")
+        assert "203.0.113.9" not in text
+        assert "AAAAC3Nza" not in text
+        assert "[REDACTED-IPV4]" in text
+        assert "ssh-ed25519 [REDACTED]" in text
+
+    def test_apply_stage_plan_with_delete_fails_closed(self, paths, tf_dir):
+        runner = FakeRunner(show_plan=plan_json([("linode_instance.gpu_baseline", ["delete"])]))
+        with pytest.raises(LifecycleError, match="delete, replace, or unrelated"):
+            make_plan(paths, tf_dir, runner)
+
+    def test_apply_stage_plan_with_replace_fails_closed(self, paths, tf_dir):
+        runner = FakeRunner(
+            show_plan=plan_json([("linode_instance.gpu_baseline", ["delete", "create"])])
+        )
+        with pytest.raises(LifecycleError, match="delete, replace, or unrelated"):
+            make_plan(paths, tf_dir, runner)
+
+    def test_apply_stage_plan_with_unrelated_resource_fails_closed(self, paths, tf_dir):
+        runner = FakeRunner(
+            show_plan=plan_json(
+                [
+                    ("linode_instance.gpu_baseline", ["create"]),
+                    ("linode_volume.sneaky", ["create"]),
+                ]
+            )
+        )
+        with pytest.raises(LifecycleError, match="unrelated"):
+            make_plan(paths, tf_dir, runner)
+
+
+class TestVerifySavedPlan:
+    def test_verification_passes_for_the_untouched_plan(self, paths, tf_dir):
+        meta, runner = make_plan(paths, tf_dir)
+        verified = lifecycle.verify_saved_plan(
+            RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=runner
+        )
+        assert verified["plan_sha256"] == meta["plan_sha256"]
+
+    def test_modified_binary_plan_is_rejected(self, paths, tf_dir):
+        _, runner = make_plan(paths, tf_dir)
+        paths.plan_path("apply").write_bytes(b"tampered")
+        with pytest.raises(LifecycleError, match="SHA-256"):
+            lifecycle.verify_saved_plan(
+                RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=runner
+            )
+
+    def test_changed_configuration_is_rejected(self, paths, tf_dir):
+        _, runner = make_plan(paths, tf_dir)
+        (tf_dir / "main.tf").write_text("# config v2 CHANGED\n", encoding="utf-8")
+        with pytest.raises(LifecycleError, match="configuration changed"):
+            lifecycle.verify_saved_plan(
+                RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=runner
+            )
+
+    def test_changed_lock_file_is_rejected(self, paths, tf_dir):
+        _, runner = make_plan(paths, tf_dir)
+        (tf_dir / ".terraform.lock.hcl").write_text("# lock v2\n", encoding="utf-8")
+        with pytest.raises(LifecycleError, match="lock file changed"):
+            lifecycle.verify_saved_plan(
+                RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=runner
+            )
+
+    def test_changed_state_is_rejected(self, paths, tf_dir):
+        _, runner = make_plan(paths, tf_dir)
+        paths.state_path.write_text("{}", encoding="utf-8")  # state appeared after plan
+        with pytest.raises(LifecycleError, match="state changed"):
+            lifecycle.verify_saved_plan(
+                RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=runner
+            )
+
+    def test_changed_commit_is_rejected(self, paths, tf_dir):
+        _, _ = make_plan(paths, tf_dir)
+        moved = FakeRunner(commit="f" * 40)
+        with pytest.raises(LifecycleError, match="commit changed"):
+            lifecycle.verify_saved_plan(
+                RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=moved
+            )
+
+    def test_stale_plan_is_rejected(self, paths, tf_dir):
+        _, runner = make_plan(paths, tf_dir)
+        future = datetime.now(timezone.utc) + timedelta(hours=2)
+        with pytest.raises(LifecycleError, match="stale"):
+            lifecycle.verify_saved_plan(
+                RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=runner, now=future
+            )
+
+    def test_missing_plan_metadata_is_rejected(self, paths, tf_dir):
+        with pytest.raises(LifecycleError, match="no reviewed apply plan"):
+            lifecycle.verify_saved_plan(
+                RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=FakeRunner()
+            )
+
+    def test_other_runs_plan_is_rejected(self, paths, tf_dir):
+        meta, runner = make_plan(paths, tf_dir)
+        meta["run_tag"] = "another-run"
+        lifecycle.write_private_json(paths.plan_meta_path("apply"), meta)
+        with pytest.raises(LifecycleError, match="does not belong"):
+            lifecycle.verify_saved_plan(
+                RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=runner
+            )
 
 
 class TestApply:
-    def test_wrong_phrase_executes_nothing(self, tmp_path):
-        runner = RecordingRunner([])
-        with pytest.raises(ApprovalError, match="nothing was executed"):
-            apply(
-                RUN_TAG,
-                "yes please",
-                tf_dir=tmp_path,
-                runner=runner,
-                ledger_dir=tmp_path / "ledgers",
-                environ=LOCAL_ENV,
-            )
-        assert runner.calls == []
-
-    @pytest.mark.parametrize("marker", ["CI", "GITHUB_ACTIONS", "CURSOR_AGENT"])
-    def test_hosted_environments_are_refused(self, tmp_path, marker):
-        runner = RecordingRunner([])
-        with pytest.raises(LifecycleError, match="hosted"):
-            apply(
-                RUN_TAG,
-                APPLY_APPROVAL_TEMPLATE.format(run_tag=RUN_TAG),
-                tf_dir=tmp_path,
-                runner=runner,
-                ledger_dir=tmp_path / "ledgers",
-                environ={marker: "1"},
-            )
-        assert runner.calls == []
-
-    def test_approved_apply_records_the_exact_ledger(self, tmp_path):
-        runner = RecordingRunner(
-            [CommandResult(0, "applied"), CommandResult(0, json.dumps(SHOW_JSON))]
+    def test_apply_executes_exactly_the_saved_plan_no_auto_approve(self, paths, tf_dir):
+        meta, runner = make_plan(paths, tf_dir)
+        report = lifecycle.apply(
+            RUN_TAG, apply_phrase(meta), paths=paths, tf_dir=tf_dir, runner=runner, environ={}
         )
-        ledger_path = apply(
-            RUN_TAG,
-            APPLY_APPROVAL_TEMPLATE.format(run_tag=RUN_TAG),
-            tf_dir=tmp_path,
-            runner=runner,
-            ledger_dir=tmp_path / "ledgers",
-            environ=LOCAL_ENV,
-        )
-        assert runner.calls[0][:2] == ["terraform", "apply"]
-        assert runner.calls[1][:3] == ["terraform", "show", "-json"]
-        ledger = load_ledger(ledger_path)
-        assert ledger["run_tag"] == RUN_TAG
-        assert ledger["resources"][0]["provider_id"] == "12345678"
-        assert ledger["resources"][0]["address"] == "linode_instance.gpu_baseline"
+        assert report["reconciled"] is True
+        apply_calls = [c for c in runner.calls if c[1] == "apply"]
+        assert apply_calls == [
+            ["terraform", "apply", "-input=false", str(paths.plan_path("apply"))]
+        ]
+        assert not any("-auto-approve" in c for c in runner.calls)
+        # No fresh plan was generated at apply time.
+        plan_calls = [c for c in runner.calls if c[1] == "plan"]
+        assert len(plan_calls) == 1  # only the original save_plan
 
-    def test_failed_apply_raises_with_recovery_guidance(self, tmp_path):
-        runner = RecordingRunner([CommandResult(1, "", "boom")])
-        with pytest.raises(LifecycleError, match="partially created"):
-            apply(
-                RUN_TAG,
-                APPLY_APPROVAL_TEMPLATE.format(run_tag=RUN_TAG),
-                tf_dir=tmp_path,
-                runner=runner,
-                ledger_dir=tmp_path / "ledgers",
-                environ=LOCAL_ENV,
-            )
-
-    def test_empty_show_output_refuses_an_empty_ledger(self):
-        with pytest.raises(LifecycleError, match="empty"):
-            build_ledger(RUN_TAG, {"values": {"root_module": {"resources": []}}})
-
-
-class TestTeardown:
-    def _ledger(self, tmp_path):
-        return load_ledger(write_ledger(build_ledger(RUN_TAG, SHOW_JSON), tmp_path / "ledgers"))
-
-    def test_teardown_plan_targets_exactly_the_ledger_resources(self, tmp_path):
-        plan_doc = teardown_plan(self._ledger(tmp_path))
-        assert plan_doc["resource_count"] == 1
-        assert plan_doc["targets"] == ["linode_instance.gpu_baseline"]
-        assert plan_doc["destroy_arguments"] == ["-target=linode_instance.gpu_baseline"]
-        assert "ONLY" in plan_doc["note"]
-
-    def test_destroy_requires_its_own_distinct_phrase(self, tmp_path):
-        ledger = self._ledger(tmp_path)
-        runner = RecordingRunner([])
-        apply_phrase = APPLY_APPROVAL_TEMPLATE.format(run_tag=RUN_TAG)
+    def test_apply_requires_the_digest_bearing_approval_phrase(self, paths, tf_dir):
+        meta, runner = make_plan(paths, tf_dir)
         with pytest.raises(ApprovalError):
-            destroy(
-                RUN_TAG, apply_phrase, ledger, tf_dir=tmp_path, runner=runner, environ=LOCAL_ENV
-            )
-        assert runner.calls == []
-
-    def test_destroy_passes_only_ledger_targets(self, tmp_path):
-        ledger = self._ledger(tmp_path)
-        runner = RecordingRunner([CommandResult(0, "destroyed")])
-        destroy(
-            RUN_TAG,
-            DESTROY_APPROVAL_TEMPLATE.format(run_tag=RUN_TAG),
-            ledger,
-            tf_dir=tmp_path,
-            runner=runner,
-            environ=LOCAL_ENV,
-        )
-        argv = runner.calls[0]
-        assert argv[:2] == ["terraform", "destroy"]
-        assert "-target=linode_instance.gpu_baseline" in argv
-        # No broad cleanup: every target is explicit; no bare destroy.
-        assert sum(1 for a in argv if a.startswith("-target=")) == 1
-
-    def test_destroy_refuses_a_mismatched_ledger(self, tmp_path):
-        ledger = self._ledger(tmp_path)
-        ledger["run_tag"] = "other-run"
-        with pytest.raises(LifecycleError, match="another run"):
-            destroy(
+            lifecycle.apply(
                 RUN_TAG,
-                DESTROY_APPROVAL_TEMPLATE.format(run_tag=RUN_TAG),
-                ledger,
-                tf_dir=tmp_path,
-                runner=RecordingRunner([]),
-                environ=LOCAL_ENV,
-            )
-
-    def test_failed_destroy_warns_that_billing_continues(self, tmp_path):
-        ledger = self._ledger(tmp_path)
-        runner = RecordingRunner([CommandResult(1, "", "boom")])
-        with pytest.raises(LifecycleError, match="still bill"):
-            destroy(
-                RUN_TAG,
-                DESTROY_APPROVAL_TEMPLATE.format(run_tag=RUN_TAG),
-                ledger,
-                tf_dir=tmp_path,
+                f"I approve creating billable Akamai resources for run {RUN_TAG}",
+                paths=paths,
+                tf_dir=tf_dir,
                 runner=runner,
-                environ=LOCAL_ENV,
+                environ={},
             )
+        assert not any(c[1] == "apply" for c in runner.calls)
+        expected = apply_phrase(meta)
+        assert meta["plan_sha256"] in expected and RUN_TAG in expected
+
+    def test_apply_refuses_hosted_environments(self, paths, tf_dir):
+        meta, runner = make_plan(paths, tf_dir)
+        with pytest.raises(LifecycleError, match="hosted"):
+            lifecycle.apply(
+                RUN_TAG,
+                apply_phrase(meta),
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                environ={"CI": "true"},
+            )
+
+    def test_pending_record_is_written_before_the_attempt(self, paths, tf_dir):
+        meta, _ = make_plan(paths, tf_dir)
+        seen = {}
+
+        class Recorder(FakeRunner):
+            def __call__(self, argv, cwd, env):
+                if argv[1] == "apply":
+                    seen["pending_at_apply"] = paths.pending_path.is_file()
+                return super().__call__(argv, cwd, env)
+
+        recorder = Recorder()
+        lifecycle.apply(
+            RUN_TAG, apply_phrase(meta), paths=paths, tf_dir=tf_dir, runner=recorder, environ={}
+        )
+        assert seen["pending_at_apply"] is True
+        # Clean reconciliation clears the pending record.
+        assert not paths.pending_path.is_file()
+
+    def test_failed_apply_still_reconciles_and_keeps_recovery_records(self, paths, tf_dir):
+        meta, _ = make_plan(paths, tf_dir)
+        runner = FakeRunner(apply_rc=1, show_state=state_json([INSTANCE_STATE]))
+        with pytest.raises(LifecycleError, match="MAY be billing"):
+            lifecycle.apply(
+                RUN_TAG, apply_phrase(meta), paths=paths, tf_dir=tf_dir, runner=runner, environ={}
+            )
+        # The ledger recorded whatever partial state exists.
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert len(ledger["resources"]) == 1
+
+    def test_failed_show_after_apply_writes_a_recovery_record(self, paths, tf_dir):
+        meta, _ = make_plan(paths, tf_dir)
+        runner = FakeRunner(show_state_rc=1)
+        with pytest.raises(LifecycleError, match="NOT clean"):
+            lifecycle.apply(
+                RUN_TAG, apply_phrase(meta), paths=paths, tf_dir=tf_dir, runner=runner, environ={}
+            )
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert ledger["state_readable"] is False
+        assert ledger["reconciled"] is False
+        assert "recovery" in ledger
+        assert ledger["recovery"]["pending_operation"]["operation"] == "apply"
+        # The pending record survives for the operator.
+        assert paths.pending_path.is_file()
+
+
+class TestReconcile:
+    def test_untracked_provider_resource_blocks_reconciliation(self, paths, tf_dir):
+        def fetch(path, token=None):
+            if path.startswith("/linode/instances"):
+                return {
+                    "data": [
+                        {
+                            "id": 12345678,
+                            "label": f"bwlab-{RUN_TAG}",
+                            "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
+                        },
+                        {
+                            "id": 999,
+                            "label": "mystery",
+                            "tags": [f"run:{RUN_TAG}"],
+                        },
+                    ],
+                    "pages": 1,
+                }
+            return {"data": [], "pages": 1}
+
+        runner = FakeRunner(show_state=state_json([INSTANCE_STATE]))
+        report = lifecycle.reconcile(
+            RUN_TAG, paths=paths, tf_dir=tf_dir, runner=runner, fetch=fetch, token="t"
+        )
+        assert report["reconciled"] is False
+        assert report["untracked_billable_count"] == 1
+        assert "blocked" in report["note"].lower() or "NOT CLEAN" in report["note"]
+
+    def test_clean_reconciliation_clears_pending(self, paths, tf_dir):
+        lifecycle.write_pending(paths, run_tag=RUN_TAG, operation="apply", plan_sha256="x")
+        report = lifecycle.reconcile(RUN_TAG, paths=paths, tf_dir=tf_dir, runner=FakeRunner())
+        assert report["reconciled"] is True
+        assert not paths.pending_path.is_file()
+
+    def test_report_is_sanitized_no_provider_ids(self, paths, tf_dir):
+        report = lifecycle.reconcile(RUN_TAG, paths=paths, tf_dir=tf_dir, runner=FakeRunner())
+        assert "12345678" not in json.dumps(report)
+
+
+def _provider_fetch(instance_overrides=None, firewall_overrides=None):
+    instance = {
+        "id": 12345678,
+        "label": f"bwlab-{RUN_TAG}",
+        "type": "rtxpro6000-x1",
+        "region": "us-ord",
+        "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
+    }
+    firewall = {
+        "id": 555,
+        "label": f"bwlab-fw-{RUN_TAG}",
+        "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
+    }
+    instance.update(instance_overrides or {})
+    firewall.update(firewall_overrides or {})
+
+    def fetch(path, token=None):
+        if path.startswith("/linode/instances/"):
+            return instance
+        if path.startswith("/networking/firewalls/"):
+            return firewall
+        return {"data": [], "pages": 1}
+
+    return fetch
+
+
+def make_ledger(paths, tf_dir):
+    runner = FakeRunner()
+    lifecycle.reconcile(RUN_TAG, paths=paths, tf_dir=tf_dir, runner=runner)
+    return lifecycle.load_ledger(paths.ledger_path)
+
+
+class TestTeardownIdentity:
+    def test_identity_verification_passes_when_everything_matches(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        report = lifecycle.verify_teardown_identity(
+            RUN_TAG,
+            ledger,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(),
+            fetch=_provider_fetch(),
+            token="t",
+        )
+        assert report["verified"] is True
+        assert report["provider_checked"] is True
+
+    def test_wrong_run_tag_ledger_is_rejected(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        ledger["run_tag"] = "some-other-run"
+        with pytest.raises(LifecycleError, match="another run"):
+            lifecycle.verify_teardown_identity(
+                RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=FakeRunner()
+            )
+
+    def test_stale_ledger_provider_id_fails_closed(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        ledger["resources"][0]["provider_id"] = "87654321"  # stale/wrong id
+        with pytest.raises(LifecycleError, match="identity verification FAILED"):
+            lifecycle.verify_teardown_identity(
+                RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=FakeRunner()
+            )
+
+    def test_missing_run_tag_in_state_fails_closed(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        untagged = json.loads(json.dumps(INSTANCE_STATE))
+        untagged["values"]["tags"] = ["blackwell-lab"]  # run tag gone
+        runner = FakeRunner(show_state=state_json([untagged, FIREWALL_STATE]))
+        with pytest.raises(LifecycleError, match="run tag missing"):
+            lifecycle.verify_teardown_identity(
+                RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner
+            )
+
+    def test_provider_api_mismatch_fails_closed(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        with pytest.raises(LifecycleError, match="API observation"):
+            lifecycle.verify_teardown_identity(
+                RUN_TAG,
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(),
+                fetch=_provider_fetch(instance_overrides={"label": "someone-elses-box"}),
+                token="t",
+            )
+
+    def test_resource_absent_from_state_fails_closed(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        runner = FakeRunner(show_state=state_json([FIREWALL_STATE]))  # instance vanished
+        with pytest.raises(LifecycleError, match="absent from the current state"):
+            lifecycle.verify_teardown_identity(
+                RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner
+            )
+
+    def test_unexpected_resource_type_fails_closed(self, paths, tf_dir):
+        volume_state = {
+            "address": "linode_volume.other",
+            "type": "linode_volume",
+            "name": "other",
+            "values": {"id": "1", "label": "bwlab-x", "tags": ["blackwell-lab"]},
+        }
+        runner = FakeRunner(show_state=state_json([INSTANCE_STATE, FIREWALL_STATE, volume_state]))
+        lifecycle.reconcile(RUN_TAG, paths=paths, tf_dir=tf_dir, runner=runner)
+        ledger = lifecycle.load_ledger(paths.ledger_path)
+        with pytest.raises(LifecycleError, match="not a resource this configuration"):
+            lifecycle.verify_teardown_identity(
+                RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner
+            )
+
+
+class TestDestroy:
+    def _destroy_runner(self):
+        return FakeRunner(
+            show_plan=plan_json(
+                [
+                    ("linode_instance.gpu_baseline", ["delete"]),
+                    ("linode_firewall.gpu_baseline", ["delete"]),
+                ]
+            )
+        )
+
+    def _prepared(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        runner = self._destroy_runner()
+        meta = lifecycle.plan_destroy(RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner)
+        return ledger, meta, runner
+
+    def test_destroy_plan_must_match_ledger_addresses_exactly(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        runner = FakeRunner(show_plan=plan_json([("linode_instance.gpu_baseline", ["delete"])]))
+        with pytest.raises(LifecycleError, match="exactly match the ledger"):
+            lifecycle.plan_destroy(RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner)
+
+    def test_destroy_stage_plan_with_create_fails_closed(self, paths, tf_dir):
+        ledger = make_ledger(paths, tf_dir)
+        runner = FakeRunner(
+            show_plan=plan_json(
+                [
+                    ("linode_instance.gpu_baseline", ["delete"]),
+                    ("linode_firewall.gpu_baseline", ["create"]),
+                ]
+            )
+        )
+        with pytest.raises(LifecycleError, match="non-delete"):
+            lifecycle.plan_destroy(RUN_TAG, ledger, paths=paths, tf_dir=tf_dir, runner=runner)
+
+    def test_destroy_requires_digest_bearing_approval(self, paths, tf_dir):
+        ledger, _meta, runner = self._prepared(paths, tf_dir)
+        with pytest.raises(ApprovalError):
+            lifecycle.destroy(
+                RUN_TAG,
+                f"I approve deleting the exact recorded resources for run {RUN_TAG}",
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                environ={},
+                token="t",
+                probe=lambda path, token: "absent",
+            )
+        assert not any(c[1] == "apply" for c in runner.calls)
+
+    def test_destroy_confirms_deletion_before_reporting_success(self, paths, tf_dir):
+        ledger, meta, runner = self._prepared(paths, tf_dir)
+        # Simulate Akamai's multi-minute deletion: present for 3 polls each.
+        counts: dict[str, int] = {}
+
+        def slow_probe(path, token):
+            counts[path] = counts.get(path, 0) + 1
+            return "absent" if counts[path] > 3 else "present"
+
+        sleeps: list[float] = []
+        timeline = iter(range(0, 100000, 10))
+        report = lifecycle.destroy(
+            RUN_TAG,
+            destroy_phrase(meta),
+            ledger,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=runner,
+            environ={},
+            token="t",
+            probe=slow_probe,
+            monotonic=lambda: float(next(timeline)),
+            sleeper=sleeps.append,
+        )
+        assert report["destroyed"] is True
+        assert report["deletion_confirmed"] is True
+        assert len(sleeps) >= 3  # actually polled through the delay
+        updated = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert updated["deletion_confirmed"] is True
+
+    def test_confirmation_timeout_reports_billing_may_continue(self, paths, tf_dir):
+        ledger, meta, runner = self._prepared(paths, tf_dir)
+        timeline = iter(range(0, 10_000_000, 700))
+        with pytest.raises(LifecycleError, match="BILLING MAY CONTINUE"):
+            lifecycle.destroy(
+                RUN_TAG,
+                destroy_phrase(meta),
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                environ={},
+                token="t",
+                probe=lambda path, token: "present",
+                monotonic=lambda: float(next(timeline)),
+                sleeper=lambda s: None,
+            )
+
+    def test_destroy_without_token_never_reports_success(self, paths, tf_dir):
+        ledger, meta, runner = self._prepared(paths, tf_dir)
+        with pytest.raises(LifecycleError, match="CANNOT BE CONFIRMED"):
+            lifecycle.destroy(
+                RUN_TAG,
+                destroy_phrase(meta),
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                environ={},
+                token=None,
+            )
+
+    def test_destroy_refuses_hosted_environments(self, paths, tf_dir):
+        ledger, meta, runner = self._prepared(paths, tf_dir)
+        with pytest.raises(LifecycleError, match="hosted"):
+            lifecycle.destroy(
+                RUN_TAG,
+                destroy_phrase(meta),
+                ledger,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                environ={"GITHUB_ACTIONS": "true"},
+                token="t",
+            )
+
+
+class TestSessionRecord:
+    def test_session_summary_computes_billable_window_and_cost(self, paths):
+        lifecycle.record_session_event(paths, "apply_attempted", {})
+        lifecycle.record_session_event(paths, "provisioned", {})
+        lifecycle.record_session_event(paths, "pilot_started", {})
+        lifecycle.record_session_event(paths, "pilot_completed", {})
+        lifecycle.record_session_event(paths, "teardown_started", {})
+        lifecycle.record_session_event(paths, "deletion_confirmed", {})
+        summary = lifecycle.session_summary(paths, hourly_price_usd=3.5)
+        assert summary["event_count"] == 6
+        assert summary["observed_billable_s"] is not None
+        assert summary["estimated_total_cost_usd"] is not None
+        assert summary["deletion_confirmed"] is True
+        assert set(summary["phases"]) == {
+            "provisioning_s",
+            "setup_s",
+            "pilot_s",
+            "teardown_s",
+        }
+
+    def test_summary_without_confirmed_deletion_reports_open_session(self, paths):
+        lifecycle.record_session_event(paths, "provisioned", {})
+        summary = lifecycle.session_summary(paths, hourly_price_usd=3.5)
+        assert summary["observed_billable_s"] is None
+        assert summary["estimated_total_cost_usd"] is None
+        assert summary["deletion_confirmed"] is False
+
+    def test_session_record_is_private(self, paths):
+        lifecycle.record_session_event(paths, "provisioned", {})
+        assert stat.S_IMODE(os.stat(paths.session_path).st_mode) == 0o600
 
 
 class TestOrphanReport:
-    INSTANCES: dict = {  # noqa: RUF012 - read-only fixture data
-        "data": [
-            {
-                "id": 12345678,
-                "label": f"bwlab-{RUN_TAG}",
-                "region": "us-fake-1",
-                "type": "g9-fake-gpu-plan",
-                "tags": [PROJECT_TAG, f"run:{RUN_TAG}"],
-            },
-            {
-                "id": 999,
-                "label": "unrelated-web-server",
-                "region": "us-fake-1",
-                "type": "g6-standard-2",
-                "tags": ["someone-elses-project"],
-            },
-            {
-                "id": 555,
-                "label": "mystery-gpu",
-                "region": "us-fake-1",
-                "type": "g9-fake-gpu-plan",
-                "tags": [],
-            },
-        ]
-    }
-    VOLUMES: dict = {  # noqa: RUF012 - read-only fixture data
-        "data": [
-            {"id": 777, "label": "bwlab-scratch", "region": "us-fake-1", "tags": [PROJECT_TAG]},
-            {"id": 888, "label": "other-volume", "region": "us-fake-1", "tags": []},
-        ]
-    }
+    def _fetch(self, instances=(), volumes=(), firewalls=()):
+        def fetch(path, token=None):
+            if path.startswith("/linode/instances"):
+                return {"data": list(instances), "pages": 1}
+            if path.startswith("/volumes"):
+                return {"data": list(volumes), "pages": 1}
+            if path.startswith("/networking/firewalls"):
+                return {"data": list(firewalls), "pages": 1}
+            raise AssertionError(path)
 
-    def fetch(self, path, token=None):
-        if path.startswith("/linode/instances"):
-            return self.INSTANCES
-        if path.startswith("/volumes"):
-            return self.VOLUMES
-        raise AssertionError(f"unexpected path: {path}")
+        return fetch
 
-    def test_report_classifies_findings_against_the_ledger(self, tmp_path):
-        ledger = build_ledger(RUN_TAG, SHOW_JSON)
-        report = orphan_report("tok", fetch=self.fetch, ledger=ledger)
-        by_label = {f["label"]: f for f in report["findings"]}
-        # The ledger-recorded instance is found and matched.
-        assert by_label[f"bwlab-{RUN_TAG}"]["in_ledger"] is True
-        # An untagged GPU instance is flagged as suspicious.
-        assert by_label["mystery-gpu"]["suspicious_untagged_gpu"] is True
-        # A project-tagged volume outside the ledger is an unrecorded finding.
-        assert by_label["bwlab-scratch"]["in_ledger"] is False
-        assert not report["clean"]
-        # Unrelated resources are never touched or listed.
-        assert "unrelated-web-server" not in by_label
-        assert "other-volume" not in by_label
-
-    def test_clean_report_after_full_teardown(self):
-        empty = {"data": []}
-        report = orphan_report("tok", fetch=lambda p, t=None: empty)
+    def test_clean_when_nothing_project_tagged_exists(self):
+        report = lifecycle.orphan_report("t", fetch=self._fetch())
         assert report["clean"] is True
-        assert report["findings"] == []
 
-    def test_sweep_failure_is_sanitized(self):
-        def boom(path, token=None):
-            raise OSError("secret-account-id-in-error")
+    def test_project_tagged_firewall_is_reported(self):
+        fetch = self._fetch(
+            firewalls=[{"id": 555, "label": "bwlab-fw-x", "tags": ["blackwell-lab"]}]
+        )
+        report = lifecycle.orphan_report("t", fetch=fetch)
+        assert report["clean"] is False
+        assert report["findings"][0]["kind"] == "firewall"
+
+    def test_untagged_gpu_instance_is_suspicious(self):
+        fetch = self._fetch(
+            instances=[{"id": 9, "label": "mystery", "type": "g2-rtxpro6000-x1", "tags": []}]
+        )
+        report = lifecycle.orphan_report("t", fetch=fetch)
+        assert report["findings"][0]["suspicious_untagged_gpu"] is True
+
+    def test_sweep_failure_never_echoes_payloads(self):
+        def broken(path, token=None):
+            raise RuntimeError("secret-account-id-123 in raw payload")
 
         with pytest.raises(LifecycleError) as excinfo:
-            orphan_report("tok", fetch=boom)
-        assert "secret-account-id" not in str(excinfo.value)
+            lifecycle.orphan_report("t", fetch=broken)
+        assert "secret-account-id-123" not in str(excinfo.value)
+
+
+class TestRunTagAndHostedGuards:
+    def test_run_tag_validation(self):
+        for bad in ("", "UPPER", "a b", "x", "a" * 60, None, 5):
+            with pytest.raises(LifecycleError):
+                lifecycle.validate_run_tag(bad)  # type: ignore[arg-type]
+        assert lifecycle.validate_run_tag(RUN_TAG) == RUN_TAG
+
+    def test_hosted_markers_refuse_billable_verbs(self):
+        for marker in ("CI", "GITHUB_ACTIONS", "CURSOR_AGENT", "CLOUD_AGENT"):
+            with pytest.raises(LifecycleError, match="hosted"):
+                lifecycle.refuse_hosted_execution({marker: "1"})
+        lifecycle.refuse_hosted_execution({})  # local: no exception

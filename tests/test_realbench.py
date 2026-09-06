@@ -45,7 +45,7 @@ HOST = {
     "gpu_count": 1,
     "gpu_memory_gb": 96.0,
     "driver_version": "580.65.06",
-    "cuda_version": "13.0",
+    "driver_max_cuda_version": "13.0",
 }
 
 
@@ -102,8 +102,12 @@ class FakeSampler:
         if self.fail:
             raise TelemetryUnavailable("GPU sampling failed mid-run: fake failure")
         return summarize_gpu_samples(
-            [GpuSample(80.0, 70.0, 400.0, 65.0), GpuSample(90.0, 75.0, 420.0, 66.0)],
-            sample_interval_s=1.0,
+            [
+                GpuSample(100.0, 80.0, 70.0, 400.0, 65.0),
+                GpuSample(101.0, 90.0, 75.0, 420.0, 66.0),
+            ],
+            window_started_monotonic_s=100.0,
+            window_ended_monotonic_s=101.1,
             successful_tasks=successful_tasks,
         )
 
@@ -124,10 +128,15 @@ class TestSpecValidation:
                 sampler_factory=FakeSampler,
             )
 
-    def test_controlled_resource_requires_joint_limits(self):
-        with pytest.raises(ConfigError, match="resource_limits"):
+    def test_controlled_resource_is_rejected_until_enforcement_exists(self):
+        # A configuration-supplied controlled-resource label is a
+        # fabrication until the joint cgroup envelope is genuinely enforced.
+        with pytest.raises(ConfigError, match="controlled-resource runs are rejected"):
             run_real_cell(
-                make_spec(comparison_mode="controlled-resource"),
+                make_spec(
+                    comparison_mode="controlled-resource",
+                    resource_limits={"vcpu_limit": 14, "memory_limit_gib": 100},
+                ),
                 UsageMockClient(),
                 host=HOST,
                 sampler_factory=FakeSampler,
@@ -181,6 +190,25 @@ class TestPrivacyGuard:
                 UsageMockClient(),
                 host=HOST,
                 sampler_factory=FakeSampler,
+                clock=FakeClock(),
+            )
+
+    def test_explicit_results_dir_is_independently_guarded(self, monkeypatch):
+        # Even a directly passed results_dir goes through the REAL-mode
+        # guard: a repository-interior path never receives genuine output.
+        from pathlib import Path
+
+        import blackwell_lab
+
+        repo_root = Path(blackwell_lab.__file__).parents[2]
+        monkeypatch.delenv("LAB_RESULTS_DIR", raising=False)
+        with pytest.raises(ResultsLocationError):
+            run_real_cell(
+                make_spec(),
+                UsageMockClient(),
+                host=HOST,
+                sampler_factory=FakeSampler,
+                results_dir=repo_root / "results",
                 clock=FakeClock(),
             )
 
@@ -259,15 +287,23 @@ class TestGenuineCell:
         ).stdout
         assert status.strip() == ""
 
-    def test_controlled_resource_mode_records_the_joint_limits(self, real_results_dir):
-        records = self._run(
-            real_results_dir,
-            comparison_mode="controlled-resource",
-            resource_limits={"vcpu_limit": 14, "memory_limit_gib": 100},
+    def test_gpu_block_carries_the_sampling_accuracy_record(self, real_results_dir):
+        result = self._run(real_results_dir)[0].result
+        sampling = result["gpu"]["sampling"]
+        assert sampling["sample_count"] == 2
+        assert "trapezoidal" in sampling["integration_method"]
+        assert 0 < sampling["coverage_fraction"] <= 1
+
+    def test_observed_container_cuda_version_lands_in_the_manifest(self, real_results_dir):
+        records = run_real_cell(
+            make_spec(container_cuda_runtime_version="13.0"),
+            UsageMockClient(),
+            host=HOST,
+            sampler_factory=FakeSampler,
+            clock=FakeClock(),
         )
-        cloud = records[0].manifest["cloud"]
-        assert cloud["comparison_mode"] == "controlled-resource"
-        assert cloud["resource_limits"] == {"vcpu_limit": 14, "memory_limit_gib": 100}
+        serving = records[0].manifest["serving"]
+        assert serving["container_cuda_runtime_version"] == "13.0"
 
 
 class TestFailVisible:
@@ -300,6 +336,25 @@ class TestFailVisible:
                 sampler_factory=FakeSampler,
                 clock=FakeClock(),
             )
+
+    def test_failed_repetition_leaves_a_marked_failure_record(self, real_results_dir):
+        with pytest.raises(RequiredMeasurementError):
+            run_real_cell(
+                make_spec(run_label="failing-run"),
+                DeterministicMockClient(),  # no usage events -> required-measurement failure
+                host=HOST,
+                sampler_factory=FakeSampler,
+                clock=FakeClock(),
+            )
+        run_dir = real_results_dir / "real-runs" / "failing-run"
+        failures = list(run_dir.glob("*.failure.json"))
+        assert len(failures) == 1
+        record = json.loads(failures[0].read_text(encoding="utf-8"))
+        assert record["failure_record"] is True
+        assert record["is_valid_result"] is False
+        assert record["error_type"] == "RequiredMeasurementError"
+        # No valid result document exists for the failed repetition.
+        assert not list(run_dir.glob("*.result.json"))
 
 
 class TestVerifiability:

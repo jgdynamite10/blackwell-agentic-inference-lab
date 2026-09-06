@@ -202,7 +202,14 @@ def as_mock_manifest(document: dict) -> dict:
     document["execution_mode"] = "mock"
     document.pop("model", None)
     document["serving"] = {"engine": "mock", "engine_version": "3.0.0"}
-    for gpu_field in ("gpu_model", "gpu_count", "gpu_memory_gb", "driver_version", "cuda_version"):
+    gpu_fields = (
+        "gpu_model",
+        "gpu_count",
+        "gpu_memory_gb",
+        "driver_version",
+        "driver_max_cuda_version",
+    )
+    for gpu_field in gpu_fields:
         document["host"].pop(gpu_field, None)
     document["cloud"]["comparison_mode"] = "not-applicable"
     return document

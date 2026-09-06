@@ -54,22 +54,68 @@ class TestFullBaselineGate:
         assert "decision-log" in err
 
 
+def pilot_config(tmp_path, comparison_mode="provider-native"):
+    config = {
+        "endpoint": {"base_url": "http://127.0.0.1:8000/v1", "model": "m"},
+        "cloud": {
+            "instance_type": "g2-rtxpro6000-x1",
+            "region": "us-ord",
+            "list_price_usd_per_hour": 3.5,
+            "price_source_date": "2026-09-06",
+        },
+        "model": {
+            "artifact": "a",
+            "revision": "r",
+            "artifact_hash": "sha256:" + "ab" * 32,
+            "precision": "bf16",
+        },
+        "serving": {
+            "engine": "vllm",
+            "engine_version": "0.27.1",
+            "image": "docker.io/vllm/vllm-openai:v0.27.1",
+            "container_digest": "docker.io/vllm/vllm-openai@sha256:" + "cd" * 32,
+        },
+        "host": {
+            "storage_description": "plan NVMe",
+            "network_description": "plan default networking",
+        },
+        "comparison_mode": comparison_mode,
+        "model_verification": {
+            "artifact_dir": str(tmp_path / "model"),
+            "digest_manifest": str(tmp_path / "model.sha256"),
+        },
+    }
+    path = tmp_path / "pilot.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+    return path
+
+
+def pilot_argv(config_path, run_label="pilot-a", run_tag=RUN_TAG, approve=None):
+    phrase = approve or cli.PILOT_APPROVAL_TEMPLATE.format(run_label=run_label)
+    return [
+        "pilot",
+        "--run-tag",
+        run_tag,
+        "--run-label",
+        run_label,
+        "--config",
+        str(config_path),
+        "--approve",
+        phrase,
+    ]
+
+
 class TestPilotGate:
     def test_pilot_refuses_in_hosted_environments(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setenv("CI", "1")
-        config = tmp_path / "pilot.json"
-        config.write_text("{}", encoding="utf-8")
-        assert main(["pilot", "--run-label", "x", "--config", str(config), "--approve", "y"]) == 1
+        config = pilot_config(tmp_path)
+        assert main(pilot_argv(config, approve="y")) == 1
         assert "hosted" in capsys.readouterr().err
 
     def test_pilot_refuses_without_the_exact_approval_phrase(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
-        config = tmp_path / "pilot.json"
-        config.write_text("{}", encoding="utf-8")
-        assert (
-            main(["pilot", "--run-label", "pilot-a", "--config", str(config), "--approve", "ok"])
-            == 1
-        )
+        config = pilot_config(tmp_path)
+        assert main(pilot_argv(config, approve="ok")) == 1
         err = capsys.readouterr().err
         assert "BLOCKED" in err
         assert "nothing was executed" in err
@@ -79,24 +125,86 @@ class TestPilotGate:
     ):
         monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
         monkeypatch.delenv("LAB_RESULTS_DIR", raising=False)
-        config = tmp_path / "pilot.json"
-        config.write_text("{}", encoding="utf-8")
-        phrase = cli.PILOT_APPROVAL_TEMPLATE.format(run_label="pilot-a")
-        assert (
-            main(["pilot", "--run-label", "pilot-a", "--config", str(config), "--approve", phrase])
-            == 3
-        )
+        config = pilot_config(tmp_path)
+        assert main(pilot_argv(config)) == 3
         assert "LAB_RESULTS_DIR" in capsys.readouterr().err
+
+    def test_pilot_rejects_config_labeled_controlled_resource(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path / "external"))
+        config = pilot_config(tmp_path, comparison_mode="controlled-resource")
+        assert main(pilot_argv(config)) == 1
+        err = capsys.readouterr().err
+        assert "provider-native" in err
+        assert "genuinely enforced" in err
+
+    def test_pilot_is_blocked_while_a_lifecycle_operation_is_pending(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        lifecycle.write_pending(paths, run_tag=RUN_TAG, operation="apply", plan_sha256="x")
+        config = pilot_config(tmp_path)
+        assert main(pilot_argv(config)) == 1
+        assert "pending lifecycle operation" in capsys.readouterr().err
+
+    def test_pilot_is_blocked_until_reconciliation_is_clean(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        lifecycle.write_private_json(
+            paths.ledger_path,
+            {
+                "run_tag": RUN_TAG,
+                "reconciled": False,
+                "resources": [{"address": "linode_instance.gpu_baseline"}],
+            },
+        )
+        config = pilot_config(tmp_path)
+        assert main(pilot_argv(config)) == 1
+        assert "not cleanly reconciled" in capsys.readouterr().err
+
+    def test_pilot_fails_visibly_on_fabricated_provenance(self, tmp_path, capsys, monkeypatch):
+        # The ledger and config exist, but nothing genuine backs them: the
+        # provenance observation layer must fail visibly, never trust config.
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        lifecycle.write_private_json(
+            paths.ledger_path,
+            {
+                "run_tag": RUN_TAG,
+                "reconciled": True,
+                "resources": [
+                    {
+                        "address": "linode_instance.gpu_baseline",
+                        "type": "linode_instance",
+                        "provider_id": "42",
+                        "region": "us-ord",
+                    }
+                ],
+            },
+        )
+        config = pilot_config(tmp_path)
+        assert main(pilot_argv(config)) == 1
+        err = capsys.readouterr().err
+        # The failure comes from a genuine observation attempt (no docker /
+        # no model files here), not from accepting the configured values.
+        assert "error:" in err
 
 
 class TestApplyDestroyGates:
-    def test_apply_without_phrase_is_an_error_and_runs_nothing(self, tmp_path, capsys, monkeypatch):
+    def test_apply_without_a_reviewed_saved_plan_refuses(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
         # Hosted markers are present in CI; either refusal path is safe, but
-        # the approval gate must trigger even in a local-looking environment.
+        # the saved-plan gate must trigger even in a local-looking environment.
         monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
         assert main(["apply", "--run-tag", RUN_TAG, "--approve", "sure"]) == 1
-        assert "approval phrase" in capsys.readouterr().err
+        assert "no reviewed apply plan" in capsys.readouterr().err
 
     def test_destroy_without_a_ledger_refuses(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
@@ -105,28 +213,48 @@ class TestApplyDestroyGates:
 
 
 class TestTeardownPlan:
-    def test_teardown_plan_prints_exact_ledger_targets(self, tmp_path, capsys, monkeypatch):
+    def test_teardown_plan_without_a_ledger_refuses(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
-        show_json = {
-            "values": {
-                "root_module": {
-                    "resources": [
-                        {
-                            "address": "linode_instance.gpu_baseline",
-                            "type": "linode_instance",
-                            "name": "gpu_baseline",
-                            "values": {"id": "42", "label": f"bwlab-{RUN_TAG}"},
-                        }
-                    ]
-                }
-            }
-        }
-        ledger = lifecycle.build_ledger(RUN_TAG, show_json)
-        lifecycle.write_ledger(ledger, tmp_path / "infra-ledgers")
-        assert main(["teardown-plan", "--run-tag", RUN_TAG]) == 0
-        plan_doc = json.loads(capsys.readouterr().out)
-        assert plan_doc["targets"] == ["linode_instance.gpu_baseline"]
-        assert plan_doc["resource_count"] == 1
+        assert main(["teardown-plan", "--run-tag", RUN_TAG]) == 1
+        assert "ledger" in capsys.readouterr().err
+
+
+class TestSessionSummary:
+    def test_session_summary_reads_the_external_record(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
+        paths = lifecycle.lifecycle_paths(tmp_path, RUN_TAG)
+        lifecycle.record_session_event(paths, "provisioned", {})
+        lifecycle.record_session_event(paths, "deletion_confirmed", {})
+        assert main(["session-summary", "--run-tag", RUN_TAG, "--hourly-price", "3.5"]) == 0
+        summary = json.loads(capsys.readouterr().out)
+        assert summary["observed_billable_s"] is not None
+        assert summary["estimated_total_cost_usd"] is not None
+
+    def test_session_summary_without_a_record_refuses(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
+        assert main(["session-summary", "--run-tag", RUN_TAG]) == 1
+        assert "session record" in capsys.readouterr().err
+
+
+class TestSanitizedErrors:
+    def test_unexpected_exception_text_is_never_printed(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
+
+        def explode(run_tag, paths):
+            raise RuntimeError("raw provider payload with account-id-999 and /private/path")
+
+        monkeypatch.setattr(
+            cli,
+            "_paths_for",
+            lambda run_tag: (_ for _ in ()).throw(
+                RuntimeError("raw provider payload with account-id-999 and /private/path")
+            ),
+        )
+        assert main(["reconcile", "--run-tag", RUN_TAG]) == 1
+        err = capsys.readouterr().err
+        assert "account-id-999" not in err
+        assert "/private/path" not in err
+        assert "details suppressed" in err
 
 
 class TestOrphanReportGate:
@@ -157,10 +285,18 @@ class TestVerifyResults:
         assert main(["verify-results"]) == 3
         assert "LAB_RESULTS_DIR" in capsys.readouterr().err
 
-    def test_empty_directory_verifies_trivially(self, tmp_path, capsys, monkeypatch):
+    def test_empty_directory_is_a_failure_by_default(self, tmp_path, capsys, monkeypatch):
+        # An empty directory never verifies a required pilot result.
         monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
-        assert main(["verify-results"]) == 0
-        assert json.loads(capsys.readouterr().out)["verified"] == 0
+        assert main(["verify-results"]) == 1
+        report = json.loads(capsys.readouterr().out)
+        assert report["verified"] == 0
+        assert report["ok"] is False
+
+    def test_empty_directory_passes_only_with_allow_empty(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
+        assert main(["verify-results", "--allow-empty"]) == 0
+        assert json.loads(capsys.readouterr().out)["ok"] is True
 
     def test_valid_run_verifies_and_prints_no_absolute_paths(self, persisted_run, capsys):
         tmp_path, _record = persisted_run
