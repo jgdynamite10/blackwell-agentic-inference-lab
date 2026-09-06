@@ -1,7 +1,8 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "run_id": "EXAMPLE-0000-0000-0000-000000000000",
   "is_synthetic_example": true,
+  "execution_mode": "gpu",
   "created_at_utc": "2026-01-01T00:00:00Z",
   "git": {
     "commit": "0000000000000000000000000000000000000000",

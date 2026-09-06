@@ -9,6 +9,7 @@
     "schema_version",
     "run_id",
     "is_synthetic_example",
+    "execution_mode",
     "created_at_utc",
     "git",
     "model",
@@ -20,6 +21,11 @@
     "timing_conditions"
   ],
   "properties": {
+    "execution_mode": {
+      "type": "string",
+      "enum": ["gpu", "mock"],
+      "description": "How the run executed: 'gpu' for a genuine GPU serving endpoint, 'mock' for the offline deterministic mock client (Phase 2). Mock runs must not fabricate GPU host details, and this field — not is_synthetic_example — is the execution-mode indicator."
+    },
     "schema_version": {
       "type": "string",
       "description": "Version of this manifest schema.",
@@ -91,12 +97,12 @@
     "serving": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine", "engine_version", "container_digest"],
+      "required": ["engine", "engine_version"],
       "properties": {
         "engine": {
           "type": "string",
-          "enum": ["vllm", "tensorrt-llm", "nim", "other"],
-          "description": "Serving path."
+          "enum": ["vllm", "tensorrt-llm", "nim", "mock", "other"],
+          "description": "Serving path. 'mock' is the offline deterministic mock client (execution_mode must be 'mock')."
         },
         "engine_version": {
           "type": "string",
@@ -123,16 +129,12 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "gpu_model",
-        "gpu_count",
-        "gpu_memory_gb",
-        "driver_version",
-        "cuda_version",
         "operating_system",
         "cpu_model",
         "vcpu_count",
         "system_memory_gib"
       ],
+      "description": "Host description. GPU fields (gpu_model, gpu_count, gpu_memory_gb, driver_version, cuda_version) are additionally required when execution_mode is 'gpu'; mock runs omit them rather than fabricating values.",
       "properties": {
         "gpu_model": { "type": "string", "description": "e.g. NVIDIA RTX PRO 6000 Blackwell Server Edition" },
         "gpu_count": { "type": "integer", "minimum": 1 },
@@ -246,5 +248,46 @@
         "notes": { "type": "string", "description": "Any other timing-relevant conditions (must contain no sensitive metadata)." }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "execution_mode": { "const": "gpu" } },
+        "required": ["execution_mode"]
+      },
+      "then": {
+        "properties": {
+          "host": {
+            "required": [
+              "gpu_model",
+              "gpu_count",
+              "gpu_memory_gb",
+              "driver_version",
+              "cuda_version",
+              "operating_system",
+              "cpu_model",
+              "vcpu_count",
+              "system_memory_gib"
+            ]
+          },
+          "serving": {
+            "required": ["engine", "engine_version", "container_digest"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "execution_mode": { "const": "mock" } },
+        "required": ["execution_mode"]
+      },
+      "then": {
+        "properties": {
+          "serving": {
+            "properties": { "engine": { "const": "mock" } }
+          }
+        }
+      }
+    }
+  ]
 }

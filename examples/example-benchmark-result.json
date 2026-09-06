@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "run_id": "EXAMPLE-0000-0000-0000-000000000000",
   "is_synthetic_example": true,
   "manifest_ref": "example-run-manifest.json",
@@ -12,12 +12,12 @@
     "mean_quality_score": 0.87
   },
   "latency_ms": {
-    "task_completion": { "mean": 42000, "p50": 40000, "p90": 55000, "p95": 60000, "p99": 66000, "min": 30000, "max": 67000, "count": 10 },
-    "time_to_first_token": { "mean": 350, "p50": 320, "p90": 480, "p95": 520, "p99": 600, "min": 250, "max": 610, "count": 42 },
+    "task_completion": { "mean": 42000, "p50": 40000, "p90": 55000, "p95": null, "p99": null, "min": 30000, "max": 67000, "count": 10 },
+    "time_to_first_token": { "mean": 350, "p50": 320, "p90": 480, "p95": null, "p99": null, "min": 250, "max": 610, "count": 42 },
     "inter_token": { "mean": 12, "p50": 11, "p90": 16, "p95": 18, "p99": 25, "min": 8, "max": 30, "count": 39000 },
-    "queue_time": { "mean": 15, "p50": 10, "p90": 30, "p95": 40, "p99": 55, "min": 2, "max": 60, "count": 42 },
-    "model_serving_time": { "mean": 9800, "p50": 9200, "p90": 13000, "p95": 14500, "p99": 16000, "min": 6800, "max": 16200, "count": 42 },
-    "tool_execution_time": { "mean": 120, "p50": 120, "p90": 130, "p95": 132, "p99": 140, "min": 100, "max": 141, "count": 63 }
+    "queue_time": { "mean": 15, "p50": 10, "p90": 30, "p95": null, "p99": null, "min": 2, "max": 60, "count": 42 },
+    "model_serving_time": { "mean": 9800, "p50": 9200, "p90": 13000, "p95": null, "p99": null, "min": 6800, "max": 16200, "count": 42 },
+    "tool_execution_time": { "mean": 120, "p50": 120, "p90": 130, "p95": null, "p99": null, "min": 100, "max": 141, "count": 63 }
   },
   "throughput": {
     "output_tokens_per_second": 85.3,
@@ -25,6 +25,7 @@
     "successful_tasks_per_gpu_hour": 8.8
   },
   "gpu": {
+    "telemetry_available": true,
     "utilization_mean_pct": 71.5,
     "utilization_p95_pct": 96.0,
     "memory_peak_gib": 78.2,
