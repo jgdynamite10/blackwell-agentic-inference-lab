@@ -241,7 +241,7 @@ flowchart TB
     end
     subgraph akamai["Akamai Cloud — ONE tagged instance (project + unique run tag + ttl)"]
         subgraph inst["RTX PRO 6000 Blackwell SE GPU Linode (1 GPU / 96 GB)"]
-            serving["Model-serving container<br/>vLLM pinned by immutable digest,<br/>BF16, model artifact digest-verified<br/>BEFORE serving; health/readiness checks"]
+            serving["Model-serving container<br/>vLLM pinned by immutable digest,<br/>open NVIDIA kernel modules,<br/>BF16, model artifact digest-verified<br/>BEFORE serving; health/readiness checks"]
             driver["Benchmark driver<br/>Phase 2 runner + OpenAI-compatible<br/>client (local endpoint only,<br/>RunMode.REAL)"]
             telem["Telemetry collection<br/>host/CPU/memory/OS/driver/CUDA facts,<br/>nvidia-smi GPU sampling —<br/>unavailable is reported, never fabricated"]
             limits["Resource controls<br/>cgroup joint envelope<br/>(controlled-resource mode) or<br/>no caps (provider-native mode)"]
@@ -308,6 +308,14 @@ explicitly authorized measurement:
   exactly the run's tagged resources, then the read-only orphan check
   confirming nothing billable remains
   ([cost-guardrails.md](cost-guardrails.md)).
+- **Open GPU stack and pinned acquisition.** Blackwell uses NVIDIA open
+  kernel modules (`nvidia-driver-580-server-open`); the proprietary
+  `nvidia-driver-580-server` package is rejected. The NVIDIA apt key is
+  content-hashed before any repository or package installation. Model
+  weights are downloaded through the digest-pinned vLLM image into a
+  revision-specific staging directory and atomically promoted only after
+  the per-file digest manifest is written. These host pins remain offline
+  candidates until verified on the GPU ([D-0015](decision-log.md)).
 - **Truthful measurement.** The real benchmark path preserves the Phase 2
   timing, evaluator, accounting, and evidence contracts; transport chunks
   are never tokens; usage and engine queue telemetry are collected only when

@@ -608,13 +608,24 @@ baseline.
    Nemotron 3.5 Lightning BF16. v0.28.0 was evaluated and not selected: it
    is newer and documents additional SM12x work, which is not a sufficient
    reason to override the named recipe.
-3. **Host and probe pins.** Record the official public Ubuntu 24.04 and
-   NVIDIA Container Toolkit versions, repository key/list, and the
-   digest-pinned CUDA 13.0.0 GPU-probe image documented in
-   [infra/akamai/README.md](../infra/akamai/README.md). The Nemotron BF16
-   revision is the public Hugging Face commit
-   `a9904d24bcc1d289a1950fa9d2b978c47cf903b9`. The complete per-file model
-   digest manifest remains unresolved until the authorized live download.
+3. **Host and probe pins.** Record the official public Ubuntu 24.04
+   **open** driver `nvidia-driver-580-server-open=580.173.02-0ubuntu0.24.04.1`
+   (Blackwell requires NVIDIA open kernel modules; the proprietary
+   `nvidia-driver-580-server` package is rejected), NVIDIA Container Toolkit
+   `1.20.0-1`, the official repository list, and the SHA-256 of the official
+   NVIDIA apt key
+   (`c880576d6cf75a48e5027a871bac70fd0421ab07d2b55f30877b21f1c87959c9`).
+   Bootstrap downloads that key to a temp file, verifies the digest, and
+   installs the keyring atomically; a mismatch performs no repository or
+   package installation. The digest-pinned CUDA 13.0.0 GPU-probe image is
+   documented in [infra/akamai/README.md](../infra/akamai/README.md). The
+   Nemotron BF16 revision is the public Hugging Face commit
+   `a9904d24bcc1d289a1950fa9d2b978c47cf903b9`. Model acquisition uses the
+   digest-pinned vLLM image (overridden entrypoint), a revision-specific
+   staging directory, and atomic promotion; an unmanifested directory is
+   untrusted. The complete per-file model digest manifest remains unresolved
+   until the authorized live download. These pins remain offline candidates
+   until verified empirically on the GPU host.
 4. **Cost convention.** Akamai access for this project is provided without
    a direct compute charge. Normalized economic cost continues to use the
    applicable $3/hour planning rate. No account or employment information is
@@ -629,4 +640,8 @@ darwin_arm64-only extra `h1:` line made saved-plan lock verification fail
 after the committed lockfile was restored. A multi-platform official lock
 plus read-only init removes that class of drift without weakening digest
 checks. Offline pin resolution is required before the next authorized live
-session so bootstrap cannot install floating or empty versions.
+session so bootstrap cannot install floating or empty versions. The same-day
+correction to the open-kernel driver package, NVIDIA key-content pin, real
+`bootstrap.env` enforcement, and atomic containerized model fetch happened
+before any live GPU session and does not change the still-unvalidated
+status of these candidates.

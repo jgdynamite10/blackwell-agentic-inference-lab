@@ -119,8 +119,10 @@ benchmark.
    digest-pinned CUDA `nvidia-smi` probe, serving-image digest pull, and
    container CUDA runtime check.
 8. **Pinned Nemotron download and digest manifest** — `fetch-model.sh`
-   at the pinned Hugging Face revision; write and verify the per-file
-   sha256 manifest (not present in Git).
+   uses the digest-pinned vLLM image (overridden entrypoint), downloads the
+   exact revision into a revision-specific staging directory, writes the
+   per-file sha256 manifest only after success, and atomically promotes
+   (not present in Git). An unmanifested directory is untrusted.
 9. **Final pilot-config digest and approval** — private config outside Git;
    `blackwell-cloud pilot` with the config SHA-256 approval phrase.
 10. **Three diagnostic cells** — interactive/1, batch-heavy/4,
@@ -271,9 +273,10 @@ run `teardown-plan` / `destroy` from the laptop against the recorded ledger.
 
 ### 6. Bootstrap the instance
 
-Copy `bootstrap/` to the instance, copy `bootstrap.env.example` to
-`bootstrap.env`, and fill in **every** pinned package version, NVIDIA
-repository URL/list entry, and digest-pinned CUDA probe image.
+Copy `bootstrap/` to the instance and copy `bootstrap.env.example` to
+`bootstrap.env` without substituting `latest`, ranges, or other floating
+values. The **actual** `bootstrap.env` is validated against the reviewed
+example before any privileged mutation.
 
 **GPU stack first (may require reboot):**
 
@@ -299,9 +302,13 @@ If you run bootstrap once before `fetch-model.sh` to install the GPU stack,
 you **must re-run** `bootstrap.sh` afterward so model verification, serving
 image checks, and readiness run against the populated artifact.
 
-Bootstrap refuses empty version pins and never installs “latest”. The GPU
-probe uses a digest-pinned NVIDIA CUDA image and runs `nvidia-smi` inside the
-container to verify exactly one RTX PRO 6000 Blackwell GPU.
+Bootstrap refuses empty, floating, wildcard, or range pins, an unapproved
+or proprietary driver package, malformed digests/revisions, and any value
+that differs from the reviewed example. Host commands and the active
+kernel's headers must already be present; bootstrap will not install an
+unpinned headers metapackage. The GPU probe uses a digest-pinned NVIDIA
+CUDA image and runs `nvidia-smi` inside the container to verify exactly one
+RTX PRO 6000 Blackwell GPU.
 
 ### 7. Short pilot (provider-native only)
 
@@ -362,20 +369,28 @@ The orphan report is read-only and never deletes anything.
 
 ## Bootstrap (`bootstrap/`)
 
-`bootstrap.sh` is **idempotent** (marker files; safe to re-run) and refuses
-to mutate the host until every package version, repository pin, and digest is
-frozen:
+`bootstrap.sh` is **idempotent** (marker files; safe to re-run) and validates
+the actual `bootstrap.env` against `bootstrap.env.example` before any apt,
+curl, gpg, dpkg, or Docker mutation. Markers never skip exact installed
+version checks. A wrong preinstalled package is explicitly converged to the
+reviewed version or refused. The NVIDIA apt key is downloaded to a temp
+file and SHA-256 verified before the keyring or list is written; a mismatch
+installs nothing. `fetch-model.sh` does not install a host Hugging Face CLI.
 
 1. OS assumption check (Ubuntu 24.04 LTS).
-2. Pinned NVIDIA driver + Container Toolkit install (exact package versions;
-   pinned apt repository key/list); reboot and post-reboot validation.
+2. Pinned NVIDIA **open** driver + Container Toolkit install (exact package
+   versions; key downloaded to a temp file and SHA-256 verified before the
+   keyring or list is written); reboot and post-reboot validation of the
+   exact package, open kernel-module flavor, and the single RTX PRO 6000.
+   Completion markers never skip those checks.
 3. Pinned Docker runtime install (exact package version).
 4. Digest-pinned NVIDIA CUDA probe image: `nvidia-smi` runs **inside** the
    container; verifies exactly one RTX PRO 6000 Blackwell GPU.
 5. Serving image pulled **by immutable digest** (`VLLM_IMAGE_DIGEST`).
 6. Container CUDA runtime validated separately from the driver's max CUDA.
 7. Model artifact digest verification before serving (requires `fetch-model.sh`
-   to have populated the artifact and manifest first).
+   to download the exact revision through the digest-pinned vLLM image into
+   staging, write the manifest only after success, and atomically promote).
 8. Serving bound to loopback only; health and readiness checks.
 9. Workload watchdog — **NOT a billing-control substitute**.
 
@@ -391,9 +406,10 @@ Candidate values are **not** a completed pilot and **not** a frozen baseline.
 
 | Component | Exact version or digest | Target platform | Official source | Retrieved | Status | Live validation still required |
 | --- | --- | --- | --- | --- | --- | --- |
-| NVIDIA driver package | `nvidia-driver-580-server=580.173.02-0ubuntu0.24.04.1` | Ubuntu 24.04 `linux/amd64` | [Ubuntu noble package](https://packages.ubuntu.com/noble/amd64/nvidia-driver-580-server) | 2026-09-07 | Official package metadata | Running driver after reboot; `nvidia-smi` on RTX PRO 6000 Blackwell Server Edition |
+| NVIDIA driver package | `nvidia-driver-580-server-open=580.173.02-0ubuntu0.24.04.1` | Ubuntu 24.04 `linux/amd64` | [Ubuntu noble open kernel metapackage](https://packages.ubuntu.com/noble/amd64/nvidia-driver-580-server-open) | 2026-09-07 | Official package metadata | Exact installed version, Dual MIT/GPL open module license (not proprietary `nvidia-driver-580-server`), one RTX PRO 6000 after reboot |
 | NVIDIA Container Toolkit | `1.20.0-1` | Ubuntu 24.04 `linux/amd64` | [NVIDIA install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html); [amd64 Packages](https://nvidia.github.io/libnvidia-container/stable/deb/amd64/Packages) | 2026-09-07 | Official docs + repo index | `nvidia-ctk` + GPU probe after install |
-| NVIDIA repo key | `https://nvidia.github.io/libnvidia-container/gpgkey` | Ubuntu apt | [NVIDIA install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) | 2026-09-07 | Official ASCII-armored PGP key | apt signed-by install on the host |
+| NVIDIA repo key URL | `https://nvidia.github.io/libnvidia-container/gpgkey` | Ubuntu apt | [NVIDIA install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) | 2026-09-07 | Official key URL | Content must match the recorded SHA-256 before any apt install |
+| NVIDIA repo key SHA-256 | `c880576d6cf75a48e5027a871bac70fd0421ab07d2b55f30877b21f1c87959c9` | armored key bytes | Official key downloaded for hashing only (3195 bytes; no packages installed) | 2026-09-07 | SHA-256 of the official armored key | Re-verify on the host; mismatch installs no keyring, list, or packages |
 | NVIDIA repo list | `deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/amd64 /` | Ubuntu 24.04 `linux/amd64` | Official list file with documented `signed-by` transform; `$(ARCH)` resolved to `amd64` | 2026-09-07 | Official repo list | apt-get update on the host |
 | Docker package | `docker.io=29.1.3-0ubuntu3~24.04.2` | Ubuntu 24.04 `linux/amd64` | [Ubuntu noble package](https://packages.ubuntu.com/noble/amd64/docker.io) | 2026-09-07 | Official package metadata | docker service + NVIDIA runtime on the host |
 | CUDA GPU-probe image tag | `nvcr.io/nvidia/cuda:13.0.0-base-ubuntu24.04` | `linux/amd64` host | NVIDIA NGC / Docker Hub `nvidia/cuda` | 2026-09-07 | Official public tag | `nvidia-smi` inside the digest-pinned probe |

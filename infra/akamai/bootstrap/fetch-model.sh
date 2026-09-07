@@ -1,88 +1,134 @@
 #!/usr/bin/env bash
-# Credential-safe model acquisition for the pinned baseline artifact.
+# Credential-safe, atomically promoted model acquisition.
 #
-# Run manually by the operator ON THE PROVISIONED INSTANCE, in an
-# owner-approved session — never in the hosted Cloud Agent and never in CI.
+# Uses the digest-pinned vLLM image (overridden entrypoint) — never an
+# unpinned host Hugging Face CLI install.
 #
 # Credential rules (AGENTS.md sections 3-4; decision D-0013):
-# - An access token (if the artifact requires one) is read ONLY from the
-#   HF_TOKEN environment variable of the calling shell. It is never accepted
-#   as an argument, never echoed, never written to any file, never placed in
-#   Terraform state, and never logged. Unset it after use
-#   (`unset HF_TOKEN`).
-# - This script never enables shell tracing and never prints the
-#   environment.
+# - HF_TOKEN, if required, is passed to the container only as an inherited
+#   environment variable name (`-e HF_TOKEN`). It is never accepted as an
+#   argument, never expanded into argv, never echoed, and never written to
+#   a file. Unset it after use (`unset HF_TOKEN`).
 #
-# Behavior (idempotent):
-# 1. Downloads MODEL_ARTIFACT at the exact pinned MODEL_REVISION into
-#    MODEL_DIR (skips the download when the directory already verifies).
-# 2. Creates the sha256sum digest manifest at MODEL_DIGEST_MANIFEST when it
-#    does not exist yet (first acquisition freezes the digests), or
-# 3. Verifies every file against the existing manifest (later runs prove the
-#    artifact is byte-identical to the frozen one).
+# Acquisition rules:
+# - download the exact MODEL_REVISION into a revision-specific staging dir;
+# - treat an unmanifested MODEL_DIR as incomplete/untrusted;
+# - never skip download merely because MODEL_DIR is nonempty;
+# - write the per-file SHA-256 manifest only after a successful download;
+# - atomically promote staging to MODEL_DIR;
+# - verify an existing manifest before reuse.
 
 set -euo pipefail
-set +x  # defensive: never trace (a trace could echo the environment)
+set +x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/bootstrap.env"
+EXAMPLE_FILE="${SCRIPT_DIR}/bootstrap.env.example"
+
+# shellcheck source=pins.sh
+. "${SCRIPT_DIR}/pins.sh"
 
 log() { printf '[bwlab-fetch-model] %s\n' "$*"; }
 fail() { printf '[bwlab-fetch-model] ERROR: %s\n' "$*" >&2; exit 1; }
 
 [ "$#" -eq 0 ] || fail "this script takes no arguments (tokens come only from the HF_TOKEN environment variable)"
 
-[ -f "${ENV_FILE}" ] || fail "bootstrap.env not found (copy bootstrap.env.example and fill in pins)"
-# shellcheck disable=SC1090
-. "${ENV_FILE}"
+load_and_validate_bootstrap_env "${ENV_FILE}" "${EXAMPLE_FILE}"
 
-[ -n "${MODEL_ARTIFACT:-}" ] || fail "MODEL_ARTIFACT pin is empty in bootstrap.env"
-[ -n "${MODEL_REVISION:-}" ] || fail "MODEL_REVISION pin is empty in bootstrap.env (the exact revision must be pinned before download)"
-[ -n "${MODEL_DIR:-}" ] || fail "MODEL_DIR pin is empty in bootstrap.env"
-[ -n "${MODEL_DIGEST_MANIFEST:-}" ] || fail "MODEL_DIGEST_MANIFEST pin is empty in bootstrap.env"
+STAGE_DIR="${MODEL_DIR}.rev-${MODEL_REVISION}.staging"
+PINNED_REF="${VLLM_IMAGE%%@*}@${VLLM_IMAGE_DIGEST}"
 
-command -v hf >/dev/null 2>&1 || command -v huggingface-cli >/dev/null 2>&1 \
-  || fail "the Hugging Face CLI is not installed (pip install 'huggingface_hub[cli]')"
-
-download_model() {
-  if [ -d "${MODEL_DIR}" ] && [ -n "$(ls -A "${MODEL_DIR}" 2>/dev/null)" ]; then
-    log "model directory already populated; skipping download (verification still runs)"
-    return
-  fi
-  log "downloading ${MODEL_ARTIFACT} at pinned revision ${MODEL_REVISION}"
-  # The CLI reads HF_TOKEN from the environment on its own: the token is
-  # never passed as an argument, so it cannot appear in `ps`, shell history,
-  # or logs.
-  mkdir -p "${MODEL_DIR}"
-  if command -v hf >/dev/null 2>&1; then
-    hf download "${MODEL_ARTIFACT}" --revision "${MODEL_REVISION}" --local-dir "${MODEL_DIR}"
-  else
-    huggingface-cli download "${MODEL_ARTIFACT}" --revision "${MODEL_REVISION}" --local-dir "${MODEL_DIR}"
-  fi
-  # Remove CLI cache metadata so the manifest covers model files only.
-  rm -rf "${MODEL_DIR}/.cache" "${MODEL_DIR}/.huggingface" 2>/dev/null || true
+manifest_verifies() {
+  local directory="$1" manifest="$2"
+  [ -d "${directory}" ] || return 1
+  [ -f "${manifest}" ] || return 1
+  ( cd "${directory}" && sha256sum --check --quiet --strict "${manifest}" )
 }
 
-create_or_verify_manifest() {
-  if [ -f "${MODEL_DIGEST_MANIFEST}" ]; then
-    log "verifying the downloaded artifact against the FROZEN digest manifest"
-    ( cd "${MODEL_DIR}" && sha256sum --check --quiet --strict "${MODEL_DIGEST_MANIFEST}" ) \
-      || fail "digest verification FAILED: the artifact does not match the frozen manifest"
-    log "artifact verified against ${MODEL_DIGEST_MANIFEST}"
-    return
-  fi
-  log "creating the digest manifest (first acquisition freezes the digests)"
-  local tmp_manifest
-  tmp_manifest="$(mktemp "${MODEL_DIGEST_MANIFEST}.XXXXXX.tmp")"
-  ( cd "${MODEL_DIR}" && find . -type f ! -name '*.tmp' -print0 \
-      | LC_ALL=C sort -z \
-      | xargs -0 sha256sum ) > "${tmp_manifest}" \
-    || { rm -f "${tmp_manifest}"; fail "digest manifest creation failed"; }
-  chmod 0600 "${tmp_manifest}"
-  mv "${tmp_manifest}" "${MODEL_DIGEST_MANIFEST}"
-  log "digest manifest written to ${MODEL_DIGEST_MANIFEST} — record and FREEZE it with the baseline"
+quarantine_untrusted_model_dir() {
+  local stamp dest
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  dest="${MODEL_DIR}.untrusted-${stamp}"
+  log "existing MODEL_DIR is unmanifested or does not match the manifest; quarantining as untrusted"
+  mv "${MODEL_DIR}" "${dest}"
+  rm -f "${MODEL_DIGEST_MANIFEST}"
 }
 
-download_model
-create_or_verify_manifest
+write_manifest_from() {
+  local source_dir="$1" dest="$2" tmp found
+  tmp="$(mktemp "${dest}.XXXXXX")"
+  found=0
+  (
+    cd "${source_dir}" || exit 1
+    while IFS= read -r rel; do
+      [ -f "${rel}" ] || continue
+      sha256sum "${rel}" || exit 1
+      found=1
+    done < <(find . -type f ! -name '*.tmp' ! -path './.cache/*' ! -path './.huggingface/*' | LC_ALL=C sort)
+    [ "${found}" = 1 ]
+  ) > "${tmp}" \
+    || { rm -f "${tmp}"; fail "digest manifest creation failed; leaving the final directory uncertified"; }
+  [ -s "${tmp}" ] || { rm -f "${tmp}"; fail "digest manifest would be empty; refusing to certify"; }
+  chmod 0600 "${tmp}"
+  mv "${tmp}" "${dest}"
+}
+
+download_revision_into_staging() {
+  command -v docker >/dev/null 2>&1 || fail "docker is required; fetch-model uses the digest-pinned vLLM image, not a host Hugging Face CLI"
+  if ! docker image inspect "${PINNED_REF}" >/dev/null 2>&1; then
+    log "pulling digest-pinned acquisition image ${PINNED_REF}"
+    docker pull "${PINNED_REF}"
+  fi
+  mkdir -p "${STAGE_DIR}"
+  log "downloading ${MODEL_ARTIFACT} at exact revision ${MODEL_REVISION} into staging"
+  # -e HF_TOKEN passes the variable NAME only. The value is never on argv.
+  docker run --rm \
+    --entrypoint python3 \
+    -e HF_TOKEN \
+    -e MODEL_ARTIFACT \
+    -e MODEL_REVISION \
+    -e MODEL_STAGE_DIR="${STAGE_DIR}" \
+    -v "${STAGE_DIR}:${STAGE_DIR}" \
+    "${PINNED_REF}" \
+    -c 'from huggingface_hub import snapshot_download
+import os
+snapshot_download(
+    repo_id=os.environ["MODEL_ARTIFACT"],
+    revision=os.environ["MODEL_REVISION"],
+    local_dir=os.environ["MODEL_STAGE_DIR"],
+)
+' || fail "exact-revision download failed; staging is incomplete and no manifest was written"
+  rm -rf "${STAGE_DIR}/.cache" "${STAGE_DIR}/.huggingface" 2>/dev/null || true
+  [ -n "$(ls -A "${STAGE_DIR}" 2>/dev/null)" ] \
+    || fail "staging directory is empty after download; refusing to certify"
+}
+
+promote_staging() {
+  write_manifest_from "${STAGE_DIR}" "${MODEL_DIGEST_MANIFEST}"
+  mkdir -p "$(dirname "${MODEL_DIR}")"
+  if [ -e "${MODEL_DIR}" ]; then
+    fail "MODEL_DIR exists during promote; refusing to overwrite a directory that was not quarantined"
+  fi
+  mv "${STAGE_DIR}" "${MODEL_DIR}"
+  manifest_verifies "${MODEL_DIR}" "${MODEL_DIGEST_MANIFEST}" \
+    || fail "promoted directory failed digest verification; refusing to treat it as complete"
+  log "atomically promoted staging to ${MODEL_DIR} and certified the digest manifest"
+}
+
+acquire_model() {
+  if [ -d "${MODEL_DIR}" ] && manifest_verifies "${MODEL_DIR}" "${MODEL_DIGEST_MANIFEST}"; then
+    log "completed download already verifies against the digest manifest; reusing it"
+    return
+  fi
+  if [ -d "${MODEL_DIR}" ]; then
+    quarantine_untrusted_model_dir
+  elif [ -f "${MODEL_DIGEST_MANIFEST}" ]; then
+    log "digest manifest exists without a matching MODEL_DIR; removing the uncertified manifest"
+    rm -f "${MODEL_DIGEST_MANIFEST}"
+  fi
+  download_revision_into_staging
+  promote_staging
+}
+
+acquire_model
 log "done. If HF_TOKEN was set for this session, unset it now: unset HF_TOKEN"

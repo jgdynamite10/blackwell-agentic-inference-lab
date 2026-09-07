@@ -35,6 +35,8 @@ modified, or deleted without explicit owner approval, regardless of cost.
      applicable **$3/hour** planning rate (the owner-observed Seattle catalog
      base price). That rate is an economic-normalization convention for
      session summaries and planning estimates, not a claim about an invoice.
+     Bootstrap fail-closed pin, key-content, and exact-package checks do not
+     change that billing rule: only deletion stops charges.
 4. **No reservations or commitments.** On-demand (or owner-approved Spot for
    non-measurement setup work) only. Committed-use discounts, savings plans,
    and reservations require a separate owner decision.

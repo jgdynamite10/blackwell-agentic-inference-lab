@@ -13,11 +13,16 @@ from collections.abc import Mapping
 
 #: Installation pins that must be exact package or repository material
 #: before bootstrap mutates a host. Empty or floating values fail closed.
+APPROVED_DRIVER_PACKAGE = "nvidia-driver-580-server-open"
+PROPRIETARY_DRIVER_PACKAGE = "nvidia-driver-580-server"
+APPROVED_DRIVER_PACKAGE_VERSION = "580.173.02-0ubuntu0.24.04.1"
+
 INSTALLATION_PINS = (
     "NVIDIA_DRIVER_PACKAGE",
     "NVIDIA_DRIVER_PACKAGE_VERSION",
     "NVIDIA_CTK_PACKAGE_VERSION",
     "NVIDIA_REPO_KEY_URL",
+    "NVIDIA_REPO_KEY_SHA256",
     "NVIDIA_REPO_LIST",
     "DOCKER_PACKAGE",
     "DOCKER_PACKAGE_VERSION",
@@ -106,6 +111,10 @@ def _looks_floating(value: str) -> bool:
         return True
     if "/latest" in lowered:
         return True
+    if any(token in value for token in ("*", "?")):
+        return True
+    if value.startswith((">=", "<=", ">", "<", "^")):
+        return True
     return False
 
 
@@ -140,9 +149,28 @@ def validate_candidate_pins(text: str) -> list[str]:
         if value and not _DIGEST_RE.fullmatch(value):
             problems.append(f"{key} must be an immutable sha256:<64-hex> digest")
 
+    key_digest = assignments.get("NVIDIA_REPO_KEY_SHA256", "")
+    if key_digest and not (
+        _DIGEST_RE.fullmatch(key_digest) or re.fullmatch(r"[a-fA-F0-9]{64}", key_digest)
+    ):
+        problems.append("NVIDIA_REPO_KEY_SHA256 must be the 64-hex SHA-256 of the official key")
+
     revision = assignments.get("MODEL_REVISION", "")
     if revision and not _REVISION_RE.fullmatch(revision):
         problems.append("MODEL_REVISION must be the exact 40-character Hugging Face commit")
+
+    driver = assignments.get("NVIDIA_DRIVER_PACKAGE", "")
+    if driver == PROPRIETARY_DRIVER_PACKAGE:
+        problems.append(
+            "proprietary nvidia-driver-580-server is rejected; Blackwell requires open modules"
+        )
+    elif driver and driver != APPROVED_DRIVER_PACKAGE:
+        problems.append(f"NVIDIA_DRIVER_PACKAGE must be {APPROVED_DRIVER_PACKAGE}")
+    version = assignments.get("NVIDIA_DRIVER_PACKAGE_VERSION", "")
+    if version and version != APPROVED_DRIVER_PACKAGE_VERSION:
+        problems.append(
+            "NVIDIA_DRIVER_PACKAGE_VERSION must equal the reviewed open-driver candidate"
+        )
 
     image = assignments.get("VLLM_IMAGE", "")
     if image.endswith(":latest") or (image and _looks_floating(image)):

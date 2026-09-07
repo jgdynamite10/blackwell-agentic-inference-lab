@@ -4,41 +4,35 @@
 # Run manually by the operator (root) after provisioning:
 #   scp -r infra/akamai/bootstrap <host>:/opt/bwlab-bootstrap
 #   ssh <host> 'cd /opt/bwlab-bootstrap && cp bootstrap.env.example bootstrap.env'
-#   # fill in the pinned values, then:
 #   ssh <host> '/opt/bwlab-bootstrap/bootstrap.sh'
 #
-# Design (decisions D-0012, D-0013):
-# - IDEMPOTENT: every step checks its own outcome before acting; re-running
-#   after a failure (or after the required reboot) resumes safely. Marker
-#   files under $STATE_DIR record completed steps.
-# - PINNED GPU-STACK ROUTE: the generic Ubuntu image is NOT assumed to ship
-#   an NVIDIA driver or the NVIDIA Container Toolkit. This script installs
-#   the exact pinned driver and toolkit packages itself, then requires a
-#   reboot and a post-reboot re-run that validates the running stack. Exit
-#   code 2 means "reboot, then re-run bootstrap.sh".
-# - PINNED INPUTS: OS, driver package, container-toolkit package, serving
-#   image (immutable digest), GPU probe image (immutable digest), model
-#   artifact revision, and digest manifest are pinned in bootstrap.env; the
-#   script REFUSES to serve when a pin is missing.
-# - VERIFIED: host driver/max-CUDA compatibility AND the container's actual
-#   CUDA runtime are checked separately (the nvidia-smi banner is the
-#   driver's maximum supported CUDA, not the container runtime), and every
-#   model file is verified against the frozen sha256 manifest BEFORE serving.
-# - This script downloads the container image; the model is acquired
-#   separately by fetch-model.sh. Both run ONLY on the provisioned instance
-#   in an owner-approved session — never in the hosted Cloud Agent, never in
-#   CI. No token is ever accepted as an argument or written to any file.
+# Design (decisions D-0012, D-0013, D-0015):
+# - VALIDATED FIRST: every mandatory pin is checked against the reviewed
+#   candidate baseline BEFORE any apt, curl, gpg, dpkg, or Docker mutation.
+# - OPEN KERNEL MODULES: Blackwell requires nvidia-driver-580-server-open.
+#   The proprietary nvidia-driver-580-server package is rejected.
+# - IDEMPOTENT BUT VERIFIED: markers never skip exact version or key-content
+#   checks. A preinstalled wrong version fails or is explicitly converged.
+# - PINNED KEY CONTENT: the NVIDIA apt key is downloaded to a temp file,
+#   SHA-256 verified, then installed atomically. A mismatch installs nothing.
 #
 # The watchdog it installs limits runaway WORKLOAD only. It is NOT a billing
-# control: on Akamai a powered-off instance still bills. Deleting the
-# instance (owner-approved teardown) is the only way to stop charges.
+# control: on Akamai a powered-off instance still bills.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/bootstrap.env"
-STATE_DIR="/var/lib/bwlab-bootstrap"
+EXAMPLE_FILE="${SCRIPT_DIR}/bootstrap.env.example"
+STATE_DIR="${BWLAB_BOOTSTRAP_STATE_DIR:-/var/lib/bwlab-bootstrap}"
+KEYRING_DIR="${BWLAB_KEYRING_DIR:-/usr/share/keyrings}"
+APT_LIST_DIR="${BWLAB_APT_LIST_DIR:-/etc/apt/sources.list.d}"
+KEYRING_PATH="${KEYRING_DIR}/nvidia-container-toolkit-keyring.gpg"
+APT_LIST_PATH="${APT_LIST_DIR}/nvidia-container-toolkit.list"
 REBOOT_REQUIRED_EXIT=2
+
+# shellcheck source=pins.sh
+. "${SCRIPT_DIR}/pins.sh"
 
 log() { printf '[bwlab-bootstrap] %s\n' "$*"; }
 fail() { printf '[bwlab-bootstrap] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -46,35 +40,45 @@ fail() { printf '[bwlab-bootstrap] ERROR: %s\n' "$*" >&2; exit 1; }
 step_done() { [ -f "${STATE_DIR}/$1.done" ]; }
 mark_done() { mkdir -p "${STATE_DIR}"; : > "${STATE_DIR}/$1.done"; }
 
-# --- configuration -----------------------------------------------------------
+# Pin validation runs in the executed-script path below, before main() and
+# before any privileged mutation. The file can be sourced by tests.
 
-[ -f "${ENV_FILE}" ] || fail "bootstrap.env not found (copy bootstrap.env.example and fill in pins)"
-# shellcheck disable=SC1090
-. "${ENV_FILE}"
+# --- helpers ----------------------------------------------------------------
 
-require_pin() {
-  local name="$1" value="${2:-}"
-  [ -n "${value}" ] || fail "required pin ${name} is empty in bootstrap.env (pins are frozen before serving)"
+require_host_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "required host command $1 is absent; refusing to mutate the host (will not install an unpinned substitute)"
 }
 
-require_pin VLLM_IMAGE "${VLLM_IMAGE:-}"
-require_pin MODEL_ARTIFACT "${MODEL_ARTIFACT:-}"
-require_pin MODEL_DIR "${MODEL_DIR:-}"
-require_pin MODEL_DIGEST_MANIFEST "${MODEL_DIGEST_MANIFEST:-}"
-require_pin NVIDIA_DRIVER_PACKAGE "${NVIDIA_DRIVER_PACKAGE:-}"
-require_pin NVIDIA_DRIVER_PACKAGE_VERSION "${NVIDIA_DRIVER_PACKAGE_VERSION:-}"
-require_pin NVIDIA_CTK_PACKAGE_VERSION "${NVIDIA_CTK_PACKAGE_VERSION:-}"
-require_pin NVIDIA_REPO_KEY_URL "${NVIDIA_REPO_KEY_URL:-}"
-require_pin NVIDIA_REPO_LIST "${NVIDIA_REPO_LIST:-}"
-require_pin DOCKER_PACKAGE "${DOCKER_PACKAGE:-}"
-require_pin DOCKER_PACKAGE_VERSION "${DOCKER_PACKAGE_VERSION:-}"
-require_pin MIN_DRIVER_BRANCH "${MIN_DRIVER_BRANCH:-}"
-require_pin DRIVER_MAX_CUDA_MAJOR "${DRIVER_MAX_CUDA_MAJOR:-}"
-require_pin GPU_PROBE_IMAGE "${GPU_PROBE_IMAGE:-}"
-require_pin GPU_PROBE_EXPECTED_GPU "${GPU_PROBE_EXPECTED_GPU:-}"
-require_pin SERVED_MODEL_NAME "${SERVED_MODEL_NAME:-}"
-require_pin SERVING_PORT "${SERVING_PORT:-}"
-require_pin WATCHDOG_IDLE_MINUTES "${WATCHDOG_IDLE_MINUTES:-}"
+installed_package_version() {
+  dpkg-query -W -f='${Version}' "$1" 2>/dev/null || true
+}
+
+assert_or_converge_package() {
+  local pkg="$1" want="$2" have
+  have="$(installed_package_version "${pkg}")"
+  if [ "${have}" = "${want}" ]; then
+    log "package ${pkg} already at reviewed version ${want}"
+    return 0
+  fi
+  if [ -n "${have}" ]; then
+    log "installed ${pkg}=${have} differs from reviewed ${want}; converging explicitly"
+  else
+    log "installing reviewed package ${pkg}=${want}"
+  fi
+  DEBIAN_FRONTEND=noninteractive apt-get install -q -y "${pkg}=${want}" \
+    || fail "apt-get could not install ${pkg}=${want}"
+  have="$(installed_package_version "${pkg}")"
+  [ "${have}" = "${want}" ] \
+    || fail "package ${pkg} is '${have}' after install; reviewed version is ${want} (wrong versions are never accepted)"
+}
+
+key_sha256_hex() {
+  local value="${NVIDIA_REPO_KEY_SHA256}"
+  case "${value}" in
+    sha256:*) printf '%s' "${value#sha256:}" ;;
+    *) printf '%s' "${value}" ;;
+  esac
+}
 
 # --- step 1: OS assumption check ----------------------------------------------
 
@@ -89,27 +93,79 @@ check_os() {
   log "OS check passed: ${ID} ${VERSION_ID}"
 }
 
-# --- step 2: pinned NVIDIA driver + container toolkit installation --------------
-# Reproducible route (D-0013): install the exact pinned packages when the
-# stack is absent, then reboot and re-run for post-reboot validation.
+check_host_prerequisites() {
+  require_host_command curl
+  require_host_command gpg
+  require_host_command apt-get
+  require_host_command dpkg
+  require_host_command dpkg-query
+  require_host_command sha256sum
+  require_host_command uname
+  local kernel headers_dir build_dir
+  kernel="$(uname -r)"
+  headers_dir="/usr/src/linux-headers-${kernel}"
+  build_dir="/lib/modules/${kernel}/build"
+  if [ ! -d "${headers_dir}" ] && [ ! -d "${build_dir}" ]; then
+    fail "active-kernel build prerequisites are absent for ${kernel}; install the matching linux-headers package for that exact kernel before bootstrap (refusing to install an unpinned headers metapackage)"
+  fi
+  log "host commands and active-kernel headers are present for ${kernel}"
+}
+
+install_verified_nvidia_key_and_list() {
+  require_host_command curl
+  require_host_command gpg
+  require_host_command sha256sum
+  mkdir -p "${KEYRING_DIR}" "${APT_LIST_DIR}"
+  local tmp expected
+  tmp="$(mktemp)"
+  expected="$(key_sha256_hex)"
+  if ! curl -fsSL "${NVIDIA_REPO_KEY_URL}" -o "${tmp}"; then
+    rm -f "${tmp}"
+    fail "NVIDIA repository key download failed; no keyring or apt list was written"
+  fi
+  if ! printf '%s  %s\n' "${expected}" "${tmp}" | sha256sum --check --strict --status; then
+    rm -f "${tmp}"
+    fail "NVIDIA repository key SHA-256 mismatch; refusing keyring and apt installation"
+  fi
+  local tmp_keyring
+  tmp_keyring="$(mktemp)"
+  if ! gpg --batch --yes --dearmor -o "${tmp_keyring}" "${tmp}"; then
+    rm -f "${tmp}" "${tmp_keyring}"
+    fail "NVIDIA repository key dearmor failed; no keyring or apt list was written"
+  fi
+  rm -f "${tmp}"
+  install -m 0644 "${tmp_keyring}" "${KEYRING_PATH}"
+  rm -f "${tmp_keyring}"
+  local tmp_list
+  tmp_list="$(mktemp)"
+  printf '%s\n' "${NVIDIA_REPO_LIST}" > "${tmp_list}"
+  install -m 0644 "${tmp_list}" "${APT_LIST_PATH}"
+  rm -f "${tmp_list}"
+  [ "$(cat "${APT_LIST_PATH}")" = "${NVIDIA_REPO_LIST}" ] \
+    || fail "NVIDIA repository list content does not match the reviewed pin"
+  log "NVIDIA repository key content and list verified"
+}
+
+verify_installed_gpu_packages() {
+  assert_or_converge_package "${NVIDIA_DRIVER_PACKAGE}" "${NVIDIA_DRIVER_PACKAGE_VERSION}"
+  local pkg
+  for pkg in ${CTK_PACKAGES}; do
+    assert_or_converge_package "${pkg}" "${NVIDIA_CTK_PACKAGE_VERSION}"
+  done
+}
 
 install_gpu_stack() {
+  check_host_prerequisites
+  # Key content is verified before any apt mutation. A mismatch writes no
+  # keyring/list and never reaches apt-get.
+  install_verified_nvidia_key_and_list
   if step_done gpu-stack-installed; then
-    log "GPU stack packages already installed (marker present)"
+    log "GPU stack marker present; still verifying exact installed versions"
+    verify_installed_gpu_packages
     return
   fi
-  local driver_pkg="${NVIDIA_DRIVER_PACKAGE}=${NVIDIA_DRIVER_PACKAGE_VERSION}"
-  local ctk_pkg="nvidia-container-toolkit=${NVIDIA_CTK_PACKAGE_VERSION}"
-  log "installing pinned GPU stack: ${driver_pkg}, ${ctk_pkg}"
   apt-get update -q
-  # One-time NVIDIA apt repository material (pinned URLs in bootstrap.env).
-  install -d -m 0755 /usr/share/keyrings
-  curl -fsSL "${NVIDIA_REPO_KEY_URL}" | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-  echo "${NVIDIA_REPO_LIST}" > /etc/apt/sources.list.d/nvidia-container-toolkit.list
-  apt-get update -q
-  DEBIAN_FRONTEND=noninteractive apt-get install -q -y "${driver_pkg}"
-  DEBIAN_FRONTEND=noninteractive apt-get install -q -y "${ctk_pkg}" \
-    || fail "nvidia-container-toolkit install failed: verify NVIDIA repo pins in bootstrap.env"
+  verify_installed_gpu_packages
   mark_done gpu-stack-installed
   if ! nvidia-smi >/dev/null 2>&1; then
     log "GPU stack installed but the driver is not active yet."
@@ -119,35 +175,45 @@ install_gpu_stack() {
   log "GPU stack installed and driver already active (no reboot needed)"
 }
 
-# --- step 3: post-reboot NVIDIA driver + driver-max-CUDA validation -------------
+# --- step 3: post-reboot open-module + GPU identity validation ----------------
 
 check_gpu_stack() {
   command -v nvidia-smi >/dev/null 2>&1 \
     || fail "nvidia-smi not found after installation: reboot and re-run bootstrap.sh (post-reboot validation)"
+  local installed
+  installed="$(installed_package_version "${NVIDIA_DRIVER_PACKAGE}")"
+  [ "${installed}" = "${NVIDIA_DRIVER_PACKAGE_VERSION}" ] \
+    || fail "installed ${NVIDIA_DRIVER_PACKAGE}=${installed} is not the reviewed ${NVIDIA_DRIVER_PACKAGE_VERSION}"
+  if dpkg-query -W -f='${Status}' "${PROPRIETARY_DRIVER_PACKAGE}" 2>/dev/null | grep -q 'install ok installed'; then
+    fail "proprietary ${PROPRIETARY_DRIVER_PACKAGE} is installed; Blackwell requires ${APPROVED_DRIVER_PACKAGE}"
+  fi
+  local module_license
+  module_license="$(modinfo nvidia -F license 2>/dev/null || true)"
+  case "${module_license}" in
+    *MIT* | *GPL*) ;;
+    *) fail "nvidia kernel-module flavor is not open (license '${module_license}'); expected Dual MIT/GPL from ${APPROVED_DRIVER_PACKAGE}" ;;
+  esac
   local driver_version driver_branch driver_max_cuda cuda_major gpu_name gpu_count
   driver_version="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1)"
   driver_branch="${driver_version%%.*}"
   [ "${driver_branch}" -ge "${MIN_DRIVER_BRANCH}" ] \
     || fail "driver ${driver_version} is older than the pinned minimum branch R${MIN_DRIVER_BRANCH}"
-  # The nvidia-smi banner reports the MAXIMUM CUDA version the driver
-  # supports — NOT the CUDA runtime any container actually uses. The
-  # container runtime is validated separately in check_container_cuda.
   driver_max_cuda="$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9][0-9]*\.[0-9]*\).*/\1/p' | head -n1)"
   [ -n "${driver_max_cuda}" ] || fail "could not determine the driver's max CUDA version from nvidia-smi"
   cuda_major="${driver_max_cuda%%.*}"
   [ "${cuda_major}" -ge "${DRIVER_MAX_CUDA_MAJOR}" ] \
     || fail "driver max CUDA ${driver_max_cuda} is below the pinned major ${DRIVER_MAX_CUDA_MAJOR}.x"
-  gpu_count="$(nvidia-smi --list-gpus | wc -l)"
-  [ "${gpu_count}" -eq 1 ] || fail "expected exactly 1 GPU, found ${gpu_count} (single-GPU baseline)"
+  gpu_count="$(nvidia-smi --list-gpus | wc -l | tr -d '[:space:]')"
+  [ "${gpu_count}" = "1" ] || fail "expected exactly 1 GPU, found ${gpu_count} (single-GPU baseline)"
   gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1)"
   case "${gpu_name}" in
     *"RTX PRO 6000"*) ;;
     *) fail "GPU is '${gpu_name}', expected an RTX PRO 6000 Blackwell part" ;;
   esac
-  log "GPU stack validated: ${gpu_name}, driver ${driver_version}, driver-max CUDA ${driver_max_cuda}"
+  log "GPU stack validated: ${gpu_name}, open ${NVIDIA_DRIVER_PACKAGE}=${installed}, driver ${driver_version}, driver-max CUDA ${driver_max_cuda}"
 }
 
-# --- step 4: container runtime (docker + NVIDIA runtime + digest-pinned probe) ---
+# --- step 4: container runtime ------------------------------------------------
 
 normalize_gpu_match_string() {
   printf '%s' "$1" | tr -d '[:space:]'
@@ -161,26 +227,11 @@ gpu_probe_name_matches() {
   esac
 }
 
-install_container_runtime() {
-  if step_done container-runtime; then
-    log "container runtime already configured (marker present)"
-    return
-  fi
-  if ! command -v docker >/dev/null 2>&1; then
-    log "installing pinned docker runtime: ${DOCKER_PACKAGE}=${DOCKER_PACKAGE_VERSION}"
-    apt-get update -q
-    DEBIAN_FRONTEND=noninteractive apt-get install -q -y \
-      "${DOCKER_PACKAGE}=${DOCKER_PACKAGE_VERSION}"
-  fi
-  command -v nvidia-ctk >/dev/null 2>&1 \
-    || fail "nvidia-ctk not found: install_gpu_stack must complete (and the host reboot) first"
-  nvidia-ctk runtime configure --runtime=docker
-  systemctl restart docker
-  require_pin GPU_PROBE_IMAGE_DIGEST "${GPU_PROBE_IMAGE_DIGEST:-}"
-  case "${GPU_PROBE_IMAGE_DIGEST}" in
-    sha256:*) ;;
-    *) fail "GPU_PROBE_IMAGE_DIGEST must be an immutable sha256:... digest (mutable tags are never pulled)" ;;
-  esac
+verify_installed_docker() {
+  assert_or_converge_package "${DOCKER_PACKAGE}" "${DOCKER_PACKAGE_VERSION}"
+}
+
+run_gpu_probe() {
   local probe_ref="${GPU_PROBE_IMAGE%%@*}@${GPU_PROBE_IMAGE_DIGEST}"
   local probe_gpu_name probe_gpu_count
   probe_gpu_name="$(docker run --rm --gpus all "${probe_ref}" \
@@ -193,18 +244,30 @@ install_container_runtime() {
   if ! gpu_probe_name_matches "${probe_gpu_name}" "${GPU_PROBE_EXPECTED_GPU}"; then
     fail "GPU probe observed '${probe_gpu_name}', expected ${GPU_PROBE_EXPECTED_GPU}"
   fi
+  log "digest-pinned CUDA probe passed: ${probe_gpu_name}"
+}
+
+install_container_runtime() {
+  if step_done container-runtime; then
+    log "container runtime marker present; still verifying exact Docker and CTK versions"
+    verify_installed_gpu_packages
+    verify_installed_docker
+    return
+  fi
+  apt-get update -q
+  verify_installed_docker
+  command -v nvidia-ctk >/dev/null 2>&1 \
+    || fail "nvidia-ctk not found: install_gpu_stack must complete (and the host reboot) first"
+  nvidia-ctk runtime configure --runtime=docker
+  systemctl restart docker
+  run_gpu_probe
   mark_done container-runtime
-  log "container runtime ready (docker + nvidia-container-toolkit; digest-pinned CUDA probe passed: ${probe_gpu_name})"
+  log "container runtime ready (exact docker + nvidia-container-toolkit; digest-pinned CUDA probe passed)"
 }
 
 # --- step 5: serving image by immutable digest ---------------------------------
 
 pull_serving_image() {
-  require_pin VLLM_IMAGE_DIGEST "${VLLM_IMAGE_DIGEST:-}"
-  case "${VLLM_IMAGE_DIGEST}" in
-    sha256:*) ;;
-    *) fail "VLLM_IMAGE_DIGEST must be an immutable sha256:... digest (frozen at pilot time)" ;;
-  esac
   local pinned_ref="${VLLM_IMAGE%%@*}@${VLLM_IMAGE_DIGEST}"
   if docker image inspect "${pinned_ref}" >/dev/null 2>&1; then
     log "serving image already present by digest"
@@ -215,10 +278,9 @@ pull_serving_image() {
   log "serving image verified: ${pinned_ref}"
 }
 
-# --- step 6: container CUDA runtime validation (separate from driver max) --------
+# --- step 6: container CUDA runtime validation --------------------------------
 
 check_container_cuda() {
-  require_pin REQUIRED_CONTAINER_CUDA_VERSION "${REQUIRED_CONTAINER_CUDA_VERSION:-}"
   local pinned_ref="${VLLM_IMAGE%%@*}@${VLLM_IMAGE_DIGEST}"
   local container_cuda
   container_cuda="$(docker run --rm --gpus all --entrypoint python3 "${pinned_ref}" \
@@ -230,7 +292,7 @@ check_container_cuda() {
   log "container CUDA runtime validated: ${container_cuda}"
 }
 
-# --- step 7: model artifact digest verification ---------------------------------
+# --- step 7: model artifact digest verification --------------------------------
 
 verify_model_artifact() {
   [ -d "${MODEL_DIR}" ] || fail "model directory ${MODEL_DIR} does not exist (run fetch-model.sh first)"
@@ -242,7 +304,7 @@ verify_model_artifact() {
   log "model artifact verified against ${MODEL_DIGEST_MANIFEST}"
 }
 
-# --- step 8: launch serving container (idempotent restart behavior) --------------
+# --- step 8: launch serving container ------------------------------------------
 
 start_serving() {
   local container_name="bwlab-vllm"
@@ -284,7 +346,7 @@ wait_for_readiness() {
   log "serving endpoint is healthy and lists the pinned model"
 }
 
-# --- step 10: workload watchdog ---------------------------------------------------
+# --- step 10: workload watchdog ------------------------------------------------
 
 install_watchdog() {
   log "installing workload watchdog (idle limit ${WATCHDOG_IDLE_MINUTES} minutes)"
@@ -309,7 +371,10 @@ main() {
   start_serving
   wait_for_readiness
   install_watchdog
-  log "bootstrap complete (idempotent: safe to re-run)"
+  log "bootstrap complete (idempotent: safe to re-run; markers never skip version checks)"
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  load_and_validate_bootstrap_env "${ENV_FILE}" "${EXAMPLE_FILE}"
+  main "$@"
+fi

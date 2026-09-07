@@ -194,7 +194,7 @@ def _check_bootstrap_scripts() -> dict:
     directory = _bootstrap_dir()
     scripts = sorted(directory.glob("*.sh")) if directory.is_dir() else []
     names = {s.name for s in scripts}
-    for required in ("bootstrap.sh", "fetch-model.sh", "watchdog.sh"):
+    for required in ("bootstrap.sh", "fetch-model.sh", "watchdog.sh", "pins.sh"):
         if required not in names:
             return {"status": "failed", "detail": f"bootstrap script missing: {required}"}
     bash = shutil.which("bash")

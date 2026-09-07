@@ -215,7 +215,7 @@ class TestBootstrapScripts:
     def test_scripts_pass_bash_syntax_check(self, bash):
         scripts = sorted(BOOTSTRAP_DIR.glob("*.sh"))
         names = {s.name for s in scripts}
-        assert {"bootstrap.sh", "fetch-model.sh", "watchdog.sh"} <= names
+        assert {"bootstrap.sh", "fetch-model.sh", "watchdog.sh", "pins.sh"} <= names
         for script in scripts:
             completed = subprocess.run(
                 [bash, "-n", str(script)],
@@ -229,6 +229,10 @@ class TestBootstrapScripts:
     def test_bootstrap_refuses_missing_env_file_before_any_action(self, bash, tmp_path):
         staged = tmp_path / "bootstrap.sh"
         staged.write_bytes((BOOTSTRAP_DIR / "bootstrap.sh").read_bytes())
+        (tmp_path / "pins.sh").write_bytes((BOOTSTRAP_DIR / "pins.sh").read_bytes())
+        (tmp_path / "bootstrap.env.example").write_bytes(
+            (BOOTSTRAP_DIR / "bootstrap.env.example").read_bytes()
+        )
         completed = subprocess.run(
             [bash, str(staged)],
             capture_output=True,
@@ -242,18 +246,14 @@ class TestBootstrapScripts:
     def test_bootstrap_refuses_unset_pins_before_any_action(self, bash, tmp_path):
         staged = tmp_path / "bootstrap.sh"
         staged.write_bytes((BOOTSTRAP_DIR / "bootstrap.sh").read_bytes())
-        # An env file with a deliberately empty required pin.
+        (tmp_path / "pins.sh").write_bytes((BOOTSTRAP_DIR / "pins.sh").read_bytes())
+        example = (BOOTSTRAP_DIR / "bootstrap.env.example").read_text(encoding="utf-8")
+        (tmp_path / "bootstrap.env.example").write_text(example, encoding="utf-8")
         (tmp_path / "bootstrap.env").write_text(
-            'VLLM_IMAGE="img"\nMODEL_ARTIFACT="x"\nMODEL_DIR="/tmp/x"\n'
-            'MODEL_DIGEST_MANIFEST="/tmp/x.sha256"\nNVIDIA_DRIVER_PACKAGE="d"\n'
-            'NVIDIA_DRIVER_PACKAGE_VERSION=""\nNVIDIA_CTK_PACKAGE_VERSION="1.0"\n'
-            'NVIDIA_REPO_KEY_URL="https://example/key"\nNVIDIA_REPO_LIST="deb ..."\n'
-            'DOCKER_PACKAGE="docker.io"\nDOCKER_PACKAGE_VERSION=""\n'
-            'MIN_DRIVER_BRANCH="580"\nDRIVER_MAX_CUDA_MAJOR="13"\n'
-            'GPU_PROBE_IMAGE="nvcr.io/nvidia/cuda:13.0.0-base-ubuntu24.04"\n'
-            'GPU_PROBE_EXPECTED_GPU="RTX PRO 6000"\n'
-            'SERVED_MODEL_NAME="m"\nSERVING_PORT="8000"\n'
-            'WATCHDOG_IDLE_MINUTES="45"\n',
+            example.replace(
+                'NVIDIA_DRIVER_PACKAGE_VERSION="580.173.02-0ubuntu0.24.04.1"',
+                'NVIDIA_DRIVER_PACKAGE_VERSION=""',
+            ),
             encoding="utf-8",
         )
         completed = subprocess.run(
@@ -271,6 +271,10 @@ class TestBootstrapScripts:
     def test_fetch_model_refuses_token_arguments(self, bash, tmp_path):
         staged = tmp_path / "fetch-model.sh"
         staged.write_bytes((BOOTSTRAP_DIR / "fetch-model.sh").read_bytes())
+        (tmp_path / "pins.sh").write_bytes((BOOTSTRAP_DIR / "pins.sh").read_bytes())
+        (tmp_path / "bootstrap.env.example").write_bytes(
+            (BOOTSTRAP_DIR / "bootstrap.env.example").read_bytes()
+        )
         completed = subprocess.run(
             [bash, str(staged), "--token", "not-a-real-token"],
             capture_output=True,
@@ -280,6 +284,7 @@ class TestBootstrapScripts:
         )
         assert completed.returncode == 1
         assert "no arguments" in completed.stdout + completed.stderr
+        assert "not-a-real-token" not in completed.stdout + completed.stderr
 
     def test_fetch_model_never_places_tokens_in_files_or_args(self):
         script = (BOOTSTRAP_DIR / "fetch-model.sh").read_text(encoding="utf-8")
@@ -294,6 +299,9 @@ class TestBootstrapScripts:
         assert "install_gpu_stack" in script
         assert "REBOOT_REQUIRED_EXIT=2" in script
         assert "check_container_cuda" in script
+        assert "nvidia-driver-580-server-open" in script
+        assert "install_verified_nvidia_key_and_list" in script
+        assert "assert_or_converge_package" in script
         # Probe image is digest-pinned; a mutable tag is never used.
         assert "GPU_PROBE_IMAGE_DIGEST" in script
         assert "nvidia-smi --query-gpu=name" in script
@@ -361,8 +369,12 @@ exit 0
         assert pins["VLLM_IMAGE_INDEX_DIGEST"].startswith("sha256:")
         assert pins["VLLM_IMAGE_DIGEST"] != pins["VLLM_IMAGE_INDEX_DIGEST"]
         assert pins["MODEL_REVISION"] == "a9904d24bcc1d289a1950fa9d2b978c47cf903b9"
-        assert pins["NVIDIA_DRIVER_PACKAGE"] == "nvidia-driver-580-server"
+        assert pins["NVIDIA_DRIVER_PACKAGE"] == "nvidia-driver-580-server-open"
+        assert pins["NVIDIA_DRIVER_PACKAGE"] != "nvidia-driver-580-server"
         assert pins["NVIDIA_DRIVER_PACKAGE_VERSION"] == "580.173.02-0ubuntu0.24.04.1"
+        assert pins["NVIDIA_REPO_KEY_SHA256"] == (
+            "c880576d6cf75a48e5027a871bac70fd0421ab07d2b55f30877b21f1c87959c9"
+        )
         assert pins["NVIDIA_CTK_PACKAGE_VERSION"] == "1.20.0-1"
         assert pins["DOCKER_PACKAGE_VERSION"] == "29.1.3-0ubuntu3~24.04.2"
         assert pins["REQUIRED_CONTAINER_CUDA_VERSION"] == "13.0"
