@@ -108,7 +108,16 @@ def _mutation_path(tmp_path: Path) -> tuple[Path, Path]:
     bin_dir = tmp_path / "mut-bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     log = tmp_path / "mutations.log"
-    for name in ("apt-get", "curl", "gpg", "dpkg", "dpkg-query", "docker"):
+    for name in (
+        "apt-get",
+        "curl",
+        "gpg",
+        "dpkg",
+        "dpkg-query",
+        "docker",
+        "systemctl",
+        "systemd",
+    ):
         _write_exec(
             bin_dir / name,
             f"#!/usr/bin/env bash\nprintf '%s %s\\n' '{name}' \"$*\" >> '{log}'\nexit 0\n",
@@ -204,6 +213,46 @@ class TestPinValidationStopsMutation:
                 'MIN_DRIVER_BRANCH="580"',
                 'MIN_DRIVER_BRANCH="570"',
                 "reviewed candidate baseline",
+            ),
+            (
+                'REQUIRED_OS_ID="ubuntu"',
+                'REQUIRED_OS_ID="debian"',
+                "reviewed candidate baseline",
+            ),
+            (
+                'REQUIRED_OS_VERSION="24.04"',
+                'REQUIRED_OS_VERSION="22.04"',
+                "reviewed candidate baseline",
+            ),
+            (
+                'SERVED_MODEL_NAME="nemotron-3.5-lightning-30b-a3b-bf16"',
+                'SERVED_MODEL_NAME="other-model"',
+                "reviewed candidate baseline",
+            ),
+            (
+                'SERVING_PORT="8000"',
+                'SERVING_PORT="9000"',
+                "reviewed candidate baseline",
+            ),
+            (
+                'SERVING_PORT="8000"',
+                'SERVING_PORT="70000"',
+                "1-65535",
+            ),
+            (
+                "--max-num-seqs 128 --enable-prefix-caching",
+                "--max-num-seqs 1 --enable-prefix-caching",
+                "reviewed candidate baseline",
+            ),
+            (
+                'WATCHDOG_IDLE_MINUTES="45"',
+                'WATCHDOG_IDLE_MINUTES="30"',
+                "reviewed candidate baseline",
+            ),
+            (
+                'WATCHDOG_IDLE_MINUTES="45"',
+                'WATCHDOG_IDLE_MINUTES="60"',
+                "no greater than 45",
             ),
         ],
     )

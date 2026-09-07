@@ -5,6 +5,7 @@
 APPROVED_DRIVER_PACKAGE="nvidia-driver-580-server-open"
 PROPRIETARY_DRIVER_PACKAGE="nvidia-driver-580-server"
 APPROVED_DRIVER_PACKAGE_VERSION="580.173.02-0ubuntu0.24.04.1"
+MAX_WATCHDOG_IDLE_MINUTES="45"
 CTK_PACKAGES="nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1"
 
 _pin_fail() { printf '[bwlab-pins] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -59,6 +60,22 @@ pin_is_revision() {
   printf '%s' "$1" | grep -Eq '^[a-f0-9]{40}$'
 }
 
+pin_is_tcp_port() {
+  local value="$1"
+  case "${value}" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  [ "${value}" -ge 1 ] && [ "${value}" -le 65535 ]
+}
+
+pin_is_watchdog_minutes() {
+  local value="$1"
+  case "${value}" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  [ "${value}" -ge 1 ] && [ "${value}" -le "${MAX_WATCHDOG_IDLE_MINUTES}" ]
+}
+
 require_nonempty_pin() {
   local name="$1" value="${2:-}"
   if [ -z "${value}" ]; then
@@ -92,6 +109,12 @@ validate_loaded_pins() {
   require_nonempty_pin GPU_PROBE_IMAGE_DIGEST "${GPU_PROBE_IMAGE_DIGEST:-}"
   require_nonempty_pin GPU_PROBE_IMAGE_INDEX_DIGEST "${GPU_PROBE_IMAGE_INDEX_DIGEST:-}"
   require_nonempty_pin GPU_PROBE_EXPECTED_GPU "${GPU_PROBE_EXPECTED_GPU:-}"
+  require_nonempty_pin REQUIRED_OS_ID "${REQUIRED_OS_ID:-}"
+  require_nonempty_pin REQUIRED_OS_VERSION "${REQUIRED_OS_VERSION:-}"
+  require_nonempty_pin SERVED_MODEL_NAME "${SERVED_MODEL_NAME:-}"
+  require_nonempty_pin SERVING_PORT "${SERVING_PORT:-}"
+  require_nonempty_pin VLLM_EXTRA_ARGS "${VLLM_EXTRA_ARGS:-}"
+  require_nonempty_pin WATCHDOG_IDLE_MINUTES "${WATCHDOG_IDLE_MINUTES:-}"
 
   pin_is_sha256_digest "${VLLM_IMAGE_DIGEST}" \
     || _pin_fail "VLLM_IMAGE_DIGEST must be an immutable sha256:<64-hex> digest"
@@ -112,6 +135,12 @@ validate_loaded_pins() {
     || _pin_fail "proprietary ${PROPRIETARY_DRIVER_PACKAGE} is rejected; use ${APPROVED_DRIVER_PACKAGE}"
   [ "${NVIDIA_DRIVER_PACKAGE_VERSION}" = "${APPROVED_DRIVER_PACKAGE_VERSION}" ] \
     || _pin_fail "NVIDIA_DRIVER_PACKAGE_VERSION must equal the reviewed candidate ${APPROVED_DRIVER_PACKAGE_VERSION}"
+  if ! pin_is_tcp_port "${SERVING_PORT}"; then
+    _pin_fail "SERVING_PORT must be an integer in 1-65535"
+  fi
+  if ! pin_is_watchdog_minutes "${WATCHDOG_IDLE_MINUTES}"; then
+    _pin_fail "WATCHDOG_IDLE_MINUTES must be a positive integer no greater than ${MAX_WATCHDOG_IDLE_MINUTES}"
+  fi
 }
 
 validate_env_matches_example() {
@@ -126,7 +155,9 @@ validate_env_matches_example() {
     NVIDIA_REPO_LIST DOCKER_PACKAGE DOCKER_PACKAGE_VERSION \
     MIN_DRIVER_BRANCH DRIVER_MAX_CUDA_MAJOR REQUIRED_CONTAINER_CUDA_VERSION \
     GPU_PROBE_IMAGE GPU_PROBE_IMAGE_DIGEST GPU_PROBE_IMAGE_INDEX_DIGEST \
-    GPU_PROBE_EXPECTED_GPU; do
+    GPU_PROBE_EXPECTED_GPU \
+    REQUIRED_OS_ID REQUIRED_OS_VERSION SERVED_MODEL_NAME SERVING_PORT \
+    VLLM_EXTRA_ARGS WATCHDOG_IDLE_MINUTES; do
     expected="$(extract_pin "${example}" "${key}")" \
       || _pin_fail "reviewed candidate baseline is missing ${key}"
     eval "actual=\"\${${key}:-}\""

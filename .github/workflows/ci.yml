@@ -163,3 +163,45 @@ jobs:
           # --redact so detected values are never printed to the log; no
           # report file is written, so no artifact can contain secrets.
           ./gitleaks git --redact --no-banner --exit-code 1 .
+      - name: Prove NVIDIA checksum allowlist is path-and-rule scoped
+        run: |
+          set -euo pipefail
+          set +x
+          example="infra/akamai/bootstrap/bootstrap.env.example"
+          config=".gitleaks.toml"
+          # The reviewed public checksum at the exact example path is accepted.
+          ./gitleaks dir --redact --no-banner --exit-code 1 --config "${config}" \
+            "${example}"
+          clean="$(mktemp -d)"
+          dirty="$(mktemp -d)"
+          cleanup() { rm -rf "${clean}" "${dirty}"; }
+          trap cleanup EXIT
+          mkdir -p "${clean}/infra/akamai/bootstrap" "${dirty}/infra/akamai/bootstrap"
+          cp "${example}" "${clean}/infra/akamai/bootstrap/bootstrap.env.example"
+          cp "${example}" "${dirty}/infra/akamai/bootstrap/bootstrap.env.example"
+          cp "${config}" "${clean}/.gitleaks.toml"
+          cp "${config}" "${dirty}/.gitleaks.toml"
+          ./gitleaks dir --redact --no-banner --exit-code 1 --config "${clean}/.gitleaks.toml" \
+            "${clean}"
+          # Synthetic generic-api-key material is built only in this job and
+          # written to a temporary copy. It is never committed or printed.
+          export BWLAB_GITLEAKS_PROBE="${dirty}/infra/akamai/bootstrap/bootstrap.env.example"
+          python3 -c '
+          import os, secrets
+          from pathlib import Path
+          path = Path(os.environ["BWLAB_GITLEAKS_PROBE"])
+          path.write_text(
+              path.read_text(encoding="utf-8")
+              + "SYNTHETIC_API_KEY="
+              + secrets.token_hex(32)
+              + "\n",
+              encoding="utf-8",
+          )
+          '
+          unset BWLAB_GITLEAKS_PROBE
+          if ./gitleaks dir --redact --no-banner --exit-code 1 --config "${dirty}/.gitleaks.toml" \
+            "${dirty}"; then
+            printf '%s\n' "allowlist path must not exempt a synthetic secret in bootstrap.env.example"
+            exit 1
+          fi
+          printf '%s\n' "gitleaks_allowlist_scope_ok"

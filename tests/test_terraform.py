@@ -378,6 +378,12 @@ exit 0
         assert pins["NVIDIA_CTK_PACKAGE_VERSION"] == "1.20.0-1"
         assert pins["DOCKER_PACKAGE_VERSION"] == "29.1.3-0ubuntu3~24.04.2"
         assert pins["REQUIRED_CONTAINER_CUDA_VERSION"] == "13.0"
+        assert pins["REQUIRED_OS_ID"] == "ubuntu"
+        assert pins["REQUIRED_OS_VERSION"] == "24.04"
+        assert pins["SERVED_MODEL_NAME"] == "nemotron-3.5-lightning-30b-a3b-bf16"
+        assert pins["SERVING_PORT"] == "8000"
+        assert pins["WATCHDOG_IDLE_MINUTES"] == "45"
+        assert "--dtype bfloat16" in pins["VLLM_EXTRA_ARGS"]
         assert "NOT been validated" in env_example
         assert "NVFP4" in env_example and "not part of this pilot" in env_example
         assert "HF_TOKEN" not in env_example

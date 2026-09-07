@@ -16,6 +16,18 @@ from collections.abc import Mapping
 APPROVED_DRIVER_PACKAGE = "nvidia-driver-580-server-open"
 PROPRIETARY_DRIVER_PACKAGE = "nvidia-driver-580-server"
 APPROVED_DRIVER_PACKAGE_VERSION = "580.173.02-0ubuntu0.24.04.1"
+APPROVED_OS_ID = "ubuntu"
+APPROVED_OS_VERSION = "24.04"
+APPROVED_SERVED_MODEL_NAME = "nemotron-3.5-lightning-30b-a3b-bf16"
+APPROVED_SERVING_PORT = "8000"
+APPROVED_VLLM_EXTRA_ARGS = (
+    "--dtype bfloat16 --max-num-seqs 128 --enable-prefix-caching "
+    "--async-scheduling --mamba-backend flashinfer "
+    "--mamba-ssm-cache-dtype float16 --enable-mamba-cache-stochastic-rounding "
+    "--mamba-cache-philox-rounds 5"
+)
+APPROVED_WATCHDOG_IDLE_MINUTES = "45"
+MAX_WATCHDOG_IDLE_MINUTES = 45
 
 INSTALLATION_PINS = (
     "NVIDIA_DRIVER_PACKAGE",
@@ -46,7 +58,18 @@ IDENTITY_PINS = (
     "GPU_PROBE_EXPECTED_GPU",
 )
 
-ALL_REQUIRED_PINS = INSTALLATION_PINS + IDENTITY_PINS
+#: Pilot-candidate host/serving settings. These are required and must match
+#: the reviewed example; they are not the frozen full-baseline configuration.
+PILOT_RUNTIME_PINS = (
+    "REQUIRED_OS_ID",
+    "REQUIRED_OS_VERSION",
+    "SERVED_MODEL_NAME",
+    "SERVING_PORT",
+    "VLLM_EXTRA_ARGS",
+    "WATCHDOG_IDLE_MINUTES",
+)
+
+ALL_REQUIRED_PINS = INSTALLATION_PINS + IDENTITY_PINS + PILOT_RUNTIME_PINS
 
 OCI_DIGEST_PINS = (
     "VLLM_IMAGE_DIGEST",
@@ -179,6 +202,36 @@ def validate_candidate_pins(text: str) -> list[str]:
     probe = assignments.get("GPU_PROBE_IMAGE", "")
     if probe.endswith(":latest"):
         problems.append("GPU_PROBE_IMAGE uses the floating tag latest")
+
+    os_id = assignments.get("REQUIRED_OS_ID", "")
+    if os_id and os_id != APPROVED_OS_ID:
+        problems.append("REQUIRED_OS_ID differs from the reviewed candidate baseline")
+    os_version = assignments.get("REQUIRED_OS_VERSION", "")
+    if os_version and os_version != APPROVED_OS_VERSION:
+        problems.append("REQUIRED_OS_VERSION differs from the reviewed candidate baseline")
+    served = assignments.get("SERVED_MODEL_NAME", "")
+    if served and served != APPROVED_SERVED_MODEL_NAME:
+        problems.append("SERVED_MODEL_NAME differs from the reviewed candidate baseline")
+    extra_args = assignments.get("VLLM_EXTRA_ARGS", "")
+    if extra_args and extra_args != APPROVED_VLLM_EXTRA_ARGS:
+        problems.append("VLLM_EXTRA_ARGS differs from the reviewed candidate baseline")
+
+    port = assignments.get("SERVING_PORT", "")
+    if port:
+        if not port.isdigit() or not (1 <= int(port) <= 65535):
+            problems.append("SERVING_PORT must be an integer in 1-65535")
+        elif port != APPROVED_SERVING_PORT:
+            problems.append("SERVING_PORT differs from the reviewed candidate baseline")
+
+    watchdog = assignments.get("WATCHDOG_IDLE_MINUTES", "")
+    if watchdog:
+        if not watchdog.isdigit() or not (1 <= int(watchdog) <= MAX_WATCHDOG_IDLE_MINUTES):
+            problems.append(
+                "WATCHDOG_IDLE_MINUTES must be a positive integer no greater than "
+                f"{MAX_WATCHDOG_IDLE_MINUTES}"
+            )
+        elif watchdog != APPROVED_WATCHDOG_IDLE_MINUTES:
+            problems.append("WATCHDOG_IDLE_MINUTES differs from the reviewed candidate baseline")
 
     return problems
 

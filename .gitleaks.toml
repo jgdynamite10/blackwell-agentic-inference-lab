@@ -1,13 +1,17 @@
 # Gitleaks configuration. Extends the default rule set.
-# Allowlisted values below are public checksums, not credentials.
+# The NVIDIA apt-key SHA-256 is a public checksum, not a credential.
+# Path and checksum must both match; the path never exempts the whole file.
 
 title = "blackwell-agentic-inference-lab"
 
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Public SHA-256 of the official NVIDIA Container Toolkit apt key"
+condition = "AND"
+targetRules = ["generic-api-key"]
+regexTarget = "match"
 paths = [
   '''(^|/)infra/akamai/bootstrap/bootstrap\.env\.example$''',
 ]
