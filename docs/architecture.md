@@ -265,14 +265,18 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    plan["terraform plan<br/>(default; read-only)"] --> approve1{{"explicit local owner<br/>approval to APPLY"}}
-    approve1 --> provision["provision ONE tagged<br/>GPU instance"]
-    provision --> bootstrap["idempotent bootstrap:<br/>pins, driver/CUDA checks,<br/>image + model digest verification,<br/>readiness checks, watchdog"]
-    bootstrap --> pilot["bounded 3B diagnostic pilot (D-0014),<br/>then freeze settings; full 12-cell<br/>baseline remains unauthorized"]
-    pilot --> verify["verify external results:<br/>schemas, semantic invariants,<br/>artifact hashes in LAB_RESULTS_DIR"]
-    verify --> approve2{{"explicit local owner<br/>approval to DESTROY"}}
-    approve2 --> teardown["delete EXACTLY the ledger's<br/>resources for this run<br/>(never broad cleanup)"]
-    teardown --> orphan["read-only orphan report:<br/>confirm no project-tagged<br/>billable resources remain"]
+    pins["offline pin verification"] --> plan["reviewed apply plan"]
+    plan --> approve1{{"apply approval"}}
+    approve1 --> reconcile["reconcile identities"]
+    reconcile --> emergency["immediate emergency<br/>teardown-plan"]
+    emergency --> bootstrap["host bootstrap<br/>and reboot"]
+    bootstrap --> gpu["GPU/container<br/>verification"]
+    gpu --> model["pinned Nemotron download<br/>and digest manifest"]
+    model --> cfg["pilot-config digest<br/>and approval"]
+    cfg --> cells["three diagnostic cells"]
+    cells --> verify["external result<br/>verification"]
+    verify --> approve2{{"destroy the<br/>preapproved plan"}}
+    approve2 --> orphan["confirmed deletion<br/>and orphan report"]
 ```
 
 Key properties, binding on the authorized Phase 3B pilot and any later
@@ -297,10 +301,12 @@ explicitly authorized measurement:
   broad cleanup command exists.
 - **Billing safety.** On Akamai, powering off a Linode does not stop
   billing — compute billing stops only when the service is deleted from the
-  account. The watchdog limits runaway workload only. The normal
-  end-of-session sequence is: export and verify results, then owner-approved
-  deletion of exactly the run's tagged resources, then the read-only orphan
-  check confirming nothing billable remains
+  account. The watchdog limits runaway workload only. Akamai access for this
+  project is provided without a direct compute charge; normalized economic
+  cost still uses the $3/hour planning rate. The normal end-of-session
+  sequence is: export and verify results, then owner-approved deletion of
+  exactly the run's tagged resources, then the read-only orphan check
+  confirming nothing billable remains
   ([cost-guardrails.md](cost-guardrails.md)).
 - **Truthful measurement.** The real benchmark path preserves the Phase 2
   timing, evaluator, accounting, and evidence contracts; transport chunks

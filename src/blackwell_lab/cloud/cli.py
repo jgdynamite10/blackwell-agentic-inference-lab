@@ -45,6 +45,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from blackwell_lab.cloud.bootstrap_pins import validate_candidate_pins
+from blackwell_lab.cloud.lifecycle import TERRAFORM_LOCKFILE_READONLY
 from blackwell_lab.paths import ResultsLocationError, RunMode, resolve_results_dir
 from blackwell_lab.schemas import (
     validate_benchmark_result,
@@ -152,7 +154,13 @@ def _check_terraform_static() -> dict:
     with tempfile.TemporaryDirectory(prefix="bwlab-tf-validate-") as tf_data:
         env = {**os.environ, "TF_DATA_DIR": tf_data, "TF_IN_AUTOMATION": "1"}
         init = subprocess.run(
-            [terraform, "init", "-backend=false", "-input=false"],
+            [
+                terraform,
+                "init",
+                "-backend=false",
+                "-input=false",
+                TERRAFORM_LOCKFILE_READONLY,
+            ],
             cwd=directory,
             env=env,
             capture_output=True,
@@ -210,30 +218,10 @@ def _check_bootstrap_pins() -> dict:
     if not env_example.is_file():
         return {"status": "failed", "detail": "bootstrap.env.example is missing"}
     content = env_example.read_text(encoding="utf-8")
-    required_keys = (
-        "VLLM_IMAGE",
-        "VLLM_IMAGE_DIGEST",
-        "MODEL_ARTIFACT",
-        "MODEL_REVISION",
-        "MODEL_DIGEST_MANIFEST",
-        "NVIDIA_DRIVER_PACKAGE",
-        "NVIDIA_DRIVER_PACKAGE_VERSION",
-        "NVIDIA_CTK_PACKAGE_VERSION",
-        "NVIDIA_REPO_KEY_URL",
-        "NVIDIA_REPO_LIST",
-        "DOCKER_PACKAGE",
-        "DOCKER_PACKAGE_VERSION",
-        "MIN_DRIVER_BRANCH",
-        "DRIVER_MAX_CUDA_MAJOR",
-        "REQUIRED_CONTAINER_CUDA_VERSION",
-        "GPU_PROBE_IMAGE",
-        "GPU_PROBE_IMAGE_DIGEST",
-        "GPU_PROBE_EXPECTED_GPU",
-    )
-    missing = [key for key in required_keys if f"{key}=" not in content]
-    if missing:
-        return {"status": "failed", "detail": f"bootstrap.env.example lacks pins: {missing}"}
-    return {"status": "ok", "detail": "bootstrap pin template declares every required pin"}
+    problems = validate_candidate_pins(content)
+    if problems:
+        return {"status": "failed", "detail": f"bootstrap.env.example pin errors: {problems}"}
+    return {"status": "ok", "detail": "bootstrap pin template declares verified candidate pins"}
 
 
 def _check_python_modules() -> dict:

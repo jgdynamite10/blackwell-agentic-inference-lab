@@ -32,6 +32,9 @@ class TestStaticConfiguration:
         versions = read("versions.tf")
         assert 'version = "4.1.0"' in versions  # exact provider pin
         assert 'required_version = "= 1.9.8"' in versions
+        assert "-platform=darwin_arm64" in versions
+        assert "-platform=linux_amd64" in versions
+        assert "-lockfile=readonly" in versions
         lock = read(".terraform.lock.hcl")
         assert "linode/linode" in lock and 'version     = "4.1.0"' in lock
 
@@ -144,7 +147,7 @@ class TestTerraformBinaryChecks:
     def test_init_backend_false_and_validate_pass(self, terraform, tmp_path):
         env = {**os.environ, "TF_DATA_DIR": str(tmp_path / "tf-data"), "TF_IN_AUTOMATION": "1"}
         init = subprocess.run(
-            [terraform, "init", "-backend=false", "-input=false"],
+            [terraform, "init", "-backend=false", "-input=false", "-lockfile=readonly"],
             cwd=INFRA_DIR,
             env=env,
             capture_output=True,
@@ -166,6 +169,39 @@ class TestTerraformBinaryChecks:
             check=False,
         )
         assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    def test_repeated_readonly_init_does_not_modify_committed_lockfile(self, terraform, tmp_path):
+        lock = INFRA_DIR / ".terraform.lock.hcl"
+        before = lock.read_bytes()
+        for index in range(2):
+            env = {
+                **os.environ,
+                "TF_DATA_DIR": str(tmp_path / f"tf-data-{index}"),
+                "TF_IN_AUTOMATION": "1",
+            }
+            init = subprocess.run(
+                [terraform, "init", "-backend=false", "-input=false", "-lockfile=readonly"],
+                cwd=INFRA_DIR,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+            if init.returncode != 0:
+                if os.environ.get("BWLAB_REQUIRE_TERRAFORM"):
+                    pytest.fail(f"terraform init -lockfile=readonly failed: {init.stderr}")
+                pytest.skip("terraform init could not download providers (offline)")
+        assert lock.read_bytes() == before
+
+    def test_committed_lockfile_covers_both_supported_platforms(self):
+        lock = read(".terraform.lock.hcl")
+        assert 'version     = "4.1.0"' in lock
+        assert 'constraints = "4.1.0"' in lock
+        h1_hashes = [line.strip() for line in lock.splitlines() if '"h1:' in line]
+        assert len(h1_hashes) >= 2, "darwin_arm64 and linux_amd64 each contribute an h1 checksum"
+        zh_hashes = [line.strip() for line in lock.splitlines() if '"zh:' in line]
+        assert len(zh_hashes) >= 12
 
 
 class TestBootstrapScripts:
@@ -309,22 +345,54 @@ exit 0
         env_example = (BOOTSTRAP_DIR / "bootstrap.env.example").read_text(encoding="utf-8")
         assert "STILL" in env_example and "BILLS" in env_example
 
-    def test_pins_template_declares_candidate_versions(self):
+    def test_pins_template_declares_verified_candidate_versions(self):
+        from blackwell_lab.cloud.bootstrap_pins import (
+            candidate_pins_are_valid,
+            parse_env_assignments,
+            validate_candidate_pins,
+        )
+
         env_example = (BOOTSTRAP_DIR / "bootstrap.env.example").read_text(encoding="utf-8")
-        assert "vllm-openai:v0.28.0" in env_example
-        assert "UNVALIDATED CANDIDATE" in env_example
-        assert "v0.27.1" in env_example  # the model card's documented recipe
-        assert "NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16" in env_example
-        assert 'MIN_DRIVER_BRANCH="580"' in env_example
-        assert 'DRIVER_MAX_CUDA_MAJOR="13"' in env_example
-        assert "REQUIRED_CONTAINER_CUDA_VERSION=" in env_example
-        assert "GPU_PROBE_IMAGE_DIGEST=" in env_example
-        assert "NVIDIA_DRIVER_PACKAGE=" in env_example
-        assert "NVIDIA_DRIVER_PACKAGE_VERSION=" in env_example
-        assert "NVIDIA_CTK_PACKAGE_VERSION=" in env_example
-        assert "NVIDIA_REPO_KEY_URL=" in env_example
-        assert "DOCKER_PACKAGE=" in env_example
-        assert "DOCKER_PACKAGE_VERSION=" in env_example
-        assert "GPU_PROBE_EXPECTED_GPU=" in env_example
-        # Digest fields exist but are deliberately unfrozen until the pilot.
-        assert 'VLLM_IMAGE_DIGEST=""' in env_example
+        assert validate_candidate_pins(env_example) == []
+        assert candidate_pins_are_valid(env_example)
+        pins = parse_env_assignments(env_example)
+        assert pins["VLLM_IMAGE"] == "docker.io/vllm/vllm-openai:v0.27.1"
+        assert pins["VLLM_IMAGE_DIGEST"].startswith("sha256:")
+        assert pins["VLLM_IMAGE_INDEX_DIGEST"].startswith("sha256:")
+        assert pins["VLLM_IMAGE_DIGEST"] != pins["VLLM_IMAGE_INDEX_DIGEST"]
+        assert pins["MODEL_REVISION"] == "a9904d24bcc1d289a1950fa9d2b978c47cf903b9"
+        assert pins["NVIDIA_DRIVER_PACKAGE"] == "nvidia-driver-580-server"
+        assert pins["NVIDIA_DRIVER_PACKAGE_VERSION"] == "580.173.02-0ubuntu0.24.04.1"
+        assert pins["NVIDIA_CTK_PACKAGE_VERSION"] == "1.20.0-1"
+        assert pins["DOCKER_PACKAGE_VERSION"] == "29.1.3-0ubuntu3~24.04.2"
+        assert pins["REQUIRED_CONTAINER_CUDA_VERSION"] == "13.0"
+        assert "NOT been validated" in env_example
+        assert "NVFP4" in env_example and "not part of this pilot" in env_example
+        assert "HF_TOKEN" not in env_example
+        assert "LINODE_TOKEN" not in env_example
+        assert "LAB_RESULTS_DIR" not in env_example
+
+    def test_pins_template_fails_closed_on_removed_or_floating_values(self):
+        from blackwell_lab.cloud.bootstrap_pins import validate_candidate_pins
+
+        env_example = (BOOTSTRAP_DIR / "bootstrap.env.example").read_text(encoding="utf-8")
+        floating = env_example.replace(
+            'NVIDIA_DRIVER_PACKAGE_VERSION="580.173.02-0ubuntu0.24.04.1"',
+            'NVIDIA_DRIVER_PACKAGE_VERSION="latest"',
+        )
+        assert any("floating" in problem for problem in validate_candidate_pins(floating))
+        emptied = env_example.replace(
+            'NVIDIA_CTK_PACKAGE_VERSION="1.20.0-1"',
+            'NVIDIA_CTK_PACKAGE_VERSION=""',
+        )
+        assert any("empty" in problem for problem in validate_candidate_pins(emptied))
+        unpinned = env_example.replace(
+            'VLLM_IMAGE_DIGEST="sha256:c2f3b1b964e47809b722b5e75b61b1e7b39a50f70388cf2bf2418f16a9f31da2"',
+            'VLLM_IMAGE_DIGEST="sha256:deadbeef"',
+        )
+        assert any("immutable" in problem for problem in validate_candidate_pins(unpinned))
+        latest_image = env_example.replace(
+            'VLLM_IMAGE="docker.io/vllm/vllm-openai:v0.27.1"',
+            'VLLM_IMAGE="docker.io/vllm/vllm-openai:latest"',
+        )
+        assert any("floating" in problem for problem in validate_candidate_pins(latest_image))

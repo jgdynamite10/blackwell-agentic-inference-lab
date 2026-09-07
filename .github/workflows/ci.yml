@@ -123,11 +123,13 @@ jobs:
         working-directory: infra/akamai
         env:
           TF_IN_AUTOMATION: "1"
-        run: terraform init -backend=false -input=false
+          TF_DATA_DIR: ${{ runner.temp }}/bwlab-tf-data
+        run: terraform init -backend=false -input=false -lockfile=readonly
       - name: terraform validate
         working-directory: infra/akamai
         env:
           TF_IN_AUTOMATION: "1"
+          TF_DATA_DIR: ${{ runner.temp }}/bwlab-tf-data
         run: terraform validate -no-color
       - name: Install package with dev extras (pinned via constraints)
         run: pip install -e ".[dev]" -c constraints.txt

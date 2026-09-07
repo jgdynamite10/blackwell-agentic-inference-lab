@@ -68,6 +68,11 @@ from blackwell_lab.cloud.preflight import Fetch
 #: Exact Terraform CLI version required for every lifecycle operation.
 REQUIRED_TERRAFORM_VERSION = "1.9.8"
 
+#: After the committed multi-platform lockfile is complete, every init must
+#: refuse to rewrite it. Checksums are generated only by
+#: ``terraform providers lock`` from official HashiCorp Registry metadata.
+TERRAFORM_LOCKFILE_READONLY = "-lockfile=readonly"
+
 #: Every resource this project creates carries this tag.
 PROJECT_TAG = "blackwell-lab"
 
@@ -354,6 +359,7 @@ def init_backend(
             "terraform",
             "init",
             "-input=false",
+            TERRAFORM_LOCKFILE_READONLY,
             "-reconfigure",
             f"-backend-config=path={paths.state_path}",
         ],

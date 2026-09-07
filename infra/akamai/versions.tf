@@ -4,6 +4,10 @@
 
 terraform {
   # Terraform CLI: exactly 1.9.8 (matches CI and lifecycle validation).
+  # .terraform.lock.hcl is generated only with:
+  #   terraform providers lock -platform=darwin_arm64 -platform=linux_amd64
+  # from official HashiCorp Registry signed metadata. Never edit checksums
+  # by hand. Lifecycle and readiness init always pass -lockfile=readonly.
   required_version = "= 1.9.8"
 
   # State lives OUTSIDE the Git working tree: the lifecycle wrapper

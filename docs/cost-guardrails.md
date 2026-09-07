@@ -30,6 +30,11 @@ modified, or deleted without explicit owner approval, regardless of cost.
      **delete** the run's compute service (owner-approved), not merely stop
      it. GPU Linodes bill hourly with no monthly cap, so a forgotten
      powered-off instance is the dominant cost risk.
+   - **Akamai access for this project is provided without a direct compute
+     charge.** Normalized economic cost is still calculated using the
+     applicable **$3/hour** planning rate (the owner-observed Seattle catalog
+     base price). That rate is an economic-normalization convention for
+     session summaries and planning estimates, not a claim about an invoice.
 4. **No reservations or commitments.** On-demand (or owner-approved Spot for
    non-measurement setup work) only. Committed-use discounts, savings plans,
    and reservations require a separate owner decision.

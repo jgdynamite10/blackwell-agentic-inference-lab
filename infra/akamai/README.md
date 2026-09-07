@@ -30,7 +30,10 @@ approval phrases.
 *exists on the account*, powered on or off. Powering off does **not** stop
 charges; the in-instance watchdog limits runaway workload only. The session
 ends by exporting and verifying results, then running the owner-approved
-teardown (deletion), deletion confirmation, and the orphan report.
+teardown (deletion), deletion confirmation, and the orphan report. Akamai
+access for this project is provided **without a direct compute charge**;
+normalized economic cost is still calculated at the applicable **$3/hour**
+planning rate.
 
 ## Authorized Phase 3B pilot (decision D-0014)
 
@@ -80,11 +83,56 @@ reviewed saved plan — not a read-only token.
 ## Files
 
 - `versions.tf` — Terraform **= 1.9.8**; provider `linode/linode` pinned to `4.1.0`; empty `backend "local" {}` for external state configuration at init.
+- `.terraform.lock.hcl` — official HashiCorp Registry checksums for `darwin_arm64` (operator laptop) and `linux_amd64` (CI / Linux operators), generated with `terraform providers lock`. Lifecycle and readiness init always pass `-lockfile=readonly`. Never edit checksums by hand.
 - `variables.tf` — D-0014 locks (`region=us-sea`, `gpu_instance_type=g3-gpu-rtxpro6000-blackwell-1`, `ttl_hours=6`) plus `management_cidr` (rejects `0.0.0.0/0` and `::/0`).
 - `main.tf` — the single GPU instance and its run-tagged firewall (inbound DROP; SSH from management CIDR only).
 - `outputs.tf` — ledger inputs including firewall id/label; instance IPv4 is sensitive.
 - `bootstrap/` — idempotent instance bootstrap with pinned driver/toolkit/docker packages and digest-pinned CUDA GPU probe.
 - `.gitignore` — state, tfvars, plans, and plugin caches never enter Git (state is **external**, not merely gitignored in-place).
+
+## Authorized live-pilot sequence
+
+The bounded Phase 3B session, when separately owner-approved, follows this
+order. Steps 2–5 and 12–13 run on the owner's laptop. Steps 6–10 run on the
+GPU instance after a manual private copy. No step here is a completed
+benchmark.
+
+1. **Offline pin verification** — `blackwell-cloud readiness`, lockfile
+   `-lockfile=readonly` init, and review of the public candidate pins in
+   `bootstrap/bootstrap.env.example` (decision D-0015). These pins are not
+   yet empirically validated on the target GPU.
+2. **Reviewed apply plan** — `blackwell-cloud plan` saves the binary plan
+   and SHA-256 outside Git.
+3. **Apply approval** — `blackwell-cloud apply` with the digest-bearing
+   phrase; hosted execution is refused.
+4. **Reconciliation** — `blackwell-cloud reconcile` must be clean
+   (`provider_checked=true`, exact instance + firewall identity).
+5. **Immediate emergency teardown-plan generation** — `blackwell-cloud
+   teardown-plan` immediately after a clean reconcile, so an
+   identity-verified destroy plan exists before bootstrap. Saved plans older
+   than one hour are stale and must be regenerated and re-reviewed before
+   destroy; do not weaken that freshness check.
+6. **Host bootstrap and reboot** — copy `bootstrap/` to the instance, copy
+   the example to `bootstrap.env`, install the pinned GPU stack; exit 2
+   means reboot and re-run.
+7. **GPU/container verification** — post-reboot driver/max-CUDA checks,
+   digest-pinned CUDA `nvidia-smi` probe, serving-image digest pull, and
+   container CUDA runtime check.
+8. **Pinned Nemotron download and digest manifest** — `fetch-model.sh`
+   at the pinned Hugging Face revision; write and verify the per-file
+   sha256 manifest (not present in Git).
+9. **Final pilot-config digest and approval** — private config outside Git;
+   `blackwell-cloud pilot` with the config SHA-256 approval phrase.
+10. **Three diagnostic cells** — interactive/1, batch-heavy/4,
+    batch-heavy/8 only.
+11. **External result verification** — copy results back, then
+    `blackwell-cloud verify-results`.
+12. **Execution of the preapproved destroy plan** — `blackwell-cloud
+    destroy` with the destroy-plan digest phrase. If the emergency plan
+    from step 5 is stale, regenerate and re-review it first.
+13. **Confirmed deletion and orphan report** — only explicit HTTP 404 is
+    absence; then `orphan-report` (zero matching resources) and
+    `session-summary --hourly-price 3.00`.
 
 ## Operator workflow (local, authenticated environment only)
 
@@ -178,6 +226,19 @@ region). Any missing, extra, duplicate, conflicting, or unverified resource
 leaves `reconciled=false` and blocks the pilot. Without a token, or when the
 provider lookup fails, the ledger records `reconciled=false`, writes a
 sanitized recovery explanation, and retains any pending record.
+
+### 5b. Immediate emergency teardown-plan (before bootstrap)
+
+As soon as reconciliation is clean, generate the identity-verified destroy
+plan so an emergency teardown path exists before anyone copies bootstrap
+material or starts serving:
+
+```bash
+blackwell-cloud teardown-plan --run-tag p3-pilot-20260907a
+```
+
+This is a reviewed saved plan, not a deletion. It still requires a later
+digest-bearing destroy approval. Plans older than one hour are stale.
 
 ## Where each step runs
 
@@ -318,6 +379,35 @@ frozen:
 8. Serving bound to loopback only; health and readiness checks.
 9. Workload watchdog — **NOT a billing-control substitute**.
 
-Pins live in `bootstrap.env` (from `bootstrap.env.example`). vLLM v0.28.0 is
-an unvalidated candidate; the model card's recipe uses v0.27.1. The pilot
-freezes the version (decision D-0012).
+Pins live in `bootstrap.env` (from `bootstrap.env.example`). Decision D-0015
+records the offline-resolved **vLLM v0.27.1** candidate (the NVIDIA model
+card's named recipe). Those pins are not empirically validated on the target
+GPU, and the baseline is not frozen until the pilot succeeds.
+
+## Candidate pin evidence (offline, 2026-09-07)
+
+Public metadata only. No model weights or container layers were downloaded.
+Candidate values are **not** a completed pilot and **not** a frozen baseline.
+
+| Component | Exact version or digest | Target platform | Official source | Retrieved | Status | Live validation still required |
+| --- | --- | --- | --- | --- | --- | --- |
+| NVIDIA driver package | `nvidia-driver-580-server=580.173.02-0ubuntu0.24.04.1` | Ubuntu 24.04 `linux/amd64` | [Ubuntu noble package](https://packages.ubuntu.com/noble/amd64/nvidia-driver-580-server) | 2026-09-07 | Official package metadata | Running driver after reboot; `nvidia-smi` on RTX PRO 6000 Blackwell Server Edition |
+| NVIDIA Container Toolkit | `1.20.0-1` | Ubuntu 24.04 `linux/amd64` | [NVIDIA install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html); [amd64 Packages](https://nvidia.github.io/libnvidia-container/stable/deb/amd64/Packages) | 2026-09-07 | Official docs + repo index | `nvidia-ctk` + GPU probe after install |
+| NVIDIA repo key | `https://nvidia.github.io/libnvidia-container/gpgkey` | Ubuntu apt | [NVIDIA install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) | 2026-09-07 | Official ASCII-armored PGP key | apt signed-by install on the host |
+| NVIDIA repo list | `deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/amd64 /` | Ubuntu 24.04 `linux/amd64` | Official list file with documented `signed-by` transform; `$(ARCH)` resolved to `amd64` | 2026-09-07 | Official repo list | apt-get update on the host |
+| Docker package | `docker.io=29.1.3-0ubuntu3~24.04.2` | Ubuntu 24.04 `linux/amd64` | [Ubuntu noble package](https://packages.ubuntu.com/noble/amd64/docker.io) | 2026-09-07 | Official package metadata | docker service + NVIDIA runtime on the host |
+| CUDA GPU-probe image tag | `nvcr.io/nvidia/cuda:13.0.0-base-ubuntu24.04` | `linux/amd64` host | NVIDIA NGC / Docker Hub `nvidia/cuda` | 2026-09-07 | Official public tag | `nvidia-smi` inside the digest-pinned probe |
+| CUDA GPU-probe index digest | `sha256:6e43a6b02e5f16e4a715953be8b29c40acbe84aed11a61357ef0fc899967fbd9` | multi-platform index | NGC and Docker Hub manifest-list APIs (identical) | 2026-09-07 | Registry `Docker-Content-Digest`; no layers downloaded | None beyond using the amd64 manifest on the host |
+| CUDA GPU-probe `linux/amd64` digest | `sha256:cf5ab24c3f5040a0ea5931658874c2158e606bf740f006809aa4bb9d3334016b` | `linux/amd64` | Same manifest APIs | 2026-09-07 | Platform manifest digest | Probe container on the GPU host |
+| Required container CUDA | `13.0` | vLLM image userland | [v0.27.1 `docker/versions.json`](https://github.com/vllm-project/vllm/blob/v0.27.1/docker/versions.json) `CUDA_VERSION=13.0.3` | 2026-09-07 | Official Dockerfile pin | Exact `torch.version.cuda` string inside the digest-pinned image |
+| vLLM image tag | `docker.io/vllm/vllm-openai:v0.27.1` | GPU host pulls `linux/amd64` | [NVIDIA model card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16); [vLLM recipes](https://recipes.vllm.ai/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16); [v0.27.1 release](https://github.com/vllm-project/vllm/releases/tag/v0.27.1) | 2026-09-07 | Named NVIDIA recipe; not chosen because newer | Serve BF16 Nemotron on RTX PRO 6000 Blackwell Server Edition |
+| vLLM index digest | `sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967` | multi-platform index | Docker Hub registry manifest list | 2026-09-07 | Registry `Docker-Content-Digest`; no layers downloaded | None beyond using the amd64 manifest on the host |
+| vLLM `linux/amd64` digest | `sha256:c2f3b1b964e47809b722b5e75b61b1e7b39a50f70388cf2bf2418f16a9f31da2` | `linux/amd64` | Docker Hub platform manifest | 2026-09-07 | Platform manifest digest | Image pull + engine version on the GPU host |
+| Nemotron BF16 revision | `a9904d24bcc1d289a1950fa9d2b978c47cf903b9` | Hugging Face repo | [Public model API](https://huggingface.co/api/models/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) | 2026-09-07 | Official `sha` field | Authorized live download + per-file digest manifest |
+| Model per-file digest manifest | unresolved (path only) | instance-local | Generated by `fetch-model.sh` at download time | — | Not computable without the weights | Live download, `sha256sum` manifest, bootstrap verification |
+| Minimum driver branch | R580 | host | NVIDIA CUDA 13.0 release notes (`>=580.65.06`); project SM120 notes | 2026-09-07 | Official CUDA 13 driver floor | Observed `nvidia-smi` driver after reboot |
+
+vLLM **v0.28.0** was evaluated and not selected: its default image is CUDA
+13.0 and its release notes mention additional SM12x work, but the NVIDIA
+model card and official vLLM recipes name **v0.27.1** for this BF16
+checkpoint. Newer is not a selection reason.

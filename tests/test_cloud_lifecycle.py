@@ -190,6 +190,7 @@ class TestExternalArtifacts:
         assert report["external_state"] is True
         init_call = runner.calls[0]
         assert f"-backend-config=path={paths.state_path}" in init_call
+        assert lifecycle.TERRAFORM_LOCKFILE_READONLY in init_call
         assert runner.envs[0]["TF_DATA_DIR"] == str(paths.tf_data_dir)
         assert paths.tf_data_dir.is_dir()
 
@@ -355,6 +356,25 @@ class TestVerifySavedPlan:
     def test_changed_lock_file_is_rejected(self, paths, tf_dir):
         _, runner = make_plan(paths, tf_dir)
         (tf_dir / ".terraform.lock.hcl").write_text("# lock v2\n", encoding="utf-8")
+        with pytest.raises(LifecycleError, match="lock file changed"):
+            lifecycle.verify_saved_plan(
+                RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=runner
+            )
+
+    def test_genuine_lockfile_hash_edit_is_still_rejected(self, paths, tf_dir):
+        _, runner = make_plan(paths, tf_dir)
+        lock = tf_dir / ".terraform.lock.hcl"
+        original = lock.read_text(encoding="utf-8")
+        lock.write_text(
+            original.replace(
+                "h1:w6ClwC0DC3vXkeVCpBeiq+/W3kHU+/hCNe2KeLHybMk=",
+                "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                1,
+            )
+            if "h1:" in original
+            else original + '\n    "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",\n',
+            encoding="utf-8",
+        )
         with pytest.raises(LifecycleError, match="lock file changed"):
             lifecycle.verify_saved_plan(
                 RUN_TAG, stage="apply", paths=paths, tf_dir=tf_dir, runner=runner

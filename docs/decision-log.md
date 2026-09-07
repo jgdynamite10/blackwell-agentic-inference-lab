@@ -581,3 +581,52 @@ operation.
 A bounded compatibility/headroom session is the next authorized step after
 Phase 3A readiness. The full 12-cell baseline and later phases stay
 unauthorized until a further owner decision.
+
+## 2026-09-07 — D-0015: Offline Phase 3B candidate pins and multi-platform Terraform lockfile
+
+**No genuine results predate this change.** No genuine benchmark has been
+executed in any phase. The candidate pins below were resolved from official
+public metadata only. They have **not** been empirically validated on an
+RTX PRO 6000 Blackwell Server Edition GPU, and they do not freeze the
+baseline.
+
+**Decision.**
+
+1. **Terraform lockfile.** The committed Linode provider 4.1.0 lockfile is
+   generated with Terraform 1.9.8 via `terraform providers lock
+   -platform=darwin_arm64 -platform=linux_amd64` from official HashiCorp
+   Registry signed metadata. Checksums are never edited by hand. Lifecycle
+   and readiness `terraform init` always pass `-lockfile=readonly`. Saved-plan
+   digest verification continues to reject any lockfile change. This
+   permanently corrects the macOS ARM64 `h1:` checksum drift observed during
+   the completed provisioning test: restoring the previous single-platform
+   committed lockfile after `init` changed the digest that saved plans
+   recorded.
+2. **vLLM candidate.** Select `docker.io/vllm/vllm-openai:v0.27.1` (linux/amd64
+   manifest `sha256:c2f3b1b964e47809b722b5e75b61b1e7b39a50f70388cf2bf2418f16a9f31da2`)
+   because the NVIDIA model card and official vLLM recipes name v0.27.1 for
+   Nemotron 3.5 Lightning BF16. v0.28.0 was evaluated and not selected: it
+   is newer and documents additional SM12x work, which is not a sufficient
+   reason to override the named recipe.
+3. **Host and probe pins.** Record the official public Ubuntu 24.04 and
+   NVIDIA Container Toolkit versions, repository key/list, and the
+   digest-pinned CUDA 13.0.0 GPU-probe image documented in
+   [infra/akamai/README.md](../infra/akamai/README.md). The Nemotron BF16
+   revision is the public Hugging Face commit
+   `a9904d24bcc1d289a1950fa9d2b978c47cf903b9`. The complete per-file model
+   digest manifest remains unresolved until the authorized live download.
+4. **Cost convention.** Akamai access for this project is provided without
+   a direct compute charge. Normalized economic cost continues to use the
+   applicable $3/hour planning rate. No account or employment information is
+   recorded.
+5. **Scope unchanged.** NIM, TensorRT-LLM, NVFP4, and Dynamo remain out of
+   this pilot. The full 12-cell baseline remains unauthorized. No
+   provisioning, destroy, model-weight download, or container-layer download
+   is authorized by this entry.
+
+**Rationale.** The completed provisioning test showed that a
+darwin_arm64-only extra `h1:` line made saved-plan lock verification fail
+after the committed lockfile was restored. A multi-platform official lock
+plus read-only init removes that class of drift without weakening digest
+checks. Offline pin resolution is required before the next authorized live
+session so bootstrap cannot install floating or empty versions.
