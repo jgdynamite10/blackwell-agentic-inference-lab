@@ -1,0 +1,16 @@
+# Gitleaks configuration. Extends the default rule set.
+# Allowlisted values below are public checksums, not credentials.
+
+title = "blackwell-agentic-inference-lab"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public SHA-256 of the official NVIDIA Container Toolkit apt key"
+paths = [
+  '''(^|/)infra/akamai/bootstrap/bootstrap\.env\.example$''',
+]
+regexes = [
+  '''c880576d6cf75a48e5027a871bac70fd0421ab07d2b55f30877b21f1c87959c9''',
+]

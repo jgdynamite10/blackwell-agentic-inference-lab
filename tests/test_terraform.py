@@ -373,7 +373,7 @@ exit 0
         assert pins["NVIDIA_DRIVER_PACKAGE"] != "nvidia-driver-580-server"
         assert pins["NVIDIA_DRIVER_PACKAGE_VERSION"] == "580.173.02-0ubuntu0.24.04.1"
         assert pins["NVIDIA_REPO_KEY_SHA256"] == (
-            "c880576d6cf75a48e5027a871bac70fd0421ab07d2b55f30877b21f1c87959c9"
+            "sha256:c880576d6cf75a48e5027a871bac70fd0421ab07d2b55f30877b21f1c87959c9"
         )
         assert pins["NVIDIA_CTK_PACKAGE_VERSION"] == "1.20.0-1"
         assert pins["DOCKER_PACKAGE_VERSION"] == "29.1.3-0ubuntu3~24.04.2"

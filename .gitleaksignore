@@ -6,3 +6,7 @@
 # never a real credential. The test now constructs the sample at runtime so
 # the literal pattern no longer appears anywhere in the working tree.
 257d9b19b6df14305224983318136eccacec4800:tests/test_safety.py:aws-access-token:140
+
+# Public SHA-256 of the official NVIDIA Container Toolkit apt key
+# (armored bytes from nvidia.github.io). Not a credential.
+6dbb4fed02de643b62356a17fd562c9adef767ad:infra/akamai/bootstrap/bootstrap.env.example:generic-api-key:74
