@@ -15,7 +15,7 @@ approval phrases.
 | External state only | `blackwell-cloud init` configures a **local backend outside Git** under the absolute `LAB_RESULTS_DIR`; Terraform state, `TF_DATA_DIR`, variable files, saved plans, and lifecycle records never live in the repository |
 | Plan/dry-run is the default | `blackwell-cloud plan --run-tag <tag>` saves a binary plan, a redacted review copy, and SHA-256 metadata outside Git |
 | Apply requires digest-bearing approval | `blackwell-cloud apply` executes **only** the exact saved plan after re-verifying its SHA-256, configuration, lock file, state, and commit; the approval phrase is verbatim: `I approve creating billable Akamai resources for run <tag> using plan sha256:<digest>` |
-| Provider reconciliation required | `blackwell-cloud reconcile` must succeed before the pilot; reconciliation is clean only when state is readable, the provider API was checked, and state matches provider observations exactly |
+| Provider reconciliation required | `blackwell-cloud reconcile` must succeed before the pilot; reconciliation is clean only when state is readable, the provider API was checked, and every resource matches by typed identity (Terraform address, type, provider ID, label, project tag, run tag, and instance region). Combined numeric-ID sets are not used |
 | Destroy requires provider verification first | `teardown-plan` and `destroy` refuse unless every ledger resource is verified against state **and** the provider API **before** any Terraform destroy plan is generated or applied |
 | Destroy requires digest-bearing approval | The destroy approval phrase is verbatim: `I approve deleting the exact recorded resources for run <tag> using destroy plan sha256:<digest>` |
 | Deletion must be confirmed | Success is reported only after read-only polling confirms every recorded provider id is gone; on timeout the operator is told billing may continue |
@@ -49,9 +49,10 @@ API payloads):
 
 The Seattle create/delete observation is stronger evidence for `us-sea` than
 an additional `us-ord` connectivity preflight. `us-ord` was only an example
-and is not the selected pilot region. Live capacity is still not guaranteed
-and must be reconfirmed through the saved Terraform plan immediately before
-apply.
+and is not the selected pilot region. A saved Terraform plan verifies the
+intended configuration and planned actions only. It does not prove live
+capacity. Capacity is known when the provider accepts provisioning and the
+instance reaches the expected running state.
 
 Authorized envelope: provider-native only; one GPU instance plus its one
 project/run-tagged firewall; six hours maximum instance lifetime; **$25
@@ -79,7 +80,7 @@ reviewed saved plan — not a read-only token.
 ## Files
 
 - `versions.tf` — Terraform **= 1.9.8**; provider `linode/linode` pinned to `4.1.0`; empty `backend "local" {}` for external state configuration at init.
-- `variables.tf` — validated inputs including `management_cidr` (rejects `0.0.0.0/0` and `::/0`).
+- `variables.tf` — D-0014 locks (`region=us-sea`, `gpu_instance_type=g3-gpu-rtxpro6000-blackwell-1`, `ttl_hours=6`) plus `management_cidr` (rejects `0.0.0.0/0` and `::/0`).
 - `main.tf` — the single GPU instance and its run-tagged firewall (inbound DROP; SSH from management CIDR only).
 - `outputs.tf` — ledger inputs including firewall id/label; instance IPv4 is sensitive.
 - `bootstrap/` — idempotent instance bootstrap with pinned driver/toolkit/docker packages and digest-pinned CUDA GPU probe.
@@ -139,8 +140,11 @@ blackwell-cloud plan --run-tag p3-pilot-20260907a
 ```
 
 Review the redacted plan text and recorded SHA-256 in the run's external
-lifecycle directory. Apply-stage plans containing delete, replace, update, or
-unrelated actions fail closed.
+lifecycle directory. The initial apply plan must create exactly
+`linode_instance.gpu_baseline` and `linode_firewall.gpu_baseline`. Apply-stage
+plans containing delete, replace, update, missing resources, extras, or
+unrelated actions fail closed. The plan confirms intended configuration and
+actions only; it is not a live-capacity guarantee.
 
 ### 4. Apply (billable) — exact saved plan only
 
@@ -167,10 +171,42 @@ blackwell-cloud reconcile --run-tag p3-pilot-20260907a
 ```
 
 Reconciliation is clean only when Terraform state is readable, the provider
-API was successfully checked, state and provider observations agree exactly,
-and no untracked or missing resource exists. Without a token, or when the
+API was successfully checked, exactly one instance and one firewall are
+present, and every resource matches by typed identity (Terraform address,
+resource type, provider ID, label, project tag, run tag, and instance
+region). Any missing, extra, duplicate, conflicting, or unverified resource
+leaves `reconciled=false` and blocks the pilot. Without a token, or when the
 provider lookup fails, the ledger records `reconciled=false`, writes a
 sanitized recovery explanation, and retains any pending record.
+
+## Where each step runs
+
+Lifecycle and Terraform operations (`init`, `plan`, `apply`, `reconcile`,
+`teardown-plan`, `destroy`, orphan report, session summary) run on the
+**owner's laptop**. Bootstrap, local serving, live provenance, and
+`blackwell-cloud pilot` run on the **GPU instance**, because instance
+metadata, Docker, `nvidia-smi`, and the loopback serving endpoint are
+instance-local.
+
+This diagnostic pilot uses a **manual private transfer**. Do not add a
+handoff, archive, or synchronization subsystem for this step.
+
+1. On the laptop, after a clean reconcile, securely copy only the approved
+   pilot config and a **read-only** ledger snapshot to an external private
+   directory on the GPU instance.
+2. Never copy Terraform state, `terraform.tfvars`, saved plans, or provider
+   credentials onto the instance.
+3. On the instance, check out and install the exact canonical commit that
+   produced the reviewed apply.
+4. Run bootstrap, serving, provenance, and the pilot on the instance.
+5. Securely copy results and pilot session records back to the laptop's
+   `LAB_RESULTS_DIR`.
+6. Validate those artifacts on the laptop (`blackwell-cloud verify-results`)
+   before normal teardown.
+
+Result-transfer failure must **never** prevent an identity-verified,
+digest-approved emergency teardown. If results cannot be copied back, still
+run `teardown-plan` / `destroy` from the laptop against the recorded ledger.
 
 ### 6. Bootstrap the instance
 
@@ -208,19 +244,27 @@ container to verify exactly one RTX PRO 6000 Blackwell GPU.
 
 ### 7. Short pilot (provider-native only)
 
+Run this on the GPU instance after the manual private transfer. The config
+path must be an existing absolute path outside the repository. The approval
+phrase names the run tag, run label, and SHA-256 of the config bytes:
+
 ```bash
 blackwell-cloud pilot \
   --run-tag p3-pilot-20260907a \
   --run-label pilot-a \
-  --config /path/to/pilot.json \
-  --approve "I approve the short Akamai pilot for run pilot-a"
+  --config /absolute/private/path/outside/the/repository/pilot.json \
+  --approve "I approve the short Akamai pilot for run p3-pilot-20260907a (pilot-a) using config sha256:<digest-of-those-config-bytes>"
 ```
 
-The pilot requires: no pending lifecycle operation; `reconciled=true`;
-`provider_checked=true`; exactly one instance and one firewall in the ledger;
-and live provenance re-verified **immediately before every cell** (observations
-from the first cell are never reused). Controlled-resource mode is rejected
-until joint cgroup enforcement is implemented.
+The pilot requires: the locked D-0014 envelope (provider-native, BF16,
+expected RTX PRO 6000 Blackwell GPU, exactly interactive/1, batch-heavy/4,
+and batch-heavy/8, one warm-up, one measured repetition, 20 tasks per cell);
+no pending lifecycle operation; `reconciled=true`; `provider_checked=true`;
+exactly one instance and one firewall in the ledger; and live provenance
+re-verified **immediately before every cell** (observations from the first
+cell are never reused). Config, approval, and ledger checks run before any
+model request, telemetry, or measurement. The full 12-cell baseline remains
+disabled.
 
 ### 8. Verify exported results
 

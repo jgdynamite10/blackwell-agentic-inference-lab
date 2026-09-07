@@ -307,6 +307,16 @@ class TestSavedPlan:
         with pytest.raises(LifecycleError, match="delete, replace, update, or unrelated"):
             make_plan(paths, tf_dir, runner)
 
+    def test_apply_stage_plan_missing_a_required_create_fails_closed(self, paths, tf_dir):
+        runner = FakeRunner(show_plan=plan_json([("linode_instance.gpu_baseline", ["create"])]))
+        with pytest.raises(LifecycleError, match="must create exactly"):
+            make_plan(paths, tf_dir, runner)
+
+    def test_apply_stage_plan_with_no_creates_fails_closed(self, paths, tf_dir):
+        runner = FakeRunner(show_plan=plan_json([]))
+        with pytest.raises(LifecycleError, match="must create exactly"):
+            make_plan(paths, tf_dir, runner)
+
     def test_wrong_terraform_cli_version_is_rejected(self, paths, tf_dir):
         class WrongVersionRunner(FakeRunner):
             def __call__(self, argv, cwd, env):
@@ -612,30 +622,143 @@ class TestReconcile:
         )
         assert "12345678" not in json.dumps(report)
 
+    def test_shared_numeric_ids_are_compared_as_typed_identity(self, paths, tf_dir):
+        colliding = json.loads(json.dumps(INSTANCE_STATE))
+        colliding["values"]["id"] = "555"
 
-def _reconcile_fetch(**extra_instances):
-    def fetch(path, token=None):
-        if path.startswith("/linode/instances"):
-            items = [
-                {
-                    "id": 12345678,
-                    "label": f"bwlab-{RUN_TAG}",
-                    "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
-                },
-                *extra_instances,
-            ]
-            return {"data": items, "pages": 1}
-        if path.startswith("/networking/firewalls"):
-            return {
-                "data": [
-                    {
-                        "id": 555,
-                        "label": f"bwlab-fw-{RUN_TAG}",
-                        "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
-                    }
-                ],
-                "pages": 1,
+        def fetch(path, token=None):
+            instance = {
+                "id": 555,
+                "label": f"bwlab-{RUN_TAG}",
+                "region": "us-ord",
+                "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
             }
+            if path.startswith("/linode/instances/"):
+                return instance
+            if path.startswith("/networking/firewalls/"):
+                raise RuntimeError("firewall absent")
+            if path.startswith("/linode/instances"):
+                return {"data": [instance], "pages": 1}
+            if path.startswith("/networking/firewalls"):
+                return {"data": [], "pages": 1}
+            return {"data": [], "pages": 1}
+
+        report = lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(show_state=state_json([colliding, FIREWALL_STATE])),
+            fetch=fetch,
+            token="t",
+        )
+        assert report["reconciled"] is False
+        assert report["missing_from_provider_count"] == 1
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert ledger["reconciled"] is False
+
+    def test_extra_instance_sharing_firewall_numeric_id_is_untracked(self, paths, tf_dir):
+        extra = {"id": 555, "label": "mystery", "tags": [f"run:{RUN_TAG}"]}
+        report = lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(),
+            fetch=_reconcile_fetch(extra_instances=(extra,)),
+            token="t",
+        )
+        assert report["reconciled"] is False
+        assert report["untracked_billable_count"] == 1
+
+    def test_region_mismatch_blocks_reconciliation(self, paths, tf_dir):
+        report = lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(),
+            fetch=_reconcile_fetch(instance_overrides={"region": "us-sea"}),
+            token="t",
+        )
+        assert report["reconciled"] is False
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert any("region" in item for item in ledger["reconciliation"]["identity_mismatches"])
+
+    def test_label_mismatch_blocks_reconciliation(self, paths, tf_dir):
+        report = lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(),
+            fetch=_reconcile_fetch(instance_overrides={"label": "someone-elses-box"}),
+            token="t",
+        )
+        assert report["reconciled"] is False
+
+    def test_missing_authorized_firewall_blocks_reconciliation(self, paths, tf_dir):
+        report = lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(show_state=state_json([INSTANCE_STATE])),
+            fetch=_reconcile_fetch(),
+            token="t",
+        )
+        assert report["reconciled"] is False
+        assert report["untracked_billable_count"] == 1
+
+    def test_duplicate_state_addresses_block_reconciliation(self, paths, tf_dir):
+        report = lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(
+                show_state=state_json([INSTANCE_STATE, INSTANCE_STATE, FIREWALL_STATE])
+            ),
+            fetch=_reconcile_fetch(),
+            token="t",
+        )
+        assert report["reconciled"] is False
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert ledger["reconciliation"]["duplicate_resources"]
+
+
+def _reconcile_fetch(
+    extra_instances=(), extra_firewalls=(), instance_overrides=None, firewall_overrides=None
+):
+    instance = {
+        "id": 12345678,
+        "label": f"bwlab-{RUN_TAG}",
+        "region": "us-ord",
+        "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
+    }
+    firewall = {
+        "id": 555,
+        "label": f"bwlab-fw-{RUN_TAG}",
+        "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
+    }
+    instance.update(instance_overrides or {})
+    firewall.update(firewall_overrides or {})
+
+    def fetch(path, token=None):
+        if path.startswith("/linode/instances/"):
+            wanted = path.rsplit("/", 1)[-1]
+            if wanted == str(instance["id"]):
+                return instance
+            for extra in extra_instances:
+                if str(extra.get("id")) == wanted:
+                    return extra
+            raise RuntimeError("instance not found")
+        if path.startswith("/networking/firewalls/"):
+            wanted = path.rsplit("/", 1)[-1]
+            if wanted == str(firewall["id"]):
+                return firewall
+            for extra in extra_firewalls:
+                if str(extra.get("id")) == wanted:
+                    return extra
+            raise RuntimeError("firewall not found")
+        if path.startswith("/linode/instances"):
+            return {"data": [instance, *extra_instances], "pages": 1}
+        if path.startswith("/networking/firewalls"):
+            return {"data": [firewall, *extra_firewalls], "pages": 1}
         return {"data": [], "pages": 1}
 
     return fetch

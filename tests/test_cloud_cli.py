@@ -7,7 +7,9 @@ unconditionally (the full 12-cell baseline remains unauthorized).
 
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 
 import pytest
 from fakes import FakeClock
@@ -54,13 +56,13 @@ class TestFullBaselineGate:
         assert "decision-log" in err
 
 
-def pilot_config(tmp_path, comparison_mode="provider-native"):
+def pilot_config(tmp_path, comparison_mode="provider-native", **overrides):
     config = {
         "endpoint": {"base_url": "http://127.0.0.1:8000/v1", "model": "m"},
         "cloud": {
-            "instance_type": "g2-rtxpro6000-x1",
-            "region": "us-ord",
-            "list_price_usd_per_hour": 3.5,
+            "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
+            "region": "us-sea",
+            "list_price_usd_per_hour": 3.0,
             "price_source_date": "2026-09-06",
         },
         "model": {
@@ -80,18 +82,36 @@ def pilot_config(tmp_path, comparison_mode="provider-native"):
             "network_description": "plan default networking",
         },
         "comparison_mode": comparison_mode,
+        "expected_gpu_model": "RTX PRO 6000 Blackwell",
         "model_verification": {
             "artifact_dir": str(tmp_path / "model"),
             "digest_manifest": str(tmp_path / "model.sha256"),
         },
+        "cells": [
+            {"profile": "interactive", "concurrency": 1},
+            {"profile": "batch-heavy", "concurrency": 4},
+            {"profile": "batch-heavy", "concurrency": 8},
+        ],
+        "warmup_passes": 1,
+        "repetitions": 1,
+        "tasks_per_repetition": 20,
     }
+    config.update(overrides)
     path = tmp_path / "pilot.json"
     path.write_text(json.dumps(config), encoding="utf-8")
     return path
 
 
+def config_sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
 def pilot_argv(config_path, run_label="pilot-a", run_tag=RUN_TAG, approve=None):
-    phrase = approve or cli.PILOT_APPROVAL_TEMPLATE.format(run_label=run_label)
+    phrase = approve or cli.PILOT_APPROVAL_TEMPLATE.format(
+        run_tag=run_tag,
+        run_label=run_label,
+        config_sha256=config_sha256(config_path),
+    )
     return [
         "pilot",
         "--run-tag",
@@ -253,8 +273,8 @@ class TestPilotGate:
                 engine_version="0.27.1",
                 instance={
                     "provider_id": "42",
-                    "instance_type": "g2-rtxpro6000-x1",
-                    "region": "us-ord",
+                    "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
+                    "region": "us-sea",
                     "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
                 },
                 host_facts={
@@ -273,16 +293,122 @@ class TestPilotGate:
         )
 
         config = pilot_config(tmp_path)
-        config_data = json.loads(config.read_text(encoding="utf-8"))
-        config_data["cells"] = [
-            {"profile": "interactive", "concurrency": 1},
-            {"profile": "batch-heavy", "concurrency": 4},
-        ]
-        config.write_text(json.dumps(config_data), encoding="utf-8")
 
         assert main(pilot_argv(config)) == 1
         assert len(run_calls) == 1
         assert "container digest" in capsys.readouterr().err
+
+    def test_pilot_rejects_relative_config_path(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        config = pilot_config(tmp_path)
+        assert main(pilot_argv("pilot.json", approve="x")) == 1
+        assert "outside the repository" in capsys.readouterr().err
+        assert config.is_file()
+
+    def test_pilot_rejects_config_inside_the_repository(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        repo_file = Path(__file__).resolve().parents[1] / "README.md"
+        assert main(pilot_argv(repo_file)) == 1
+        assert "outside the repository" in capsys.readouterr().err
+
+    def test_pilot_rejects_approval_without_config_digest(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        config = pilot_config(tmp_path)
+        stale = f"I approve the short Akamai pilot for run {RUN_TAG} (pilot-a)"
+        assert main(pilot_argv(config, approve=stale)) == 1
+        err = capsys.readouterr().err
+        assert "BLOCKED" in err
+        assert config_sha256(config) in err
+
+    def test_pilot_does_not_construct_client_before_validation(self, tmp_path, capsys, monkeypatch):
+        constructed: list[int] = []
+
+        class Boom:
+            def __init__(self, *args, **kwargs):
+                constructed.append(1)
+
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        monkeypatch.setattr(
+            "blackwell_lab.workload.openai_client.OpenAICompatibleClient",
+            Boom,
+        )
+        config = pilot_config(tmp_path, cells=[{"profile": "interactive", "concurrency": 1}])
+        assert main(pilot_argv(config)) == 1
+        assert constructed == []
+        assert "exactly interactive/1" in capsys.readouterr().err
+
+
+class TestAuthorizedPilotConfig:
+    def test_valid_d0014_config_is_accepted(self, tmp_path):
+        path = pilot_config(tmp_path)
+        config = json.loads(path.read_bytes())
+        cli.validate_authorized_pilot_config(config)
+
+    def test_missing_cell_is_rejected(self, tmp_path):
+        path = pilot_config(
+            tmp_path,
+            cells=[
+                {"profile": "interactive", "concurrency": 1},
+                {"profile": "batch-heavy", "concurrency": 4},
+            ],
+        )
+        config = json.loads(path.read_text(encoding="utf-8"))
+        with pytest.raises(cli.ConfigError, match="exactly interactive/1"):
+            cli.validate_authorized_pilot_config(config)
+
+    def test_duplicate_cell_is_rejected(self, tmp_path):
+        path = pilot_config(
+            tmp_path,
+            cells=[
+                {"profile": "interactive", "concurrency": 1},
+                {"profile": "batch-heavy", "concurrency": 4},
+                {"profile": "batch-heavy", "concurrency": 4},
+            ],
+        )
+        config = json.loads(path.read_text(encoding="utf-8"))
+        with pytest.raises(cli.ConfigError, match="duplicate"):
+            cli.validate_authorized_pilot_config(config)
+
+    def test_additional_cell_is_rejected(self, tmp_path):
+        path = pilot_config(
+            tmp_path,
+            cells=[
+                {"profile": "interactive", "concurrency": 1},
+                {"profile": "batch-heavy", "concurrency": 4},
+                {"profile": "batch-heavy", "concurrency": 8},
+                {"profile": "reasoning-heavy", "concurrency": 1},
+            ],
+        )
+        config = json.loads(path.read_text(encoding="utf-8"))
+        with pytest.raises(cli.ConfigError, match="additional"):
+            cli.validate_authorized_pilot_config(config)
+
+    def test_wrong_precision_is_rejected(self, tmp_path):
+        path = pilot_config(tmp_path)
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["model"]["precision"] = "nvfp4"
+        with pytest.raises(cli.ConfigError, match="bf16"):
+            cli.validate_authorized_pilot_config(config)
+
+    def test_wrong_gpu_is_rejected(self, tmp_path):
+        path = pilot_config(tmp_path, expected_gpu_model="A100")
+        config = json.loads(path.read_text(encoding="utf-8"))
+        with pytest.raises(cli.ConfigError, match="RTX PRO 6000 Blackwell"):
+            cli.validate_authorized_pilot_config(config)
+
+    def test_wrong_warmup_or_repetitions_or_tasks_are_rejected(self, tmp_path):
+        path = pilot_config(tmp_path, warmup_passes=2)
+        config = json.loads(path.read_text(encoding="utf-8"))
+        with pytest.raises(cli.ConfigError, match="warmup_passes"):
+            cli.validate_authorized_pilot_config(config)
+        config["warmup_passes"] = 1
+        config["repetitions"] = 3
+        with pytest.raises(cli.ConfigError, match="repetitions"):
+            cli.validate_authorized_pilot_config(config)
+        config["repetitions"] = 1
+        config["tasks_per_repetition"] = 100
+        with pytest.raises(cli.ConfigError, match="tasks_per_repetition"):
+            cli.validate_authorized_pilot_config(config)
 
 
 class TestApplyDestroyGates:

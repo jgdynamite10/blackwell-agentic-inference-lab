@@ -14,7 +14,9 @@ Safety model (cost guardrails; AGENTS.md section 1; decisions D-0012/D-0013):
   plan's SHA-256, and a metadata record (commit SHA, run tag, Terraform
   version, provider-lock digest, configuration digest, state digest,
   creation time, per-resource action classification). An apply-stage plan
-  that contains delete, replace, or unrelated actions **fails closed**.
+  that contains delete, replace, update, or unrelated actions **fails
+  closed**, and the initial apply plan must create exactly
+  ``linode_instance.gpu_baseline`` and ``linode_firewall.gpu_baseline``.
 - **Apply executes exactly the reviewed saved plan.** The approval phrase
   names the run tag AND the saved plan's SHA-256; apply re-verifies the plan
   hash, configuration digest, lock digest, state digest, and commit SHA, and
@@ -25,8 +27,12 @@ Safety model (cost guardrails; AGENTS.md section 1; decisions D-0012/D-0013):
   every apply attempt; after every attempt — success or failure — the
   external state is inspected, optionally reconciled against read-only
   provider API results, and the ledger is atomically written or updated. A
-  failed ``terraform show`` still leaves a recovery record. The pilot is
-  blocked until reconciliation is clean.
+  failed ``terraform show`` still leaves a recovery record. Reconciliation
+  compares typed identity (Terraform address, resource type, provider ID,
+  label, project tag, run tag, and instance region) — never a combined
+  numeric-ID set. Any missing, extra, duplicate, conflicting, or unverified
+  resource leaves ``reconciled=false``. The pilot is blocked until
+  reconciliation is clean.
 - **Teardown is identity-safe.** Destroy requires that every target's
   Terraform address, resource type, provider id, project tag, run tag, and
   expected label match the ledger, the current state, and (when a read-only
@@ -429,6 +435,14 @@ def _enforce_stage_rules(stage: str, classified: list[dict]) -> None:
                 "plan text; maintenance/update workflows are not authorized and "
                 "destructive changes require the separate destroy workflow."
             )
+        creates = frozenset(c["address"] for c in classified if c["classification"] == "create")
+        if creates != EXPECTED_RESOURCE_ADDRESSES:
+            raise LifecycleError(
+                "the apply-stage plan must create exactly "
+                f"{', '.join(sorted(EXPECTED_RESOURCE_ADDRESSES))}; "
+                f"got {sorted(creates) or 'none'}. Updates, replacements, "
+                "deletions, missing resources, and extras are refused."
+            )
     elif stage == "destroy":
         wrong = [c for c in classified if c["classification"] not in ("delete", "no-op", "read")]
         if wrong:
@@ -657,6 +671,42 @@ def _state_resources(show_json: dict) -> list[dict]:
     return resources
 
 
+def _typed_provider_ref(resource_type: str, provider_id: object) -> dict[str, str]:
+    return {"type": resource_type, "provider_id": str(provider_id or "")}
+
+
+def _typed_ref_sort_key(item: dict) -> tuple[str, str]:
+    return (str(item.get("type") or ""), str(item.get("provider_id") or ""))
+
+
+def _identity_gaps(resource: dict, run_tag: str) -> list[str]:
+    """Required typed-identity fields for a clean reconciliation."""
+    address = resource.get("address") or "<unknown>"
+    gaps: list[str] = []
+    expected_type = EXPECTED_RESOURCE_TYPES.get(address)
+    if expected_type is None:
+        gaps.append(f"{address}: not an authorized Terraform address")
+    elif resource.get("type") != expected_type:
+        gaps.append(f"{address}: resource type is not {expected_type}")
+    if not resource.get("provider_id"):
+        gaps.append(f"{address}: provider ID missing")
+    if not resource.get("label"):
+        gaps.append(f"{address}: label missing")
+    tags = set(resource.get("tags") or [])
+    if PROJECT_TAG not in tags:
+        gaps.append(f"{address}: project tag missing")
+    if f"run:{run_tag}" not in tags:
+        gaps.append(f"{address}: run tag missing")
+    if resource.get("type") == "linode_instance" and not resource.get("region"):
+        gaps.append(f"{address}: instance region missing")
+    return gaps
+
+
+def _run_tagged_items(items: list[dict], run_tag: str) -> list[dict]:
+    label = f"run:{run_tag}"
+    return [item for item in items if label in (item.get("tags") or [])]
+
+
 def reconcile(
     run_tag: str,
     *,
@@ -669,11 +719,14 @@ def reconcile(
     """Inspects external state, reconciles with the provider, updates the ledger.
 
     Runs after EVERY apply attempt (including failures) and on demand. When a
-    read-only token is locally available, provider-visible run-tagged
-    resources are compared against the state so possibly created, billable,
-    or untracked resources are clearly reported. A failed ``terraform show``
-    still produces a recovery ledger record. The returned report is
-    sanitized (labels and counts, no provider ids).
+    read-only token is locally available, each state resource is matched by
+    typed identity (Terraform address, resource type, provider ID, label,
+    project tag, run tag, and instance region) against the per-resource
+    provider API view. Run-tagged extras are detected from the instance and
+    firewall lists using the same typed key — never a combined numeric-ID
+    set. Exactly one instance and one firewall are required. A failed
+    ``terraform show`` still produces a recovery ledger record. The returned
+    report is sanitized (labels and counts, no provider ids).
     """
     validate_run_tag(run_tag)
     directory = tf_dir or default_terraform_dir()
@@ -693,6 +746,8 @@ def reconcile(
         "provider_checked": False,
         "untracked_billable": [],
         "missing_from_provider": [],
+        "identity_mismatches": [],
+        "duplicate_resources": [],
     }
     if fetch is None or not token:
         reconciliation["provider_note"] = (
@@ -713,23 +768,92 @@ def reconcile(
             )
         else:
             reconciliation["provider_checked"] = True
-            run_tag_label = f"run:{run_tag}"
-            provider_ids = {
-                str(item.get("id", ""))
-                for item in [*instances, *firewalls]
-                if run_tag_label in (item.get("tags") or [])
+            state_keys = {
+                (r.get("type"), r.get("provider_id"))
+                for r in resources
+                if r.get("type") and r.get("provider_id")
             }
-            state_ids = {r["provider_id"] for r in resources if r["provider_id"]}
-            reconciliation["untracked_billable"] = sorted(provider_ids - state_ids)
-            reconciliation["missing_from_provider"] = sorted(state_ids - provider_ids)
+            extras: list[dict] = []
+            seen_list_keys: set[tuple[str, str]] = set()
+            list_duplicates: list[dict] = []
+            for resource_type, items in (
+                ("linode_instance", instances),
+                ("linode_firewall", firewalls),
+            ):
+                for item in _run_tagged_items(items, run_tag):
+                    key = (resource_type, str(item.get("id") or ""))
+                    if key in seen_list_keys:
+                        list_duplicates.append(_typed_provider_ref(*key))
+                        continue
+                    seen_list_keys.add(key)
+                    if key not in state_keys:
+                        extras.append(_typed_provider_ref(*key))
+            reconciliation["untracked_billable"] = sorted(extras, key=_typed_ref_sort_key)
+            reconciliation["duplicate_resources"] = sorted(list_duplicates, key=_typed_ref_sort_key)
 
-    incomplete = [r["address"] for r in resources if not r["provider_id"]]
+            missing: list[dict] = []
+            mismatches: list[str] = []
+            for resource in resources:
+                mismatches.extend(_identity_gaps(resource, run_tag))
+                provider_view: dict | None = None
+                if resource.get("type") in ("linode_instance", "linode_firewall"):
+                    try:
+                        provider_view = fetch(_provider_view_path(resource), token)
+                        if not isinstance(provider_view, dict):
+                            provider_view = None
+                    except Exception:
+                        provider_view = None
+                    if provider_view is None:
+                        missing.append(
+                            _typed_provider_ref(
+                                resource.get("type") or "", resource.get("provider_id")
+                            )
+                        )
+                mismatches.extend(
+                    _verify_resource_identity(
+                        resource,
+                        resource,
+                        run_tag,
+                        provider_view=provider_view,
+                        provider_checked=True,
+                    )
+                )
+            reconciliation["missing_from_provider"] = sorted(missing, key=_typed_ref_sort_key)
+            reconciliation["identity_mismatches"] = sorted(set(mismatches))
+
+    addresses = [r.get("address") for r in resources]
+    duplicate_addresses = sorted({addr for addr in addresses if addr and addresses.count(addr) > 1})
+    if duplicate_addresses:
+        reconciliation["duplicate_resources"] = sorted(
+            [
+                *reconciliation["duplicate_resources"],
+                *(
+                    {"type": "terraform_address", "provider_id": addr}
+                    for addr in duplicate_addresses
+                ),
+            ],
+            key=_typed_ref_sort_key,
+        )
+
+    instances = [r for r in resources if r.get("type") == "linode_instance"]
+    firewalls = [r for r in resources if r.get("type") == "linode_firewall"]
+    expected_shape = (
+        set(addresses) == EXPECTED_RESOURCE_ADDRESSES
+        and len(resources) == 2
+        and len(instances) == 1
+        and len(firewalls) == 1
+        and not duplicate_addresses
+    )
+    incomplete = [r["address"] for r in resources if _identity_gaps(r, run_tag)]
     clean = (
         state_readable
         and reconciliation["provider_checked"]
+        and expected_shape
         and not incomplete
         and not reconciliation["untracked_billable"]
         and not reconciliation["missing_from_provider"]
+        and not reconciliation["identity_mismatches"]
+        and not reconciliation["duplicate_resources"]
     )
 
     ledger = {
@@ -939,10 +1063,26 @@ def _verify_resource_identity(
                 mismatches.append(f"{address}: expected tags missing in the API observation")
             if ledger_resource.get("type") == "linode_instance":
                 api_region = provider_view.get("region")
-                if api_region and api_region != state_resource.get("region"):
-                    mismatches.append(f"{address}: region differs from the API observation")
-                if api_region and api_region != ledger_resource.get("region"):
-                    mismatches.append(f"{address}: region differs between ledger and API")
+                if not api_region:
+                    mismatches.append(
+                        f"{address}: instance region missing from the API observation"
+                    )
+                else:
+                    if api_region != state_resource.get("region"):
+                        mismatches.append(f"{address}: region differs from the API observation")
+                    if api_region != ledger_resource.get("region"):
+                        mismatches.append(f"{address}: region differs between ledger and API")
+    if ledger_resource.get("type") == "linode_instance":
+        if not ledger_resource.get("region"):
+            mismatches.append(f"{address}: instance region missing from the ledger")
+        if state_resource is not None and not state_resource.get("region"):
+            mismatches.append(f"{address}: instance region missing from state")
+        elif (
+            state_resource is not None
+            and ledger_resource.get("region")
+            and ledger_resource.get("region") != state_resource.get("region")
+        ):
+            mismatches.append(f"{address}: instance region differs between ledger and state")
     return mismatches
 
 

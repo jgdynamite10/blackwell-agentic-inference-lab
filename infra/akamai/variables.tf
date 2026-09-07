@@ -20,37 +20,30 @@ variable "run_tag" {
 
 variable "region" {
   description = <<-EOT
-    Akamai region id for the instance (e.g. "us-ord"). Must be one of the
-    documented RTX PRO 6000 limited-availability regions AND eligible for
-    this account (verify with scripts/preflight/check_akamai.py first).
-    EU, Singapore, and Jakarta regions carry documented price surcharges.
+    Akamai region id for the authorized D-0014 diagnostic pilot. Locked to
+    us-sea. A saved Terraform plan verifies this intended configuration only;
+    it does not prove live capacity.
   EOT
   type        = string
+  default     = "us-sea"
 
   validation {
-    condition     = can(regex("^[a-z]{2,3}(-[a-z0-9]+)+$", var.region))
-    error_message = "region must be a Linode region id such as us-ord."
+    condition     = var.region == "us-sea"
+    error_message = "region must equal us-sea for the authorized D-0014 diagnostic pilot."
   }
 }
 
 variable "gpu_instance_type" {
   description = <<-EOT
-    The exact single-GPU RTX PRO 6000 Blackwell plan id, as shown in the
-    onboarded account's catalog (the id is confirmed by the authenticated
-    preflight; the plan is limited-availability and absent from the public
-    catalog). This module deploys ONLY a single-GPU Blackwell plan: plans
-    with more GPUs are rejected.
+    Dedicated single-GPU RTX PRO 6000 Blackwell plan for the authorized
+    D-0014 diagnostic pilot. Locked to g3-gpu-rtxpro6000-blackwell-1.
   EOT
   type        = string
+  default     = "g3-gpu-rtxpro6000-blackwell-1"
 
   validation {
-    # Single-GPU RTX PRO 6000 Blackwell plan ids only. Multi-GPU variants
-    # (e.g. *-x2/-x4 suffixes) and non-Blackwell GPU plans are refused.
-    condition = (
-      can(regex("rtxpro6000|rtx-pro-6000", var.gpu_instance_type)) &&
-      !can(regex("(x2|x4|x8)$", var.gpu_instance_type))
-    )
-    error_message = "gpu_instance_type must be a single-GPU RTX PRO 6000 Blackwell plan id."
+    condition     = var.gpu_instance_type == "g3-gpu-rtxpro6000-blackwell-1"
+    error_message = "gpu_instance_type must equal g3-gpu-rtxpro6000-blackwell-1 for the authorized D-0014 diagnostic pilot."
   }
 }
 
@@ -102,14 +95,15 @@ variable "authorized_ssh_key" {
 variable "ttl_hours" {
   description = <<-EOT
     Intended maximum session length in hours, recorded as a ttl tag.
-    Informational cost control: Akamai has no native auto-stop, and powering
-    off does NOT stop billing — the instance must be DELETED to stop charges.
+    Locked to 6 for the authorized D-0014 diagnostic pilot. Informational
+    cost control: Akamai has no native auto-stop, and powering off does NOT
+    stop billing — the instance must be DELETED to stop charges.
   EOT
   type        = number
   default     = 6
 
   validation {
-    condition     = var.ttl_hours >= 1 && var.ttl_hours <= 24 && floor(var.ttl_hours) == var.ttl_hours
-    error_message = "ttl_hours must be a whole number between 1 and 24."
+    condition     = var.ttl_hours == 6
+    error_message = "ttl_hours must equal 6 for the authorized D-0014 diagnostic pilot."
   }
 }

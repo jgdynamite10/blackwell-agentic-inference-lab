@@ -120,8 +120,10 @@ committed or pasted into chat, issues, PRs, or CI; see
   benchmark and collected no model-serving or benchmark results. The direct
   Seattle create/delete observation is stronger evidence for `us-sea` than
   an additional `us-ord` connectivity preflight; `us-ord` was only an
-  example and is not the selected pilot region. Live capacity must still be
-  reconfirmed through the saved Terraform plan immediately before apply.
+  example and is not the selected pilot region. A saved Terraform plan
+  verifies intended configuration and planned actions only; it does not
+  prove live capacity. Capacity is known when provisioning is accepted and
+  the instance reaches the expected running state.
 
 ## 3. Google Cloud — `g4-standard-48`
 
@@ -426,8 +428,10 @@ teardown tooling is implemented or executed in Phase 1.
 2. ~~Akamai limited-availability onboarding / Seattle price for the exact
    one-GPU plan~~ — recorded as owner-verified sanitized facts in D-0014
    (`g3-gpu-rtxpro6000-blackwell-1`, `us-sea`, $3.00/h catalog base, no
-   observed Seattle surcharge). Live capacity remains un-guaranteed and
-   must be reconfirmed by the saved Terraform plan immediately before apply.
+   observed Seattle surcharge). A saved Terraform plan verifies intended
+   configuration and planned actions only; it does not prove live capacity.
+   Capacity is known when provisioning is accepted and the instance reaches
+   the expected running state.
 3. Google Cloud `NVIDIA_RTX_PRO_6000_GPUS` quota and consumable regions.
 4. AWS G-instance vCPU quota and G7e regional capacity.
 5. Whether the NIM path requires a Production Branch model / NVIDIA AI

@@ -525,9 +525,10 @@ AWS/GCP quota values are recorded:
 
 The direct Seattle create/delete observation establishes stronger evidence
 for `us-sea` than an additional `us-ord` connectivity preflight. `us-ord`
-was only an example and is not the selected pilot region. Future live
-capacity is still not guaranteed and must be reconfirmed through the saved
-Terraform plan immediately before the authorized apply.
+was only an example and is not the selected pilot region. A saved Terraform
+plan verifies the intended configuration and planned actions only. It does
+not prove live capacity. Capacity is known when the provider accepts
+provisioning and the instance reaches the expected running state.
 
 ### Authorized pilot envelope
 
@@ -566,8 +567,15 @@ GPU-memory and CPU headroom, concurrency-8 behavior, telemetry, result
 persistence, and realized task latency.
 
 Terraform apply, the pilot command, and destroy continue to require their
-separate exact local approval phrases. This decision authorizes the
-envelope; it does not execute any provider operation.
+separate exact local approval phrases. Lifecycle and Terraform run on the
+owner's laptop; bootstrap, local serving, provenance, and the pilot run on
+the GPU instance after a manual private copy of the approved config and a
+read-only ledger snapshot. Terraform state, tfvars, and provider credentials
+are never copied to the instance. Result-transfer failure must not prevent
+an identity-verified, digest-approved emergency teardown.
+
+This decision authorizes the envelope; it does not execute any provider
+operation.
 
 **Rationale.** Owner Phase 3B pilot-authorization instruction (2026-09-06).
 A bounded compatibility/headroom session is the next authorized step after

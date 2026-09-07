@@ -95,9 +95,16 @@ class TestStaticConfiguration:
         variables = read("variables.tf")
         # Every variable declares a validation block.
         assert variables.count("variable ") == variables.count("validation {")
-        # Multi-GPU plans are rejected; the SSH key must be a public key.
-        assert "x2|x4|x8" in variables
         assert "ssh-ed25519" in variables
+
+    def test_variables_lock_authorized_pilot_identity(self):
+        variables = read("variables.tf")
+        assert 'var.region == "us-sea"' in variables
+        assert "region must equal us-sea" in variables
+        assert 'var.gpu_instance_type == "g3-gpu-rtxpro6000-blackwell-1"' in variables
+        assert "gpu_instance_type must equal g3-gpu-rtxpro6000-blackwell-1" in variables
+        assert "var.ttl_hours == 6" in variables
+        assert "ttl_hours must equal 6" in variables
 
     def test_ip_output_is_sensitive(self):
         outputs = read("outputs.tf")

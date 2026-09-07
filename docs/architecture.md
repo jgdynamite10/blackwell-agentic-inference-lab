@@ -280,11 +280,21 @@ explicitly authorized measurement:
 
 - **Plan is the default.** `blackwell-cloud plan` and `teardown-plan` are
   read-only; `apply` and `destroy` each require a separate explicit approval
-  phrase from the local owner and refuse hosted execution.
+  phrase from the local owner and refuse hosted execution. A saved plan
+  verifies intended configuration and actions only; it does not prove live
+  capacity.
+- **Laptop vs instance.** Lifecycle and Terraform run on the owner's laptop.
+  Bootstrap, local serving, provenance, and the diagnostic pilot run on the
+  GPU instance. This pilot uses a manual private copy of the approved config
+  and a read-only ledger snapshot — never Terraform state, tfvars, or
+  provider credentials. Result-transfer failure must not block an
+  identity-verified, digest-approved emergency teardown. See
+  [infra/akamai/README.md](../infra/akamai/README.md).
 - **Exact resource ledger.** Every applied resource is recorded (from
-  `terraform show -json`) in a per-run ledger outside Git; teardown targets
-  only the ledger's resources, matched by the run's unique tags. No broad
-  cleanup command exists.
+  `terraform show -json`) in a per-run ledger outside Git; reconciliation
+  and teardown match typed identity (address, type, provider ID, label,
+  project tag, run tag, instance region), not a combined numeric-ID set. No
+  broad cleanup command exists.
 - **Billing safety.** On Akamai, powering off a Linode does not stop
   billing — compute billing stops only when the service is deleted from the
   account. The watchdog limits runaway workload only. The normal
