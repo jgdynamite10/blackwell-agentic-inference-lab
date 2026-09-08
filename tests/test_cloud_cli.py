@@ -1,8 +1,9 @@
 """Tests for the blackwell-cloud CLI: gates, guards, and verification.
 
 Everything runs offline. Billable verbs are exercised only through their
-refusal paths or injected fakes; the full-baseline command must refuse
-unconditionally (the full 12-cell baseline remains unauthorized).
+refusal paths or injected fakes. The full-baseline command is D-0017
+implementation-authorized and still fail-closed without the digest-bearing
+phrase, a clean commit, and a clean ledger.
 """
 
 from __future__ import annotations
@@ -45,15 +46,28 @@ class TestReadiness:
 
 
 class TestFullBaselineGate:
-    def test_the_constant_is_disabled_in_source(self):
-        assert FULL_BASELINE_AUTHORIZED is False
+    def test_the_constant_is_enabled_in_source(self):
+        assert FULL_BASELINE_AUTHORIZED is True
 
-    def test_full_baseline_refuses_with_a_dedicated_exit_code(self, capsys):
-        assert main(["full-baseline"]) == 3
-        err = capsys.readouterr().err
-        assert "DISABLED" in err
-        assert "not authorized" in err
-        assert "decision-log" in err
+    def test_full_baseline_refuses_in_hosted_environments(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("CI", "1")
+        assert (
+            main(
+                [
+                    "full-baseline",
+                    "--run-tag",
+                    RUN_TAG,
+                    "--run-label",
+                    "baseline-a",
+                    "--config",
+                    str(tmp_path / "missing.json"),
+                    "--approve",
+                    "no",
+                ]
+            )
+            == 1
+        )
+        assert "hosted" in capsys.readouterr().err
 
 
 def pilot_config(tmp_path, comparison_mode="provider-native", **overrides):

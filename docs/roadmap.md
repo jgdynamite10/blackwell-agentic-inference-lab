@@ -5,8 +5,9 @@ explicitly authorizes it, and work stops at the end of the currently
 authorized phase** ([AGENTS.md](../AGENTS.md), section 7).
 
 Phase status: **Phases 1 and 2 are complete.** **Phase 3A is complete.**
-**Phase 3B is authorized only for one bounded Akamai compatibility/headroom
-pilot** (decision D-0014). The **full Phase 3 baseline is not authorized**.
+**Phase 3B D-0014 pilot is complete as a diagnostic.** Decision **D-0017
+authorizes implementation** of the exact Phase 3 Akamai 12-cell baseline;
+**live execution still requires separate digest-bearing approval phrases**.
 **Phase 4 and later phases remain unauthorized.**
 
 ## Phase 1 — Repository foundation and feasibility *(complete)*
@@ -64,9 +65,9 @@ sanitized authenticated preflight; and the `blackwell-cloud` workflows
 teardown plan, orphan report). Lifecycle-safety policy is recorded as
 decision D-0013.
 
-### Phase 3B — provisioning and measurement *(bounded pilot authorized; full baseline not authorized)*
+### Phase 3B — provisioning and measurement *(D-0014 pilot complete; D-0017 implementation authorized; live baseline not yet approved)*
 
-Decision D-0014 authorizes **only one** Akamai compatibility/headroom pilot:
+Decision D-0014 authorized **only one** Akamai compatibility/headroom pilot:
 
 - region `us-sea`, plan `g3-gpu-rtxpro6000-blackwell-1`;
 - exactly one GPU instance and its one project/run-tagged firewall;
@@ -82,11 +83,14 @@ exact local approval phrases. Teardown may target only ledger-recorded
 resources; post-destroy provider verification and an orphan report are
 mandatory.
 
-Full-run settings — model artifact and hash, vLLM container digest, BF16
-configuration, generation settings, warm-up, timeouts, resource allocation,
-and cgroup enforcement — are **frozen only after the pilot**. The full
-12-cell baseline then requires its own explicit authorization. Every
-provisioning action follows [AGENTS.md](../AGENTS.md) §1 and
+Decision **D-0017 freezes** those full-run settings (model revision and
+aggregate digest, vLLM 0.27.1 linux/amd64 digest, BF16, native OpenAI tool
+transport, generation 1.0 / 0.95 / 1024, joint 14-vCPU/100-GiB cgroup
+envelope, 1 warm-up + 5 × 200 tasks) and authorizes the `full-baseline`
+implementation. Live apply and `full-baseline` execution still require
+their separate digest-bearing phrases. The D-0014 six-hour / $25 envelope
+stays separately named. Phase 4 remains unauthorized. Every provisioning
+action follows [AGENTS.md](../AGENTS.md) §1 and
 [cost-guardrails.md](cost-guardrails.md).
 
 ## Phase 4 — NVIDIA optimization

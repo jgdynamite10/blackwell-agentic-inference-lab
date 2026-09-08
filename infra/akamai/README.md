@@ -3,10 +3,11 @@
 Terraform configuration for **exactly one** single-GPU NVIDIA RTX PRO 6000
 Blackwell Server Edition instance plus its run-tagged Cloud Firewall, used for
 one owner-approved session at a time. Phase 3A readiness is **complete**.
-Decision D-0014 authorizes **only** one bounded Phase 3B
-compatibility/headroom pilot. The full 12-cell baseline remains unauthorized.
-Actual apply, pilot, and destroy still require their separate exact local
-approval phrases.
+Decision D-0014 authorized the bounded Phase 3B compatibility/headroom
+pilot. Decision D-0017 authorizes **implementation** of the frozen 12-cell
+baseline. Live apply, `full-baseline`, and destroy still require their
+separate exact local approval phrases. The D-0014 six-hour / $25 envelope
+must not be treated as baseline authority.
 
 ## Safety contract (do not weaken)
 
@@ -57,13 +58,18 @@ intended configuration and planned actions only. It does not prove live
 capacity. Capacity is known when the provider accepts provisioning and the
 instance reaches the expected running state.
 
-Authorized envelope: provider-native only; one GPU instance plus its one
-project/run-tagged firewall; six hours maximum instance lifetime; **$25
-total** session ceiling; owner checkpoint at three elapsed hours.
-Diagnostic cells only: interactive/1, batch-heavy/4, batch-heavy/8 (one
-warm-up, one measured repetition, 20 tasks each). Pilot observations must
-not be represented as comparative benchmark findings. The full 12-cell
-baseline is not authorized.
+D-0014 pilot envelope (unchanged, separately named): provider-native only;
+one GPU instance plus its one project/run-tagged firewall; six hours
+maximum instance lifetime; **$25 total** session ceiling; owner checkpoint
+at three elapsed hours; diagnostic cells interactive/1, batch-heavy/4,
+batch-heavy/8.
+
+D-0017 full-baseline envelope (implementation only until a live phrase is
+issued): both comparison modes; joint 14-vCPU/100-GiB slice with swap 0;
+1 warm-up + 5 × 200 tasks; 12 cells in the recorded order; canary before
+each mode; ceilings 230 measured GPU-hours / 240 total live hours / $720
+at $3/hour. `session_kind=full-baseline` unlocks `ttl_hours` in 1–240
+without weakening the pilot lock.
 
 ## Credentials and API access
 
@@ -331,8 +337,27 @@ no pending lifecycle operation; `reconciled=true`; `provider_checked=true`;
 exactly one instance and one firewall in the ledger; and live provenance
 re-verified **immediately before every cell** (observations from the first
 cell are never reused). Config, approval, and ledger checks run before any
-model request, telemetry, or measurement. The full 12-cell baseline remains
-disabled.
+model request, telemetry, or measurement.
+
+### 7b. Full baseline (D-0017 implementation; live phrase still required)
+
+Host-resident systemd unit `bwlab-full-baseline.service` survives loss of
+the owner's SSH session. The watchdog recognizes
+`blackwell-cloud full-baseline` and is **not** an Akamai billing control.
+
+```bash
+blackwell-cloud full-baseline \
+  --run-tag p3-baseline-20260908a \
+  --run-label baseline-a \
+  --config /absolute/private/path/outside/the/repository/baseline.json \
+  --approve "I approve the Phase 3 Akamai 12-cell baseline for run p3-baseline-20260908a (baseline-a) using config sha256:<digest-of-those-config-bytes>"
+```
+
+The config must name the exact canonical commit, the frozen 12-cell order,
+the frozen pins, and 5 × 200 measurement counts. No flag or environment
+variable may expand the matrix. After each canary a sanitized projection
+that exceeds the D-0017 ceiling stops measured work. Completion or failure
+prepares a fresh teardown plan and stops for the exact destroy phrase.
 
 ### 8. Verify exported results
 

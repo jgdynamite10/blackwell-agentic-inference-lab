@@ -67,8 +67,8 @@ IDENTITY_PINS = (
     "GPU_PROBE_EXPECTED_GPU",
 )
 
-#: Pilot-candidate host/serving settings. These are required and must match
-#: the reviewed example; they are not the frozen full-baseline configuration.
+#: Frozen D-0017 host/serving settings. Required and must match the reviewed
+#: example. The D-0014 pilot continues to use the same pins.
 PILOT_RUNTIME_PINS = (
     "REQUIRED_OS_ID",
     "REQUIRED_OS_VERSION",

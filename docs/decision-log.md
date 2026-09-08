@@ -693,3 +693,88 @@ The correction is bounded to the wire protocol, launch parser flags, and
 measurement-contract wording. Task definitions, evaluator rules, maximum
 turns, seeds, temperatures, top_p values, concurrency cells, and success
 criteria are unchanged. The full 12-cell baseline remains unauthorized.
+
+## 2026-09-08 — D-0017: Phase 3 Akamai 12-cell baseline freeze and implementation authorization
+
+**No genuine baseline results predate this change.** Run-e's quality and
+performance remain diagnostic and nonpublishable because they used the
+retired text protocol. Run-e infrastructure, serving, live provenance,
+teardown, and the locally verified model aggregate
+`sha256:5d6a435f3e0faf95dd4a610c66fefd9c4ccbe350af950216dab9fec6f3d3da0d`
+at revision `a9904d24bcc1d289a1950fa9d2b978c47cf903b9` support this freeze.
+Raw run-e results do not enter Git.
+
+**Decision.** The owner authorizes **implementation** of the exact Phase 3
+Akamai 12-cell baseline. Live execution is **not** authorized by this
+entry; it still requires separate digest-bearing apply and
+`full-baseline` approval phrases. Phase 4 optimization remains
+unauthorized. Dynamo, NIM, TensorRT-LLM, NVFP4, and any other model are
+not added.
+
+**Frozen identity.**
+
+| Dimension | Frozen value |
+| --- | --- |
+| Provider / region / plan | Akamai Cloud / `us-sea` / `g3-gpu-rtxpro6000-blackwell-1` |
+| GPU | one RTX PRO 6000 Blackwell Server Edition |
+| Model | `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` |
+| Model revision | `a9904d24bcc1d289a1950fa9d2b978c47cf903b9` |
+| Aggregate artifact hash | `sha256:5d6a435f3e0faf95dd4a610c66fefd9c4ccbe350af950216dab9fec6f3d3da0d` |
+| Per-file digests | host-resident sha256sum manifest at `MODEL_DIGEST_MANIFEST`; live re-verified; never committed |
+| Precision | BF16 only |
+| Serving | vLLM 0.27.1 linux/amd64 `sha256:c2f3b1b964e47809b722b5e75b61b1e7b39a50f70388cf2bf2418f16a9f31da2` |
+| CUDA / driver / Docker / CTK | existing exact pins (CUDA 13.0, open driver 580.173.02, docker.io 29.1.3, CTK 1.20.0-1) |
+| Tool transport | native OpenAI `tools` / `tool_choice=auto` / `parallel_tool_calls=false` |
+| Parsers | `--reasoning-parser nemotron_v3`, `--tool-call-parser qwen3_coder`, auto tool choice enabled |
+| Reasoning mode | true |
+| Sampling | temperature 1.0, top_p 0.95, max_tokens 1024, seed 20260906 |
+| Workload | `cloud-ops-agent` 2.3.0; existing scenarios, evaluator, SLOs, timeouts |
+| Measurement | 1 warm-up pass, 5 measured repetitions, 200 balanced tasks per repetition |
+
+**Matrix and order** (also the AWS/GCP replica order):
+controlled-resource then provider-native; interactive then batch-heavy;
+concurrency 1, 4, 8. Twelve cells, 60 measured repetitions, 12,000
+measured task observations.
+
+**Controlled-resource mode.** One shared cgroup-v2 / systemd slice
+(`bwlab-controlled.slice`) applies a **joint** maximum of 14 vCPUs and
+100 GiB memory across the serving container and the benchmark process
+together. Swap is frozen at 0. The same numbers applied independently to
+each workload are rejected. Immediately before every controlled-resource
+cell the runner observes cpu.max, memory.max, swap, PID membership, and
+oom_kill. Provider-native mode verifies that no controlled slice, Docker
+resource limit, or residual cap remains. Mode transitions recreate
+serving from the already-verified local model and never redownload it.
+
+**Canary.** Before measured work in each comparison mode, a non-measured
+canary covers all ten scenarios once, exercises native `tool_calls` and
+`role=tool` round trips, and uses concurrency 8 for the
+controlled-resource headroom gate. Every task must terminate
+structurally (no endpoint, malformed call, invalid tool, timeout, or
+runtime error). Evaluator quality is not a gate. Failure writes a
+sanitized receipt, prepares a fresh teardown plan, and stops for destroy
+approval. Success continues into that mode's measured cells. Canary
+artifacts are diagnostic only.
+
+**Resume.** An external mode-0600 progress ledger is bound to the
+canonical commit, config digest, model and container digests, workload
+version, run tag, and exact matrix. Resume skips only repetitions whose
+manifest, result, observations, and digests all verify. Partial,
+corrupt, mismatched, or foreign artifacts are rejected. Completed
+genuine files are never overwritten. A host-resident systemd unit lets
+an active cell survive loss of the owner's SSH session. The watchdog
+recognizes `blackwell-cloud full-baseline` and remains a workload
+safeguard — it does not stop Akamai billing. No automatic provider
+deletion is authorized.
+
+**Ceilings (separately named from D-0014).** The six-hour / $25 pilot
+limit is unchanged. The full-baseline implementation ceiling is 230
+measured GPU-hours, 240 total live hours including setup and teardown
+allowance, and $720 maximum normalized exposure at the account-visible
+$3/hour rate. After each canary, a sanitized projection that exceeds
+the ceiling stops measured work and requires a new owner decision. These
+are implementation ceilings, not permission to apply resources.
+
+**Rationale.** Owner authorization of 2026-09-08 (Phase 3B full Akamai
+baseline enablement). Implementation is code-and-review only until the
+owner issues the exact apply and full-baseline phrases.

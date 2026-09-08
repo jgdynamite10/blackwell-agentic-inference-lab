@@ -108,6 +108,9 @@ class TestStaticConfiguration:
         assert "gpu_instance_type must equal g3-gpu-rtxpro6000-blackwell-1" in variables
         assert "var.ttl_hours == 6" in variables
         assert "ttl_hours must equal 6" in variables
+        assert 'var.session_kind == "pilot"' in variables
+        assert "full-baseline" in variables
+        assert "240" in variables
 
     def test_ip_output_is_sensitive(self):
         outputs = read("outputs.tf")
@@ -384,8 +387,8 @@ exit 0
         assert pins["SERVING_PORT"] == "8000"
         assert pins["WATCHDOG_IDLE_MINUTES"] == "45"
         assert "--dtype bfloat16" in pins["VLLM_EXTRA_ARGS"]
-        assert "NOT been validated" in env_example
-        assert "NVFP4" in env_example and "not part of this pilot" in env_example
+        assert "D-0017" in env_example
+        assert "NVFP4" in env_example and "not part of this baseline" in env_example
         assert "HF_TOKEN" not in env_example
         assert "LINODE_TOKEN" not in env_example
         assert "LAB_RESULTS_DIR" not in env_example

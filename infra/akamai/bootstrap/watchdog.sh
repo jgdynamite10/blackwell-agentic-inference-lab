@@ -16,7 +16,7 @@ is_active() {
   # Active when a benchmark driver is running or the serving container is
   # processing (container running counts as active only with a live driver;
   # an idle serving container alone does not keep the host up).
-  pgrep -f "blackwell-bench|blackwell-cloud pilot" >/dev/null 2>&1
+  pgrep -f "blackwell-bench|blackwell-cloud pilot|blackwell-cloud full-baseline" >/dev/null 2>&1
 }
 
 now_epoch="$(date +%s)"

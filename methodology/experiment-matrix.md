@@ -78,11 +78,16 @@ Before any full-baseline measurement, one short owner-approved
 - Scope: a **reduced task count** (indicatively ~20–25 tasks per profile at
   one or two concurrency levels), explicitly labeled a pilot; pilot output is
   never mixed with baseline results and never published.
-- Freeze point: model artifact and hash, vLLM container digest, BF16
-  configuration, generation settings, warm-up criterion, timeouts, resource
-  allocation, and cgroup enforcement are **frozen only after the pilot**
-  (with a decision-log entry). The full 12-cell baseline requires its own
-  separate authorization after the freeze.
+- Freeze point: decision **D-0017** froze the model revision and aggregate
+  digest, vLLM 0.27.1 linux/amd64 digest, BF16, native OpenAI tool
+  transport, generation 1.0 / 0.95 / 1024, warm-up, timeouts, and the joint
+  14-vCPU/100-GiB cgroup envelope. Pilot output remains diagnostic and is
+  never mixed with baseline results. Live 12-cell execution still requires
+  a separate digest-bearing `full-baseline` approval phrase.
+
+The frozen execution order (also used for later AWS and GCP replicas) is
+controlled-resource then provider-native; interactive then batch-heavy;
+concurrency 1, 4, 8.
 
 ## Phase 4 — optimization (Akamai)
 

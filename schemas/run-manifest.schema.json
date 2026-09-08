@@ -289,6 +289,29 @@
             }
           }
         },
+        "resource_enforcement": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Sanitized live observations of the joint cgroup envelope or of its verified absence. Never includes PIDs, paths, or provider identifiers.",
+          "properties": {
+            "verified": { "type": "boolean" },
+            "mode": {
+              "type": "string",
+              "enum": ["controlled-resource", "provider-native"]
+            },
+            "slice": { "type": "string" },
+            "joint": { "type": "boolean" },
+            "cpu_max": { "type": ["string", "null"] },
+            "memory_max_bytes": { "type": ["integer", "null"] },
+            "swap_max_bytes": { "type": ["integer", "null"] },
+            "oom_kill": { "type": ["integer", "null"] },
+            "serving_in_slice": { "type": "boolean" },
+            "benchmark_in_slice": { "type": "boolean" },
+            "docker_cpu_limit": { "type": "integer" },
+            "docker_memory_limit": { "type": "integer" },
+            "controlled_slice_present": { "type": "boolean" }
+          }
+        },
         "list_price_usd_per_hour": {
           "type": "number",
           "minimum": 0,

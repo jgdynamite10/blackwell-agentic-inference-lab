@@ -21,6 +21,7 @@ locals {
     local.project_tag,
     "run:${var.run_tag}",
     "ttl-hours:${var.ttl_hours}",
+    "session-kind:${var.session_kind}",
     "phase:3",
   ]
 }

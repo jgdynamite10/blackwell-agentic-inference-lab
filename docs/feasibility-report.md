@@ -307,12 +307,12 @@ is the binding CPU constraint (Akamai and AWS), 128 GiB the binding memory
 constraint (AWS); ~60 GB BF16 weights + serving runtime fit within 100 GiB
 with margin.
 
-**Not final:** per the exit criteria, the exact allocation between the two
-containers and the cgroup enforcement mechanism will be frozen **only after
-Phase 3 headroom validation** empirically confirms adequate headroom for
-model loading, serving, telemetry, and benchmark execution. CPU
-**architecture** differences (AMD Turin vs Intel Emerald Rapids vs Akamai's
-host CPU) cannot be equalized — they are recorded, not hidden.
+**Frozen by D-0017:** the joint envelope is enforced by one shared
+cgroup-v2 / systemd slice (`bwlab-controlled.slice`) applying 14 vCPUs and
+100 GiB (swap 0) across the serving container and the benchmark process
+together. Per-container Docker limits are refused. CPU **architecture**
+differences (AMD Turin vs Intel Emerald Rapids vs Akamai's host CPU)
+cannot be equalized — they are recorded, not hidden.
 
 ## 8. Approximate costs
 
@@ -324,7 +324,7 @@ verification** in the owner's local environment before budgeting decisions.
 | Phase | Basis | Estimate |
 | --- | --- | --- |
 | Phase 2 (synthetic workload) | No GPU; local dev + GitHub Actions CI (small usage; Actions minutes are free once the repository is public) | **≈ $0 cloud** |
-| Phase 3 (Akamai baseline, **full 12-cell estimate — not authorized**) | ~90–230 GPU-h (12 cells — both comparison modes per D-0012 — plus setup) × **$3.00/h** owner-observed Seattle catalog base price (D-0014; public advertised starting price remains $2.50/h; higher in EU/Singapore/Jakarta) + storage/egress | **≈ $270–$690** before incidental costs |
+| Phase 3 (Akamai baseline, **D-0017 implementation ceiling; live execution still requires a separate phrase**) | ~90–230 measured GPU-h planning range retained; ceiling 230 measured / 240 total live hours × **$3.00/h** owner-observed Seattle catalog base price (D-0014/D-0017; public advertised starting price remains $2.50/h; higher in EU/Singapore/Jakarta) + storage/egress | **$720** maximum normalized exposure before incidentals |
 | Phase 3B authorized pilot only | ≤ 6 GPU-h on one `g3-gpu-rtxpro6000-blackwell-1` in `us-sea` | **$25 total ceiling** (six hours × $3.00/h ≈ $18 before incidentals; not authorization of the full Phase 3 estimate) |
 | Phase 4 (optimization, **not authorized**) | ~80–200 GPU-h × **$3.00/h** Seattle observed plan price (same advertised-vs-observed distinction) | **≈ $240–$600** before incidental costs |
 | Phase 5 (Google Cloud) | ~60–140 GPU-h (12 cells: both comparison modes) × ~$4.50/h + Hyperdisk/local SSD | **≈ $280–$650** |

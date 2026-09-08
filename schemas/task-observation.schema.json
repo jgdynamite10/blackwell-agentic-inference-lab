@@ -19,8 +19,8 @@
     "repetition_index": { "type": "integer", "minimum": 1 },
     "phase": {
       "type": "string",
-      "enum": ["measured", "warmup"],
-      "description": "Warm-up files are retained for audit but never enter measured summaries."
+      "enum": ["measured", "warmup", "canary"],
+      "description": "Warm-up and canary files are retained for audit but never enter measured baseline summaries."
     },
     "observations": {
       "type": "array",

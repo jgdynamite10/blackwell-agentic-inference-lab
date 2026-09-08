@@ -1121,7 +1121,9 @@ class TestSessionRecord:
         assert set(summary["phases"]) == {
             "provisioning_s",
             "setup_s",
+            "setup_baseline_s",
             "pilot_s",
+            "baseline_s",
             "teardown_s",
         }
 

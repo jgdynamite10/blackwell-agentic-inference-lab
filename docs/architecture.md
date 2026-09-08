@@ -2,9 +2,10 @@
 
 This document describes both the **implemented architecture** (Phases 1–2
 and the completed Phase 3A readiness layer) and the intended architecture of
-later phases. Phase 3B is authorized only for one bounded
-compatibility/headroom pilot (decision D-0014). The full 12-cell baseline
-and later phases remain unauthorized.
+later phases. Decision D-0017 authorizes implementation of the frozen
+12-cell Akamai baseline. Live execution still requires separate
+digest-bearing approval phrases. Phase 4 and later phases remain
+unauthorized.
 
 ## Overview
 
@@ -204,13 +205,11 @@ privately with the run results.
 
 Two strictly separated modes (never mixed in analysis or reporting):
 
-1. **Controlled-resource mode.** The serving and benchmark workload run
-   under a documented common CPU and system-memory envelope that is the same
-   on all three providers, defined as a **joint total across both containers
-   combined** (provisional: 14 vCPUs / 100 GiB joint total, see
-   [feasibility-report.md](feasibility-report.md) §7). The exact per-container
-   allocation and the cgroup enforcement mechanism are frozen only after
-   Phase 3 headroom validation.
+1. **Controlled-resource mode.** The serving container and benchmark
+   process run under one shared cgroup-v2 / systemd slice
+   (`bwlab-controlled.slice`) that applies a **joint** maximum of 14 vCPUs
+   and 100 GiB memory (swap frozen at 0). The same numbers are never applied
+   independently to each workload (decision D-0017).
 2. **Provider-native mode.** Each provider's normal purchasable instance
    configuration, no artificial caps; evaluates what a customer actually
    receives, including economics.
@@ -223,17 +222,18 @@ memory, storage type, network configuration, virtualization, driver, CUDA
 version, OS, region, and any other material environmental facts, so
 differences are recorded rather than hidden.
 
-## Phase 3 — Akamai deployment architecture (3A readiness complete; 3B bounded pilot authorized)
+## Phase 3 — Akamai deployment architecture (3A complete; D-0017 implementation authorized)
 
 Phase 3A implemented the **readiness** layer: Terraform under
 [../infra/akamai/](../infra/akamai/), the bootstrap design under
 `infra/akamai/bootstrap/`, and the `blackwell-cloud` CLI
-(`src/blackwell_lab/cloud/`). Decision D-0014 authorizes one bounded
-compatibility/headroom pilot; every billable or destructive action still
+(`src/blackwell_lab/cloud/`). Decision D-0017 authorizes the frozen
+12-cell implementation, including the joint cgroup slice and
+`full-baseline` command. Every billable or destructive action still
 requires its separate exact local owner approval phrase and refuses to
-execute in hosted/CI environments. The full 12-cell baseline remains
-unauthorized. There is **no frontend application** — the entire workflow is
-CLI-first.
+execute in hosted/CI environments. Live full-baseline apply is not
+authorized by D-0017 itself. There is **no frontend application** — the
+entire workflow is CLI-first.
 
 ### Deployment view (single Akamai GPU instance)
 
