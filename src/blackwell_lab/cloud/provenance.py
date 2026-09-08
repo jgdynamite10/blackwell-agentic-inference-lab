@@ -16,9 +16,12 @@ Observed facts:
 - the **engine version** reported by the running service itself
   (vLLM's ``/version`` endpoint) — not a configured string;
 - the **instance identity** (provider id, type, region, run tags) from the
-  provider's link-local metadata service, verified against the lifecycle
-  ledger — the metadata service requires no credentials, so this check runs
-  on the instance without any token;
+  provider's link-local Metadata API: a fresh ephemeral metadata token is
+  obtained with ``PUT /v1/token`` immediately before each cell, then
+  ``GET /v1/instance`` is authenticated with that token. The metadata token
+  is not a Linode API credential and is never printed, persisted, or
+  returned. Live metadata never falls back to configuration, the ledger, or
+  the provider API;
 - **host and GPU facts** via :mod:`blackwell_lab.cloud.telemetry`, and the
   container's actual CUDA runtime (separate from the driver's max CUDA).
 """
@@ -35,11 +38,21 @@ from pathlib import Path
 
 from blackwell_lab.cloud import telemetry
 
-#: Linode/Akamai link-local metadata service (no credentials involved).
+#: Linode/Akamai link-local Metadata API (instance-local; not the Linode API).
 METADATA_BASE = "http://169.254.169.254/v1"
+METADATA_TOKEN_URL = f"{METADATA_BASE}/token"
+METADATA_INSTANCE_URL = f"{METADATA_BASE}/instance"
+METADATA_EXPIRY_SECONDS = 60
+METADATA_ACCEPT = "application/json"
 
 #: Injectable HTTP GET returning decoded JSON: (url) -> dict.
+#: Used only for engine-version and other unauthenticated local GETs.
 HttpGetJson = Callable[[str], dict]
+
+#: Injectable metadata HTTP request: (method, url, headers) -> JSON value.
+#: Used only for the authenticated Metadata API. Kept separate from
+#: :data:`HttpGetJson` so engine-version requests never carry metadata tokens.
+HttpRequestJson = Callable[[str, str, dict[str, str]], object]
 
 
 class ProvenanceError(RuntimeError):
@@ -65,10 +78,72 @@ def _require_local_or_private(url: str) -> None:
 
 
 def default_http_get_json(url: str) -> dict:
+    """Unauthenticated JSON GET for engine-version and similar local probes."""
     _require_local_or_private(url)
     request = urllib.request.Request(url)  # noqa: S310 - validated local/private URL
     with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
+        payload = json.load(response)
+    if not isinstance(payload, dict):
+        raise ProvenanceError("the local HTTP response was not a JSON object")
+    return payload
+
+
+def default_http_request_json(method: str, url: str, headers: dict[str, str]) -> object:
+    """Method-aware JSON request for the instance-local Metadata API only."""
+    _require_local_or_private(url)
+    request = urllib.request.Request(  # noqa: S310 - validated local/private URL
+        url,
+        data=None,
+        headers=dict(headers),
+        method=method.upper(),
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
         return json.load(response)
+
+
+def parse_metadata_token_response(payload: object) -> str:
+    """Parse the documented singleton JSON array ``["<token>"]``.
+
+    The token string is returned to the caller for immediate use and must
+    never be logged, persisted, or interpolated into an error message.
+    """
+    if not isinstance(payload, list) or len(payload) != 1:
+        raise ProvenanceError("the metadata token response was malformed")
+    token = payload[0]
+    if not isinstance(token, str) or not token.strip():
+        raise ProvenanceError("the metadata token response was malformed")
+    return token.strip()
+
+
+def _require_instance_id(value: object) -> str:
+    if isinstance(value, bool) or value is None:
+        raise ProvenanceError("the instance metadata response was incomplete")
+    if isinstance(value, int):
+        text = str(value)
+    elif isinstance(value, str):
+        text = value.strip()
+    else:
+        raise ProvenanceError("the instance metadata response was incomplete")
+    if not text:
+        raise ProvenanceError("the instance metadata response was incomplete")
+    return text
+
+
+def _require_instance_string(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ProvenanceError("the instance metadata response was incomplete")
+    return value.strip()
+
+
+def _require_instance_tags(value: object) -> list[str]:
+    if not isinstance(value, list):
+        raise ProvenanceError("the instance metadata tags were invalid")
+    tags: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ProvenanceError("the instance metadata tags were invalid")
+        tags.append(item)
+    return tags
 
 
 def version_endpoint_url(base_url: str) -> str:
@@ -108,33 +183,66 @@ def observe_engine_version(base_url: str, *, http_get: HttpGetJson = default_htt
     return version
 
 
-def observe_instance_identity(*, http_get: HttpGetJson = default_http_get_json) -> dict:
-    """Instance identity from the provider's link-local metadata service.
+def observe_instance_identity(*, http_request: HttpRequestJson = default_http_request_json) -> dict:
+    """Instance identity from the official Akamai Metadata API.
 
-    Returns ``{"provider_id", "instance_type", "region", "tags"}`` as
-    observed on the instance itself. No credentials are involved; the
-    metadata service is only reachable from the instance.
+    Obtains a fresh ephemeral metadata token with ``PUT /v1/token`` and
+    immediately GETs ``/v1/instance`` with that token. The token is not a
+    Linode API credential and is never printed, persisted, returned, or
+    included in an exception. Failures never fall back to configuration,
+    the lifecycle ledger, or the provider API.
     """
     try:
-        payload = http_get(f"{METADATA_BASE}/instance")
+        token_payload = http_request(
+            "PUT",
+            METADATA_TOKEN_URL,
+            {
+                "Metadata-Token-Expiry-Seconds": str(METADATA_EXPIRY_SECONDS),
+                "Accept": METADATA_ACCEPT,
+            },
+        )
+        token = parse_metadata_token_response(token_payload)
     except ProvenanceError:
+        raise
+    except Exception:
+        raise ProvenanceError(
+            "the instance metadata token could not be obtained; instance "
+            "identity cannot be observed (and is never taken from configuration)"
+        ) from None
+
+    try:
+        payload = http_request(
+            "GET",
+            METADATA_INSTANCE_URL,
+            {
+                "Metadata-Token": token,
+                "Accept": METADATA_ACCEPT,
+            },
+        )
+    except ProvenanceError as exc:
+        if token in str(exc):
+            raise ProvenanceError(
+                "the instance metadata service is unreachable; instance "
+                "identity cannot be observed (and is never taken from configuration)"
+            ) from None
         raise
     except Exception:
         raise ProvenanceError(
             "the instance metadata service is unreachable; instance identity "
             "cannot be observed (and is never taken from configuration)"
         ) from None
-    provider_id = str(payload.get("id", "")).strip()
-    instance_type = str(payload.get("type", "")).strip()
-    region = str(payload.get("region", "")).strip()
-    tags = payload.get("tags") or []
-    if not provider_id or not instance_type or not region:
+
+    if not isinstance(payload, dict):
         raise ProvenanceError("the instance metadata response was incomplete")
+    provider_id = _require_instance_id(payload.get("id"))
+    instance_type = _require_instance_string(payload.get("type"))
+    region = _require_instance_string(payload.get("region"))
+    tags = _require_instance_tags(payload.get("tags"))
     return {
         "provider_id": provider_id,
         "instance_type": instance_type,
         "region": region,
-        "tags": list(tags),
+        "tags": tags,
     }
 
 
@@ -162,6 +270,7 @@ def verify_live_provenance(
     serving_container_name: str = "bwlab-vllm",
     runner: telemetry.CommandRunner = telemetry.run_command,
     http_get: HttpGetJson = default_http_get_json,
+    http_request: HttpRequestJson = default_http_request_json,
     host_facts: dict | None = None,
     gpu_facts: dict | None = None,
 ) -> ObservedProvenance:
@@ -195,7 +304,7 @@ def verify_live_provenance(
     if expected_cuda and observed_container_cuda != expected_cuda:
         mismatches.append("container CUDA runtime differs from the approved pilot configuration")
 
-    instance = observe_instance_identity(http_get=http_get)
+    instance = observe_instance_identity(http_request=http_request)
     ledger_instances = [
         r for r in ledger.get("resources", []) if r.get("type") == "linode_instance"
     ]

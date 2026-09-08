@@ -325,18 +325,28 @@ class TestPilotGate:
             if url == "http://127.0.0.1:8000/version":
                 return {"version": approved["serving"]["engine_version"]}
             if url.startswith(provenance.METADATA_BASE):
+                raise AssertionError(
+                    f"engine-version HTTP GET must not call the Metadata API: {url}"
+                )
+            raise AssertionError(f"unexpected URL observed: {url}")
+
+        def http_request(method: str, url: str, headers: dict[str, str]) -> object:
+            if method == "PUT" and url == provenance.METADATA_TOKEN_URL:
+                return ["cli-metadata-token-not-a-credential"]
+            if method == "GET" and url == provenance.METADATA_INSTANCE_URL:
                 return {
                     "id": "42",
                     "type": approved["cloud"]["instance_type"],
                     "region": approved["cloud"]["region"],
                     "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
                 }
-            raise AssertionError(f"unexpected URL observed: {url}")
+            raise AssertionError(f"unexpected metadata request: {method} {url}")
 
         real_verify = provenance.verify_live_provenance
 
         def verify_with_injected_http(**kwargs):
             kwargs["http_get"] = http_get
+            kwargs["http_request"] = http_request
             return real_verify(**kwargs)
 
         monkeypatch.setattr(provenance, "verify_live_provenance", verify_with_injected_http)
@@ -369,6 +379,110 @@ class TestPilotGate:
         assert main(pilot_argv(config)) == 0
         version_urls = [url for url in requested if url.endswith("/version")]
         assert version_urls == ["http://127.0.0.1:8000/version"] * 3
+
+    def _pilot_with_live_provenance(self, tmp_path, monkeypatch, *, http_request, run_calls):
+        from blackwell_lab.cloud import provenance, realbench, telemetry
+
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        ledger = pilot_ready_ledger()
+        ledger["resources"][0]["region"] = "us-sea"
+        lifecycle.write_private_json(paths.ledger_path, ledger)
+        config = pilot_config(tmp_path)
+        approved = json.loads(config.read_text(encoding="utf-8"))
+
+        def http_get(url: str) -> dict:
+            if url == "http://127.0.0.1:8000/version":
+                return {"version": approved["serving"]["engine_version"]}
+            raise AssertionError(f"unexpected URL observed: {url}")
+
+        real_verify = provenance.verify_live_provenance
+
+        def verify_with_injected_http(**kwargs):
+            kwargs["http_get"] = http_get
+            kwargs["http_request"] = http_request
+            return real_verify(**kwargs)
+
+        monkeypatch.setattr(provenance, "verify_live_provenance", verify_with_injected_http)
+        monkeypatch.setattr(
+            telemetry,
+            "resolve_container_digest",
+            lambda *args, **kwargs: approved["serving"]["container_digest"],
+        )
+        monkeypatch.setattr(
+            telemetry,
+            "verify_model_artifact",
+            lambda *args, **kwargs: approved["model"]["artifact_hash"],
+        )
+        monkeypatch.setattr(
+            telemetry, "observe_container_cuda_version", lambda *args, **kwargs: "13.0"
+        )
+        monkeypatch.setattr(
+            telemetry, "collect_host_facts", lambda **kwargs: dict(approved["host"])
+        )
+        monkeypatch.setattr(
+            telemetry,
+            "collect_gpu_facts",
+            lambda *args, **kwargs: {
+                "gpu_model": "NVIDIA RTX PRO 6000 Blackwell",
+                "driver_version": "580",
+            },
+        )
+        monkeypatch.setattr(
+            realbench, "run_real_cell", lambda *args, **kwargs: run_calls.append(1) or []
+        )
+        return config, approved
+
+    def test_each_pilot_cell_obtains_fresh_metadata_token(self, tmp_path, monkeypatch):
+        from blackwell_lab.cloud import provenance
+
+        tokens = [f"fresh-cell-token-{index}" for index in (1, 2, 3)]
+        issued = iter(tokens)
+        calls: list[tuple[str, str, dict[str, str]]] = []
+
+        def http_request(method: str, url: str, headers: dict[str, str]) -> object:
+            calls.append((method, url, dict(headers)))
+            if method == "PUT" and url == provenance.METADATA_TOKEN_URL:
+                return [next(issued)]
+            if method == "GET" and url == provenance.METADATA_INSTANCE_URL:
+                return {
+                    "id": "42",
+                    "type": "g3-gpu-rtxpro6000-blackwell-1",
+                    "region": "us-sea",
+                    "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
+                }
+            raise AssertionError(f"unexpected metadata request: {method} {url}")
+
+        run_calls: list[int] = []
+        config, _approved = self._pilot_with_live_provenance(
+            tmp_path, monkeypatch, http_request=http_request, run_calls=run_calls
+        )
+        assert main(pilot_argv(config)) == 0
+        assert [method for method, _url, _headers in calls] == ["PUT", "GET"] * 3
+        assert [
+            headers["Metadata-Token"] for method, _url, headers in calls if method == "GET"
+        ] == tokens
+        assert len(run_calls) == 3
+
+    def test_metadata_failure_makes_zero_measurement_calls(self, tmp_path, capsys, monkeypatch):
+        from blackwell_lab.cloud import provenance
+
+        def http_request(method: str, url: str, headers: dict[str, str]) -> object:
+            if method == "PUT" and url == provenance.METADATA_TOKEN_URL:
+                raise OSError("metadata token unavailable")
+            raise AssertionError(f"instance GET must not run after token PUT failure: {method}")
+
+        run_calls: list[int] = []
+        config, _approved = self._pilot_with_live_provenance(
+            tmp_path, monkeypatch, http_request=http_request, run_calls=run_calls
+        )
+        assert main(pilot_argv(config)) == 1
+        assert run_calls == []
+        err = capsys.readouterr().err
+        assert "never taken from configuration" in err
+        assert "metadata token unavailable" not in err
 
     def test_pilot_rejects_relative_config_path(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
