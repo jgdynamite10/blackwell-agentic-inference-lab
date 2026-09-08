@@ -562,3 +562,245 @@ class TestFetchModelStatic:
         assert "--entrypoint python3" in script
         assert "huggingface_hub" in script
         assert "staging" in script
+
+
+class TestOpenModuleLicenseQuery:
+    """The live run-c failure was the reversed modinfo argument order."""
+
+    _CORRECT_ARGV = "-F license nvidia"
+    _OBSOLETE_ARGV = "nvidia -F license"
+
+    def test_script_uses_standard_modinfo_flag_order_only(self):
+        script = (BOOTSTRAP_DIR / "bootstrap.sh").read_text(encoding="utf-8")
+        assert "modinfo -F license nvidia" in script
+        assert "modinfo nvidia -F license" not in script
+        assert "require_host_command modinfo" in script
+        assert "/sys/module/nvidia/license" not in script
+        assert "nvidia-smi is responding; the open-module license gate follows" in script
+        assert "driver already active (no reboot needed)" not in script
+        assert "REBOOT_REQUIRED_EXIT=2" in script
+
+    def _gpu_binaries(
+        self,
+        bin_dir: Path,
+        *,
+        argv_log: Path,
+        license_output: str | None,
+        license_exit: int = 0,
+        obsolete_output: str = "NVIDIA",
+    ) -> None:
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        license_text = "" if license_output is None else license_output
+        _write_exec(
+            bin_dir / "modinfo",
+            f"""#!/usr/bin/env bash
+printf '%s\\n' "$*" >> '{argv_log}'
+if [ "$#" -eq 3 ] && [ "$1" = "-F" ] \\
+    && [ "$2" = "license" ] && [ "$3" = "nvidia" ]; then
+  printf '%s\\n' '{license_text}'
+  exit {license_exit}
+fi
+if [ "$#" -eq 3 ] && [ "$1" = "nvidia" ] \\
+    && [ "$2" = "-F" ] && [ "$3" = "license" ]; then
+  printf '%s\\n' '{obsolete_output}'
+  exit 0
+fi
+exit 1
+""",
+        )
+        _write_exec(
+            bin_dir / "nvidia-smi",
+            """#!/usr/bin/env bash
+case " $* " in
+  *'--query-gpu=driver_version'*) printf '580.173.02\\n' ;;
+  *'--query-gpu=name'*)
+    printf 'NVIDIA RTX PRO 6000 Blackwell Server Edition\\n'
+    ;;
+  *'--list-gpus'*)
+    printf 'GPU 0: NVIDIA RTX PRO 6000 Blackwell Server Edition\\n'
+    ;;
+  *)
+    printf '| NVIDIA-SMI 580.173.02    Driver Version: 580.173.02    CUDA Version: 13.0 |\\n'
+    ;;
+esac
+""",
+        )
+        _write_exec(
+            bin_dir / "dpkg-query",
+            """#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *nvidia-driver-580-server-open* ]]; then
+  if [[ "$args" == *Status* ]]; then
+    printf "install ok installed\\n"
+  else
+    printf "580.173.02-0ubuntu0.24.04.1\\n"
+  fi
+  exit 0
+fi
+if [[ "$args" == *nvidia-driver-580-server* ]]; then
+  printf "unknown ok not-installed\\n"
+  exit 1
+fi
+if [[ "$args" == *nvidia-container-toolkit* \\
+    || "$args" == *libnvidia-container* ]]; then
+  if [[ "$args" == *Status* ]]; then
+    printf "install ok installed\\n"
+  else
+    printf "1.20.0-1\\n"
+  fi
+  exit 0
+fi
+exit 1
+""",
+        )
+        _write_exec(bin_dir / "uname", "#!/usr/bin/env bash\nprintf '6.8.0-134-generic\\n'\n")
+        for name in ("curl", "gpg", "apt-get", "dpkg"):
+            _write_exec(bin_dir / name, "#!/usr/bin/env bash\nexit 0\n")
+        _ensure_sha256sum(bin_dir)
+
+    def _run_check_gpu_stack(
+        self,
+        bash: str,
+        tmp_path: Path,
+        *,
+        license_output: str | None,
+        license_exit: int = 0,
+        obsolete_output: str = "NVIDIA",
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
+        dest = _stage_bootstrap(tmp_path)
+        bin_dir = tmp_path / "bin"
+        argv_log = tmp_path / "modinfo.argv"
+        self._gpu_binaries(
+            bin_dir,
+            argv_log=argv_log,
+            license_output=license_output,
+            license_exit=license_exit,
+            obsolete_output=obsolete_output,
+        )
+        helper = tmp_path / "check-gpu.sh"
+        helper.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+. "{dest / "bootstrap.sh"}"
+load_and_validate_bootstrap_env "${{ENV_FILE}}" "${{EXAMPLE_FILE}}"
+check_gpu_stack
+""",
+            encoding="utf-8",
+        )
+        helper.chmod(0o755)
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+        return _run(bash, helper, env), argv_log
+
+    def test_requires_exact_modinfo_flag_order(self, bash, tmp_path):
+        completed, argv_log = self._run_check_gpu_stack(
+            bash, tmp_path, license_output="Dual MIT/GPL"
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        recorded = argv_log.read_text(encoding="utf-8").splitlines()
+        assert self._CORRECT_ARGV in recorded
+        assert self._OBSOLETE_ARGV not in recorded
+
+    def test_accepts_dual_mit_gpl(self, bash, tmp_path):
+        completed, _ = self._run_check_gpu_stack(bash, tmp_path, license_output="Dual MIT/GPL")
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert "GPU stack validated" in completed.stdout + completed.stderr
+
+    def test_rejects_proprietary_only_license(self, bash, tmp_path):
+        completed, _ = self._run_check_gpu_stack(bash, tmp_path, license_output="NVIDIA")
+        assert completed.returncode == 1
+        assert "not open" in completed.stdout + completed.stderr
+        assert "NVIDIA" in completed.stdout + completed.stderr
+
+    def test_rejects_empty_license(self, bash, tmp_path):
+        completed, _ = self._run_check_gpu_stack(bash, tmp_path, license_output="")
+        assert completed.returncode == 1
+        assert "not open" in completed.stdout + completed.stderr
+
+    def test_rejects_modinfo_command_failure(self, bash, tmp_path):
+        completed, _ = self._run_check_gpu_stack(
+            bash, tmp_path, license_output="Dual MIT/GPL", license_exit=1
+        )
+        assert completed.returncode == 1
+        output = completed.stdout + completed.stderr
+        assert "could not read the nvidia kernel-module license" in output
+
+    def test_obsolete_modinfo_order_cannot_satisfy_the_gate(self, bash, tmp_path):
+        completed, argv_log = self._run_check_gpu_stack(
+            bash,
+            tmp_path,
+            license_output="",
+            obsolete_output="Dual MIT/GPL",
+        )
+        assert completed.returncode == 1
+        recorded = argv_log.read_text(encoding="utf-8").splitlines()
+        assert self._CORRECT_ARGV in recorded
+        assert self._OBSOLETE_ARGV not in recorded
+
+    def test_live_open_module_conditions_do_not_require_reboot(self, bash, tmp_path):
+        dest = _stage_bootstrap(tmp_path)
+        bin_dir = tmp_path / "bin"
+        argv_log = tmp_path / "modinfo.argv"
+        self._gpu_binaries(
+            bin_dir,
+            argv_log=argv_log,
+            license_output="Dual MIT/GPL",
+        )
+        helper = tmp_path / "live-no-reboot.sh"
+        helper.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+export BWLAB_BOOTSTRAP_STATE_DIR="{tmp_path / "state"}"
+export BWLAB_KEYRING_DIR="{tmp_path / "keyrings"}"
+export BWLAB_APT_LIST_DIR="{tmp_path / "lists"}"
+. "{dest / "bootstrap.sh"}"
+load_and_validate_bootstrap_env "${{ENV_FILE}}" "${{EXAMPLE_FILE}}"
+# Host headers and NVIDIA key download are out of scope for this license-gate
+# regression. Keep the nvidia-smi-active install_gpu_stack path intact.
+check_host_prerequisites() {{ require_host_command modinfo; }}
+install_verified_nvidia_key_and_list() {{ :; }}
+install_gpu_stack
+check_gpu_stack
+""",
+            encoding="utf-8",
+        )
+        helper.chmod(0o755)
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+        completed = _run(bash, helper, env)
+        output = completed.stdout + completed.stderr
+        assert completed.returncode == 0, output
+        assert completed.returncode != 2
+        assert "REBOOT REQUIRED" not in output
+        assert "open-module license gate follows" in output
+        assert "GPU stack validated" in output
+        recorded = argv_log.read_text(encoding="utf-8").splitlines()
+        assert self._CORRECT_ARGV in recorded
+        assert self._OBSOLETE_ARGV not in recorded
+
+    def test_missing_modinfo_is_a_host_prerequisite_failure(self, bash, tmp_path):
+        dest = _stage_bootstrap(tmp_path)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        for name in ("curl", "gpg", "apt-get", "dpkg", "dpkg-query"):
+            _write_exec(bin_dir / name, "#!/usr/bin/env bash\nexit 0\n")
+        _write_exec(bin_dir / "uname", "#!/usr/bin/env bash\nprintf '6.8.0-134-generic\\n'\n")
+        _write_exec(bin_dir / "sha256sum", _SHA256SUM_FALLBACK)
+        helper = tmp_path / "need-modinfo.sh"
+        helper.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+. "{dest / "bootstrap.sh"}"
+load_and_validate_bootstrap_env "${{ENV_FILE}}" "${{EXAMPLE_FILE}}"
+check_host_prerequisites
+""",
+            encoding="utf-8",
+        )
+        helper.chmod(0o755)
+        # Keep grep/sed for pin validation, but omit sbin so a real kmod
+        # `modinfo` cannot satisfy the prerequisite on Linux CI hosts.
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+        }
+        completed = _run(bash, helper, env)
+        assert completed.returncode == 1
+        assert "required host command modinfo is absent" in completed.stdout + completed.stderr

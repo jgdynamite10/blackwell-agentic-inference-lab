@@ -101,6 +101,7 @@ check_host_prerequisites() {
   require_host_command dpkg-query
   require_host_command sha256sum
   require_host_command uname
+  require_host_command modinfo
   local kernel headers_dir build_dir
   kernel="$(uname -r)"
   headers_dir="/usr/src/linux-headers-${kernel}"
@@ -172,7 +173,7 @@ install_gpu_stack() {
     log "REBOOT REQUIRED: reboot now, then re-run bootstrap.sh for post-reboot validation."
     exit "${REBOOT_REQUIRED_EXIT}"
   fi
-  log "GPU stack installed and driver already active (no reboot needed)"
+  log "GPU stack installed and nvidia-smi is responding; the open-module license gate follows"
 }
 
 # --- step 3: post-reboot open-module + GPU identity validation ----------------
@@ -188,7 +189,10 @@ check_gpu_stack() {
     fail "proprietary ${PROPRIETARY_DRIVER_PACKAGE} is installed; Blackwell requires ${APPROVED_DRIVER_PACKAGE}"
   fi
   local module_license
-  module_license="$(modinfo nvidia -F license 2>/dev/null || true)"
+  # Standard kmod ordering is flags before the module name. Reversing that
+  # order can return empty even when the open module is loaded and active.
+  module_license="$(modinfo -F license nvidia)" \
+    || fail "modinfo could not read the nvidia kernel-module license"
   case "${module_license}" in
     *MIT* | *GPL*) ;;
     *) fail "nvidia kernel-module flavor is not open (license '${module_license}'); expected Dual MIT/GPL from ${APPROVED_DRIVER_PACKAGE}" ;;
