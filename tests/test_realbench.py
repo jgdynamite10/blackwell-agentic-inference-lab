@@ -128,28 +128,12 @@ class TestSpecValidation:
                 sampler_factory=FakeSampler,
             )
 
-    def test_controlled_resource_label_without_live_facts_is_rejected(self):
-        with pytest.raises(ConfigError, match="verified live enforcement"):
+    def test_controlled_resource_is_rejected_until_enforced(self):
+        with pytest.raises(ConfigError, match="not yet implemented"):
             run_real_cell(
                 make_spec(
                     comparison_mode="controlled-resource",
                     resource_limits={"vcpu_limit": 14, "memory_limit_gib": 100},
-                ),
-                UsageMockClient(),
-                host=HOST,
-                sampler_factory=FakeSampler,
-            )
-
-    def test_provider_native_rejects_residual_caps(self):
-        with pytest.raises(ConfigError, match="residual"):
-            run_real_cell(
-                make_spec(
-                    comparison_mode="provider-native",
-                    resource_enforcement={
-                        "verified": True,
-                        "controlled_slice_present": True,
-                        "serving_in_slice": True,
-                    },
                 ),
                 UsageMockClient(),
                 host=HOST,
@@ -236,33 +220,6 @@ class TestGenuineCell:
             sampler_factory=FakeSampler,
             clock=FakeClock(),
         )
-
-    def test_controlled_resource_persists_sanitized_enforcement(self, real_results_dir):
-        records = self._run(
-            real_results_dir,
-            comparison_mode="controlled-resource",
-            resource_limits={"vcpu_limit": 14, "memory_limit_gib": 100},
-            resource_enforcement={
-                "verified": True,
-                "mode": "controlled-resource",
-                "slice": "bwlab-controlled.slice",
-                "joint": True,
-                "cpu_max": "1400000 100000",
-                "memory_max_bytes": 107374182400,
-                "swap_max_bytes": 0,
-                "oom_kill": 0,
-                "serving_in_slice": True,
-                "benchmark_in_slice": True,
-                "docker_cpu_limit": 0,
-                "docker_memory_limit": 0,
-                "controlled_slice_present": True,
-            },
-            run_label="test-cr",
-        )
-        cloud = records[0].manifest["cloud"]
-        assert cloud["resource_limits"]["vcpu_limit"] == 14
-        assert cloud["resource_enforcement"]["verified"] is True
-        assert cloud["resource_enforcement"]["swap_max_bytes"] == 0
 
     def test_refuses_to_overwrite_existing_artifacts(self, real_results_dir):
         self._run(real_results_dir, run_label="once")

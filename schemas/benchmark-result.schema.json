@@ -633,10 +633,6 @@
     "notes": {
       "type": "string",
       "description": "Free-form observations. Must contain no sensitive infrastructure metadata."
-    },
-    "diagnostic_only": {
-      "type": "boolean",
-      "description": "True for non-measured canary/diagnostic artifacts. Must never enter a baseline summary."
     }
   },
   "allOf": [

@@ -18,11 +18,13 @@ to this repository.
 **Status:** Phases 1 and 2 are **complete**. Phase 3A (Akamai baseline
 readiness) is **complete**. Phase 3B's D-0014 compatibility/headroom pilot
 is complete as a diagnostic. Decision **D-0017 authorizes implementation**
-of the exact Phase 3 Akamai 12-cell baseline (frozen pins, both comparison
-modes, joint 14-vCPU/100-GiB envelope). **Live full-baseline execution is
-not authorized by D-0017** — it still requires separate digest-bearing
-apply and `full-baseline` approval phrases. Phase 4 and later phases remain
-**unauthorized** ([docs/roadmap.md](docs/roadmap.md)).
+of the Akamai **minimum valuable lab** (`blackwell-cloud mvl-baseline`):
+provider-native, three cells, existing frozen pins. It is sufficient for
+exploratory reporting and a first project article; it is **not** a complete
+controlled-resource or cross-cloud study. **Live MVL execution still
+requires** separate digest-bearing apply and `mvl-baseline` approval
+phrases. Phase 4 and later phases remain **unauthorized**
+([docs/roadmap.md](docs/roadmap.md)).
 
 - **No genuine benchmarks have been run yet.** No results exist.
 - **All current example files are synthetic** and clearly labeled as such.
@@ -132,10 +134,10 @@ blackwell-cloud readiness
 ```
 
 The bounded Phase 3B pilot (`blackwell-cloud apply`, `pilot`, `destroy`)
-and the D-0017 `full-baseline` implementation run only in the owner's
+and the D-0017 `mvl-baseline` command run only in the owner's
 authenticated local environment and still require each command's separate
-exact approval phrase. Live full-baseline execution is not authorized by
-D-0017 itself. See [infra/akamai/README.md](infra/akamai/README.md) and
+exact approval phrase. Live MVL execution is not authorized by D-0017
+itself. See [infra/akamai/README.md](infra/akamai/README.md) and
 decisions D-0014 and D-0017.
 
 ## Project governance

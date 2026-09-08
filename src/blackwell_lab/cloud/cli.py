@@ -14,8 +14,10 @@ Subcommands map one-to-one to the separated workflows required by Phase 3A:
 - ``pilot``           the short, owner-approved compatibility/headroom pilot
                       (RunMode.REAL): blocked until reconciliation is clean,
                       provider-native only, live provenance verified first.
-- ``full-baseline``   owner-approved D-0017 12-cell Akamai baseline (fail-closed;
-                      live apply/destroy remain separately approved).
+- ``mvl-baseline``    owner-approved D-0017 Akamai minimum valuable lab
+                      (provider-native, three cells; fail-closed).
+- ``full-baseline``   DISABLED: the research-grade 12-cell baseline is not
+                      part of the MVL.
 - ``verify-results``  external verification of persisted genuine results;
                       an empty directory is a FAILURE unless --allow-empty.
 - ``teardown-plan``   identity-verified, saved destroy plan from the ledger.
@@ -45,9 +47,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from blackwell_lab.cloud.baseline import FULL_BASELINE_AUTHORIZED
 from blackwell_lab.cloud.bootstrap_pins import validate_candidate_pins
 from blackwell_lab.cloud.lifecycle import TERRAFORM_LOCKFILE_READONLY
+from blackwell_lab.cloud.mvl import MVL_APPROVAL_TEMPLATE
 from blackwell_lab.paths import ResultsLocationError, RunMode, resolve_results_dir
 from blackwell_lab.schemas import (
     validate_benchmark_result,
@@ -78,6 +80,7 @@ AUTHORIZED_PILOT_INSTANCE_TYPE = "g3-gpu-rtxpro6000-blackwell-1"
 AUTHORIZED_WARMUP_PASSES = 1
 AUTHORIZED_REPETITIONS = 1
 AUTHORIZED_TASKS_PER_REPETITION = 20
+FULL_BASELINE_AUTHORIZED = False
 
 
 def _repo_root() -> Path:
@@ -221,9 +224,8 @@ def _check_bootstrap_pins() -> dict:
 
 def _check_python_modules() -> dict:
     try:
-        import blackwell_lab.cloud.baseline
-        import blackwell_lab.cloud.controlled_resource
         import blackwell_lab.cloud.lifecycle
+        import blackwell_lab.cloud.mvl
         import blackwell_lab.cloud.preflight
         import blackwell_lab.cloud.provenance
         import blackwell_lab.cloud.realbench
@@ -773,45 +775,68 @@ def _tree_clean() -> bool:
     return result.returncode == 0 and not result.stdout.strip()
 
 
-def cmd_full_baseline(args: argparse.Namespace) -> int:
-    from blackwell_lab.cloud import baseline, lifecycle, provenance, realbench, telemetry
-    from blackwell_lab.cloud.artifacts import write_private_json
-    from blackwell_lab.cloud.controlled_resource import (
-        current_pid,
-        observe_cgroup,
-        parse_docker_inspect,
-        verify_controlled_resource,
-        verify_provider_native,
-    )
-    from blackwell_lab.workload.model_client import GenerationSettings
-    from blackwell_lab.workload.openai_client import OpenAICompatibleClient
-
+def cmd_full_baseline(_args: argparse.Namespace) -> int:
     if not FULL_BASELINE_AUTHORIZED:
         print(
-            "DISABLED: the full 12-cell Akamai baseline is not authorized.",
+            "DISABLED: the full 12-cell Akamai baseline is not authorized. "
+            "Decision D-0017 authorizes the provider-native minimum valuable "
+            "lab (blackwell-cloud mvl-baseline). The research-grade 12-cell "
+            "baseline remains disabled until the owner grants separate "
+            "explicit authorization, recorded in docs/decision-log.md and "
+            "enabled through a reviewed change to FULL_BASELINE_AUTHORIZED.",
             file=sys.stderr,
         )
         return 3
+    raise NotImplementedError  # pragma: no cover - unreachable while disabled
+
+
+def _mvl_stop(message: str, *, results_dir: Path | None, run_label: str) -> int:
+    from blackwell_lab.cloud.artifacts import write_private_json
+    from blackwell_lab.cloud.mvl import TEARDOWN_FROM_LAPTOP_NOTE, failure_record
+
+    if results_dir is not None:
+        write_private_json(
+            results_dir / "real-runs" / f"{run_label}-failure.json",
+            failure_record(message),
+        )
+    print(f"BLOCKED: {message}", file=sys.stderr)
+    print(TEARDOWN_FROM_LAPTOP_NOTE, file=sys.stderr)
+    return 1
+
+
+def cmd_mvl_baseline(args: argparse.Namespace) -> int:
+    import time
+
+    from blackwell_lab.cloud import lifecycle, mvl, provenance, realbench, telemetry
+    from blackwell_lab.workload.model_client import GenerationSettings
+    from blackwell_lab.workload.openai_client import OpenAICompatibleClient
 
     lifecycle.refuse_hosted_execution()
     try:
-        config_path = baseline.require_external_config(args.config, _repo_root())
-        config, config_sha256 = baseline.load_full_baseline_config(config_path)
+        run_label = mvl.require_safe_run_label(args.run_label)
+        config_path = mvl.require_external_config(args.config, _repo_root())
+        config, config_sha256 = mvl.load_mvl_config(config_path)
     except ConfigError as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 1
 
-    expected = baseline.FULL_BASELINE_APPROVAL_TEMPLATE.format(
+    expected = MVL_APPROVAL_TEMPLATE.format(
         run_tag=args.run_tag,
-        run_label=args.run_label,
+        run_label=run_label,
         config_sha256=config_sha256,
     )
     if (args.approve or "") != expected:
         print(
-            "BLOCKED: the full baseline requires the exact owner approval "
-            f"phrase (expected verbatim: {expected!r}); nothing was executed.",
+            "BLOCKED: the MVL requires the exact owner approval phrase "
+            f"(expected verbatim: {expected!r}); nothing was executed.",
             file=sys.stderr,
         )
+        return 1
+
+    try:
+        mvl.require_clean_canonical_commit(config, git_head=_git_head(), tree_clean=_tree_clean())
+    except mvl.MvlError as exc:
+        print(f"BLOCKED: {exc}", file=sys.stderr)
         return 1
 
     results_dir = _resolve_real_results_dir()
@@ -820,7 +845,7 @@ def cmd_full_baseline(args: argparse.Namespace) -> int:
         print(
             "BLOCKED: the resource ledger is missing for this run. Run "
             "'blackwell-cloud init', apply, and 'blackwell-cloud reconcile' "
-            "before any full-baseline execution.",
+            "before any MVL execution.",
             file=sys.stderr,
         )
         return 1
@@ -828,79 +853,53 @@ def cmd_full_baseline(args: argparse.Namespace) -> int:
     blockers = lifecycle.pilot_blockers(ledger, pending=lifecycle.has_pending(paths))
     if blockers:
         print(
-            "BLOCKED: the full baseline cannot run until every lifecycle gate "
-            "passes. " + "; ".join(blockers),
+            "BLOCKED: the MVL cannot run until every lifecycle gate passes. " + "; ".join(blockers),
             file=sys.stderr,
         )
         return 1
 
-    def _transition(mode: str) -> None:
-        script = _bootstrap_dir() / "controlled-resource.sh"
-        action = "apply" if mode == "controlled-resource" else "remove"
-        bash = shutil.which("bash")
-        if bash is None:
-            raise baseline.BaselineError("bash is required for serving mode transitions")
-        completed = subprocess.run(
-            [bash, str(script), action],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=1800,
-        )
-        if completed.returncode != 0:
-            raise baseline.BaselineError(
-                "serving mode transition failed; the already verified model was not redownloaded"
-            )
+    endpoint = config["endpoint"]
+    lifecycle.record_session_event(
+        paths,
+        "mvl_started",
+        {"run_label": run_label, "config_sha256": config_sha256},
+    )
 
-    def _observe(mode: str) -> dict:
-        docker = shutil.which("docker")
-        if docker is None:
-            raise baseline.BaselineError("docker is required to observe serving-cgroup membership")
-        inspect_raw = subprocess.run(
-            [docker, "inspect", "bwlab-vllm"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
-        inspect = parse_docker_inspect(inspect_raw.stdout) if inspect_raw.returncode == 0 else {}
-        state = inspect.get("State") if isinstance(inspect.get("State"), dict) else {}
-        serving_pid = state.get("Pid") if isinstance(state, dict) else None
-        view = observe_cgroup(
-            serving_pid=int(serving_pid) if serving_pid else None,
-            benchmark_pid=current_pid(),
-            docker_inspect=inspect,
-        )
-        if mode == "controlled-resource":
-            return verify_controlled_resource(view)
-        return verify_provider_native(view)
-
-    def _provenance(_mode: str) -> object:
+    def _provenance() -> object:
         return provenance.verify_live_provenance(
             run_tag=args.run_tag,
             approved=config,
             ledger=ledger,
             artifact_dir=Path(config["model_verification"]["artifact_dir"]),
             digest_manifest=Path(config["model_verification"]["digest_manifest"]),
-            serving_base_url=config["endpoint"]["base_url"],
+            serving_base_url=endpoint["base_url"],
         )
 
-    def _run_cell(spec_dict: dict) -> list:
-        observed = _provenance(spec_dict["comparison_mode"])
+    def _run_cell(
+        *,
+        profile: str,
+        concurrency: int,
+        repetitions: int,
+        warmup: int,
+        tasks: int,
+        label: str,
+    ):
+        observed = _provenance()
+        if observed.model_artifact_hash != mvl.FROZEN_MODEL_ARTIFACT_HASH:
+            raise mvl.MvlError("live model digest drifted from the frozen aggregate")
+        digest = str(observed.container_digest)
+        if digest not in {
+            mvl.FROZEN_CONTAINER_DIGEST,
+            mvl.FROZEN_VLLM_IMAGE_DIGEST,
+        } and not digest.endswith(mvl.FROZEN_VLLM_IMAGE_DIGEST):
+            raise mvl.MvlError("live container digest drifted from the frozen image")
         host = {**observed.host_facts, **observed.gpu_facts}
         model = dict(config["model"])
         model["artifact_hash"] = observed.model_artifact_hash
-        if model["artifact_hash"] != baseline.FROZEN_MODEL_ARTIFACT_HASH:
-            raise baseline.BaselineError("live model digest drifted from the frozen aggregate")
-        if observed.container_digest not in {
-            baseline.FROZEN_CONTAINER_DIGEST,
-            f"{baseline.FROZEN_VLLM_IMAGE}@{baseline.FROZEN_VLLM_IMAGE_DIGEST}",
-        } and not str(observed.container_digest).endswith(baseline.FROZEN_VLLM_IMAGE_DIGEST):
-            raise baseline.BaselineError("live container digest drifted from the frozen image")
         spec = realbench.RealRunSpec(
-            profile_name=spec_dict.get("profile") or "interactive",
-            concurrency=spec_dict["concurrency"],
-            comparison_mode=spec_dict["comparison_mode"],
+            profile_name=profile,
+            concurrency=concurrency,
+            comparison_mode=mvl.FROZEN_COMPARISON_MODE,
             instance_type=observed.instance["instance_type"],
             region=observed.instance["region"],
             list_price_usd_per_hour=config["cloud"]["list_price_usd_per_hour"],
@@ -910,27 +909,22 @@ def cmd_full_baseline(args: argparse.Namespace) -> int:
             engine_version=observed.engine_version,
             container_digest=observed.container_digest,
             container_cuda_runtime_version=observed.container_cuda_runtime_version,
-            repetitions=spec_dict["repetitions"],
-            warmup_passes=spec_dict["warmup_passes"],
-            tasks_per_repetition=spec_dict["tasks_per_repetition"],
-            seed=baseline.FROZEN_SEED,
-            resource_limits=spec_dict.get("resource_limits"),
-            resource_enforcement=spec_dict.get("resource_enforcement"),
-            run_label=spec_dict["run_label"],
-            observation_phase=spec_dict["observation_phase"],
-            diagnostic_only=spec_dict["diagnostic_only"],
+            repetitions=repetitions,
+            warmup_passes=warmup,
+            tasks_per_repetition=tasks,
+            seed=mvl.FROZEN_SEED,
+            run_label=label,
             generation=GenerationSettings(
-                temperature=baseline.FROZEN_TEMPERATURE,
-                top_p=baseline.FROZEN_TOP_P,
-                max_tokens=baseline.FROZEN_MAX_TOKENS,
-                seed=baseline.FROZEN_SEED,
-                reasoning_mode=baseline.FROZEN_REASONING_MODE,
+                temperature=mvl.FROZEN_TEMPERATURE,
+                top_p=mvl.FROZEN_TOP_P,
+                seed=mvl.FROZEN_SEED,
+                reasoning_mode=mvl.FROZEN_REASONING_MODE,
             ),
         )
         client = OpenAICompatibleClient(
-            config["endpoint"]["base_url"],
-            config["endpoint"]["model"],
-            api_key_env=config["endpoint"].get("api_key_env"),
+            endpoint["base_url"],
+            endpoint["model"],
+            api_key_env=endpoint.get("api_key_env"),
         )
         return realbench.run_real_cell(
             spec,
@@ -940,39 +934,101 @@ def cmd_full_baseline(args: argparse.Namespace) -> int:
             results_dir=results_dir,
         )
 
-    def _teardown() -> dict:
-        fetch, token = _read_only_provider_access()
-        if not token or fetch is None:
-            return {"plan_sha256": None, "note": "teardown-plan requires a local token"}
-        meta = lifecycle.plan_destroy(args.run_tag, ledger, paths=paths, fetch=fetch, token=token)
-        return {"plan_sha256": meta.get("plan_sha256")}
+    try:
+        canary_label = mvl.output_label(run_label, "canary")
+        started = time.monotonic()
+        canary_records = _run_cell(
+            profile="interactive",
+            concurrency=mvl.FROZEN_CANARY_CONCURRENCY,
+            repetitions=1,
+            warmup=0,
+            tasks=mvl.FROZEN_CANARY_TASKS,
+            label=canary_label,
+        )
+        wall_s = max(time.monotonic() - started, 0.001)
+        outcomes: list[object] = []
+        for record in canary_records:
+            outcomes.extend(getattr(record, "outcomes", ()) or ())
+            measured = getattr(record, "measured_observations", None) or {}
+            if isinstance(measured, dict):
+                outcomes.extend(measured.get("observations") or [])
+            else:
+                outcomes.extend(getattr(measured, "get", lambda *_: [])("observations") or [])
+        if not outcomes:
+            for record in canary_records:
+                document = getattr(record, "measured_observations", None)
+                if isinstance(document, dict):
+                    outcomes.extend(document.get("observations") or [])
+        mvl.evaluate_canary(outcomes)
+        remaining = mvl.remaining_session_seconds(
+            (json.loads(paths.session_path.read_text(encoding="utf-8")).get("events") or [])
+            if paths.session_path.is_file()
+            else []
+        )
+        mvl.refuse_if_session_exceeded(mvl.project_measured_seconds(wall_s), remaining)
+    except Exception as exc:
+        message = (
+            str(exc)
+            if isinstance(exc, (mvl.MvlError, ConfigError))
+            else f"canary aborted: {type(exc).__name__}"
+        )
+        return _mvl_stop(message, results_dir=results_dir, run_label=run_label)
 
-    deps = baseline.FullBaselineDeps(
-        git_head=_git_head,
-        tree_clean=_tree_clean,
-        verify_live_provenance=_provenance,
-        observe_and_verify_mode=_observe,
-        transition_serving=_transition,
-        run_real_cell=_run_cell,
-        prepare_teardown_plan=_teardown,
-        record_session_event=lambda event, detail=None: lifecycle.record_session_event(
-            paths, event, detail
-        ),
-        monotonic=__import__("time").monotonic,
-        sha256_file=_sha256_file,
-        client_factory=lambda: None,
-        write_failure_receipt=write_private_json,
+    summaries = [
+        {
+            "kind": "canary",
+            "diagnostic_only": True,
+            "run_label": canary_label,
+            "note": "Canary observations are diagnostic and excluded from MVL summaries.",
+        }
+    ]
+    try:
+        for profile, concurrency in mvl.AUTHORIZED_MVL_CELLS:
+            label = mvl.output_label(run_label, mvl.cell_output_suffix(profile, concurrency))
+            records = _run_cell(
+                profile=profile,
+                concurrency=concurrency,
+                repetitions=mvl.FROZEN_REPETITIONS,
+                warmup=mvl.FROZEN_WARMUP_PASSES,
+                tasks=mvl.FROZEN_TASKS_PER_REPETITION,
+                label=label,
+            )
+            if len(records) != mvl.FROZEN_REPETITIONS:
+                raise mvl.MvlError("each measured cell must persist exactly three repetitions")
+            summaries.append(
+                {
+                    "kind": "measured",
+                    "profile": profile,
+                    "concurrency": concurrency,
+                    "repetitions": len(records),
+                    "tasks_per_repetition": mvl.FROZEN_TASKS_PER_REPETITION,
+                    "run_label": label,
+                    "run_ids": [record.run_id for record in records],
+                    "files": [name for record in records for name in record.written_files],
+                }
+            )
+    except Exception as exc:
+        message = (
+            str(exc)
+            if isinstance(exc, (mvl.MvlError, ConfigError))
+            else f"measured cell aborted: {type(exc).__name__}"
+        )
+        return _mvl_stop(message, results_dir=results_dir, run_label=run_label)
+
+    lifecycle.record_session_event(paths, "mvl_completed", {"cells": len(mvl.AUTHORIZED_MVL_CELLS)})
+    print(
+        json.dumps(
+            {
+                "workflow": "mvl-baseline",
+                "run_label": run_label,
+                "comparison_mode": "provider-native",
+                "counts": mvl.measured_counts(),
+                "cells": summaries,
+                "note": mvl.TEARDOWN_FROM_LAPTOP_NOTE,
+            },
+            indent=2,
+        )
     )
-    report = baseline.execute_full_baseline(
-        run_tag=args.run_tag,
-        run_label=args.run_label,
-        config=config,
-        config_sha256=config_sha256,
-        results_dir=results_dir,
-        progress_path=paths.run_dir / "baseline-progress.json",
-        deps=deps,
-    )
-    print(json.dumps(report, indent=2))
     return 0
 
 
@@ -1083,8 +1139,8 @@ def build_parser() -> argparse.ArgumentParser:
             "run tag and the reviewed plan digest) and run only in the "
             "owner's local environment. Every lifecycle artifact lives in "
             "the external private LAB_RESULTS_DIR. Decision D-0017 authorizes "
-            "implementation of the 12-cell baseline; live apply and baseline "
-            "execution still require their separate digest-bearing phrases."
+            "the Akamai minimum valuable lab (mvl-baseline); live apply and "
+            "MVL execution still require their separate digest-bearing phrases."
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1134,24 +1190,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pilot_parser.add_argument("--approve", help="The exact pilot approval phrase.")
 
-    full_parser = sub.add_parser(
-        "full-baseline",
-        help=(
-            "Owner-approved D-0017 12-cell Akamai baseline (canary then "
-            "measured cells; never expands via flags)."
-        ),
+    mvl_parser = sub.add_parser(
+        "mvl-baseline",
+        help="Owner-approved D-0017 Akamai minimum valuable lab (provider-native, three cells).",
     )
-    full_parser.add_argument("--run-tag", required=True)
-    full_parser.add_argument("--run-label", required=True)
-    full_parser.add_argument(
+    mvl_parser.add_argument("--run-tag", required=True)
+    mvl_parser.add_argument("--run-label", required=True)
+    mvl_parser.add_argument(
         "--config",
         required=True,
         help=(
-            "Existing absolute path to the approved D-0017 baseline config "
-            "JSON; must live outside this repository."
+            "Existing absolute path to the approved D-0017 MVL config JSON; "
+            "must live outside this repository."
         ),
     )
-    full_parser.add_argument("--approve", help="The exact full-baseline approval phrase.")
+    mvl_parser.add_argument("--approve", help="The exact MVL approval phrase.")
+
+    sub.add_parser(
+        "full-baseline",
+        help="DISABLED: the research-grade 12-cell baseline is not part of the MVL.",
+    )
 
     verify_parser = sub.add_parser(
         "verify-results", help="Verify persisted external results (schemas, hashes)."
@@ -1216,6 +1274,7 @@ _HANDLERS = {
     "apply": cmd_apply,
     "reconcile": cmd_reconcile,
     "pilot": cmd_pilot,
+    "mvl-baseline": cmd_mvl_baseline,
     "full-baseline": cmd_full_baseline,
     "verify-results": cmd_verify_results,
     "teardown-plan": cmd_teardown_plan,
@@ -1230,16 +1289,14 @@ def _sanitized_error_types() -> tuple[type[BaseException], ...]:
     project's own errors). Anything else prints ONLY its type name —
     arbitrary exception text could carry provider responses, ids, tokens, or
     private paths."""
-    from blackwell_lab.cloud.baseline import BaselineError
-    from blackwell_lab.cloud.controlled_resource import ControlledResourceError
     from blackwell_lab.cloud.lifecycle import LifecycleError
+    from blackwell_lab.cloud.mvl import MvlError
     from blackwell_lab.cloud.provenance import ProvenanceError
     from blackwell_lab.cloud.realbench import RequiredMeasurementError
     from blackwell_lab.cloud.telemetry import ArtifactVerificationError, TelemetryUnavailable
 
     return (
-        BaselineError,
-        ControlledResourceError,
+        MvlError,
         LifecycleError,
         ProvenanceError,
         RequiredMeasurementError,

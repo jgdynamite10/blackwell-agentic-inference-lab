@@ -106,10 +106,12 @@ class RequiredMeasurementError(RuntimeError):
 
 #: Controlled-resource mode requires the joint 14-vCPU/100-GiB
 #: serving-plus-benchmark cgroup envelope to be genuinely implemented,
-#: enforced, and observed (decisions D-0013, D-0017). A comparison-mode
-#: label supplied merely in configuration is still a fabrication: every
-#: controlled-resource spec must carry verified live enforcement facts.
-CONTROLLED_RESOURCE_ENFORCEMENT_IMPLEMENTED = True
+#: enforced, and observed. Until that exists, any run labeled
+#: "controlled-resource" would be labeled by configuration alone — a
+#: fabrication — so the mode is rejected outright. Enabling it is a reviewed
+#: code change gated on verified enforcement, never a runtime flag
+#: (decision D-0013). Optional future work, not part of the D-0017 MVL.
+CONTROLLED_RESOURCE_ENFORCEMENT_IMPLEMENTED = False
 
 
 #: A sampler factory returns an object with start()/stop()/summary(...) —
@@ -137,17 +139,10 @@ class RealRunSpec:
     tasks_per_repetition: int = DEFAULT_TASKS_PER_REPETITION
     seed: int = 20260906
     resource_limits: dict | None = None  # required for controlled-resource
-    resource_enforcement: dict | None = None  # live observed facts; never configured
     container_cuda_runtime_version: str | None = None  # observed, never configured
     run_label: str = "real"
-    observation_phase: str = "measured"  # "measured" | "canary"
-    diagnostic_only: bool = False
     generation: GenerationSettings = field(
-        # Frozen D-0017 sampling. max_tokens is taken from GenerationSettings
-        # when set (full baseline: 1024 for every profile).
-        default_factory=lambda: GenerationSettings(
-            temperature=1.0, top_p=0.95, max_tokens=1024, reasoning_mode=True
-        )
+        default_factory=lambda: GenerationSettings(temperature=1.0, top_p=0.95, reasoning_mode=True)
     )
 
 
@@ -178,37 +173,11 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
                 "supplied merely in configuration is a fabrication. Run "
                 "provider-native (decision D-0013)."
             )
-        if not spec.resource_limits:
+        if not spec.resource_limits:  # pragma: no cover - unreachable while gated
             raise ConfigError(
                 "controlled-resource runs must declare the enforced joint "
                 "resource_limits (vcpu_limit, memory_limit_gib)"
             )
-        enforcement = spec.resource_enforcement or {}
-        if enforcement.get("verified") is not True:
-            raise ConfigError(
-                "controlled-resource runs require verified live enforcement "
-                "facts for the joint 14-vCPU/100-GiB slice; a configuration "
-                "label alone is a fabrication"
-            )
-        if not enforcement.get("serving_in_slice") or not enforcement.get("benchmark_in_slice"):
-            raise ConfigError("controlled-resource PIDs must share the verified parent slice")
-        if enforcement.get("cpu_max") is None or enforcement.get("memory_max_bytes") is None:
-            raise ConfigError("controlled-resource runs require observed cpu.max and memory.max")
-        if enforcement.get("swap_max_bytes") != 0:
-            raise ConfigError("controlled-resource swap must be frozen at 0")
-    if spec.comparison_mode == "provider-native":
-        enforcement = spec.resource_enforcement or {}
-        if enforcement.get("controlled_slice_present") or enforcement.get("serving_in_slice"):
-            raise ConfigError(
-                "provider-native mode is invalidated by a residual controlled "
-                "slice or Docker resource cap"
-            )
-        if spec.resource_limits:
-            raise ConfigError("provider-native runs must not declare resource_limits")
-    if spec.observation_phase not in ("measured", "canary"):
-        raise ConfigError("observation_phase must be 'measured' or 'canary'")
-    if spec.observation_phase == "canary" and not spec.diagnostic_only:
-        raise ConfigError("canary runs must be labeled diagnostic_only")
     for key in ("artifact", "revision", "artifact_hash", "precision"):
         if not spec.model.get(key):
             raise ConfigError(f"model.{key} is required for genuine runs")
@@ -255,26 +224,6 @@ def build_real_manifest(
     }
     if spec.comparison_mode == "controlled-resource":
         cloud["resource_limits"] = spec.resource_limits
-    if spec.resource_enforcement:
-        cloud["resource_enforcement"] = {
-            key: spec.resource_enforcement[key]
-            for key in (
-                "verified",
-                "mode",
-                "slice",
-                "joint",
-                "cpu_max",
-                "memory_max_bytes",
-                "swap_max_bytes",
-                "oom_kill",
-                "serving_in_slice",
-                "benchmark_in_slice",
-                "docker_cpu_limit",
-                "docker_memory_limit",
-                "controlled_slice_present",
-            )
-            if key in spec.resource_enforcement
-        }
     serving: dict = {
         "engine": spec.engine,
         "engine_version": spec.engine_version,
@@ -299,7 +248,7 @@ def build_real_manifest(
         "generation": {
             "temperature": spec.generation.temperature,
             "top_p": spec.generation.top_p,
-            "max_tokens": spec.generation.max_tokens or profile.max_tokens,
+            "max_tokens": profile.max_tokens,
             "seed": spec.generation.seed,
             "reasoning_mode": spec.generation.reasoning_mode,
         },
@@ -537,13 +486,7 @@ def build_real_result(
             "periodic power samples (mean power x sampled wall time). "
             "Inter-token latency and per-request queue time are reported only "
             "when the serving path genuinely provides them."
-            + (
-                " CANARY/DIAGNOSTIC ONLY: excluded from every baseline summary."
-                if spec.diagnostic_only
-                else ""
-            )
         ),
-        "diagnostic_only": spec.diagnostic_only,
     }
 
 
@@ -584,17 +527,14 @@ def run_real_cell(
             os.chmod(directory, 0o700)
     existing = sorted(target_dir.glob("*.result.json")) + sorted(target_dir.glob("*.manifest.json"))
     if existing:
-        raise ConfigError(
-            "refusing to overwrite existing genuine artifacts in this run "
-            "label; resume skips only fully verified repetitions"
-        )
+        raise ConfigError("refusing to overwrite existing genuine artifacts in this run label")
 
     full_catalog = catalog()
     template_ids = list(full_catalog)
     settings = GenerationSettings(
         temperature=spec.generation.temperature,
         top_p=spec.generation.top_p,
-        max_tokens=spec.generation.max_tokens or profile.max_tokens,
+        max_tokens=profile.max_tokens,
         seed=spec.generation.seed,
         reasoning_mode=spec.generation.reasoning_mode,
     )
@@ -653,7 +593,7 @@ def run_real_cell(
             measured_document = _observation_document(
                 run_id=run_id,
                 repetition_index=repetition_index,
-                phase=spec.observation_phase,
+                phase="measured",
                 outcomes=data.outcomes,
             )
             validate_task_observations(measured_document)

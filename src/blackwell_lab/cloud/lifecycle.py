@@ -1357,9 +1357,8 @@ def record_session_event(paths: LifecyclePaths, event: str, detail: dict | None 
 _SESSION_PHASES = (
     ("provisioning", "apply_attempted", "provisioned"),
     ("setup", "provisioned", "pilot_started"),
-    ("setup_baseline", "provisioned", "baseline_started"),
     ("pilot", "pilot_started", "pilot_completed"),
-    ("baseline", "baseline_started", "baseline_completed"),
+    ("mvl", "mvl_started", "mvl_completed"),
     ("teardown", "teardown_started", "deletion_confirmed"),
 )
 

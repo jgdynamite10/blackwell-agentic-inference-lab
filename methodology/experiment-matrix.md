@@ -78,16 +78,14 @@ Before any full-baseline measurement, one short owner-approved
 - Scope: a **reduced task count** (indicatively ~20–25 tasks per profile at
   one or two concurrency levels), explicitly labeled a pilot; pilot output is
   never mixed with baseline results and never published.
-- Freeze point: decision **D-0017** froze the model revision and aggregate
-  digest, vLLM 0.27.1 linux/amd64 digest, BF16, native OpenAI tool
-  transport, generation 1.0 / 0.95 / 1024, warm-up, timeouts, and the joint
-  14-vCPU/100-GiB cgroup envelope. Pilot output remains diagnostic and is
-  never mixed with baseline results. Live 12-cell execution still requires
-  a separate digest-bearing `full-baseline` approval phrase.
-
-The frozen execution order (also used for later AWS and GCP replicas) is
-controlled-resource then provider-native; interactive then batch-heavy;
-concurrency 1, 4, 8.
+- Freeze point: decision **D-0017** authorized the Akamai **minimum
+  valuable lab** rather than the research-grade 12-cell matrix: provider-native
+  only; interactive/1, batch-heavy/4, batch-heavy/8; 1 warm-up + 3 × 200
+  tasks (1,800 measured observations). Pilot output remains diagnostic.
+  Live MVL execution still requires a separate digest-bearing
+  `mvl-baseline` approval phrase. p50 and p95 are primary; p99 is
+  exploratory. Controlled-resource mode remains optional future work. AWS
+  and GCP later repeat this same three-cell matrix if quota permits.
 
 ## Phase 4 — optimization (Akamai)
 

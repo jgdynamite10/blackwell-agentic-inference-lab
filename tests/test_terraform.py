@@ -108,9 +108,8 @@ class TestStaticConfiguration:
         assert "gpu_instance_type must equal g3-gpu-rtxpro6000-blackwell-1" in variables
         assert "var.ttl_hours == 6" in variables
         assert "ttl_hours must equal 6" in variables
-        assert 'var.session_kind == "pilot"' in variables
-        assert "full-baseline" in variables
-        assert "240" in variables
+        assert "session_kind" not in variables
+        assert "full-baseline" not in variables
 
     def test_ip_output_is_sensitive(self):
         outputs = read("outputs.tf")

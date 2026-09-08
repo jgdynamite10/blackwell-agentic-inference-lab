@@ -694,9 +694,9 @@ measurement-contract wording. Task definitions, evaluator rules, maximum
 turns, seeds, temperatures, top_p values, concurrency cells, and success
 criteria are unchanged. The full 12-cell baseline remains unauthorized.
 
-## 2026-09-08 — D-0017: Phase 3 Akamai 12-cell baseline freeze and implementation authorization
+## 2026-09-08 — D-0017: Akamai minimum valuable lab
 
-**No genuine baseline results predate this change.** Run-e's quality and
+**No genuine MVL results predate this change.** Run-e's quality and
 performance remain diagnostic and nonpublishable because they used the
 retired text protocol. Run-e infrastructure, serving, live provenance,
 teardown, and the locally verified model aggregate
@@ -704,12 +704,19 @@ teardown, and the locally verified model aggregate
 at revision `a9904d24bcc1d289a1950fa9d2b978c47cf903b9` support this freeze.
 Raw run-e results do not enter Git.
 
-**Decision.** The owner authorizes **implementation** of the exact Phase 3
-Akamai 12-cell baseline. Live execution is **not** authorized by this
-entry; it still requires separate digest-bearing apply and
-`full-baseline` approval phrases. Phase 4 optimization remains
-unauthorized. Dynamo, NIM, TensorRT-LLM, NVFP4, and any other model are
-not added.
+**Decision.** The owner authorizes **implementation** of the Akamai
+**minimum valuable lab** (`blackwell-cloud mvl-baseline`). This is an
+initial provider-native Akamai baseline, sufficient for exploratory
+reporting and a first project article. It is **not** a complete
+controlled-resource or cross-cloud study. Live execution still requires
+separate digest-bearing apply and `mvl-baseline` approval phrases. Phase 4
+optimization remains unauthorized. Dynamo, NIM, TensorRT-LLM, NVFP4, and
+any other model are not added.
+
+**Reporting.** p50 and p95 are primary. p99 is exploratory because of
+sample size (1,800 measured observations across three cells).
+Controlled-resource mode and additional engines are optional future work.
+AWS and GCP will later repeat this same MVL matrix if quota permits.
 
 **Frozen identity.**
 
@@ -729,52 +736,34 @@ not added.
 | Reasoning mode | true |
 | Sampling | temperature 1.0, top_p 0.95, max_tokens 1024, seed 20260906 |
 | Workload | `cloud-ops-agent` 2.3.0; existing scenarios, evaluator, SLOs, timeouts |
-| Measurement | 1 warm-up pass, 5 measured repetitions, 200 balanced tasks per repetition |
+| Measurement | 1 warm-up pass, 3 measured repetitions, 200 balanced tasks per repetition |
 
-**Matrix and order** (also the AWS/GCP replica order):
-controlled-resource then provider-native; interactive then batch-heavy;
-concurrency 1, 4, 8. Twelve cells, 60 measured repetitions, 12,000
-measured task observations.
+**Matrix.** Provider-native only:
 
-**Controlled-resource mode.** One shared cgroup-v2 / systemd slice
-(`bwlab-controlled.slice`) applies a **joint** maximum of 14 vCPUs and
-100 GiB memory across the serving container and the benchmark process
-together. Swap is frozen at 0. The same numbers applied independently to
-each workload are rejected. Immediately before every controlled-resource
-cell the runner observes cpu.max, memory.max, swap, PID membership, and
-oom_kill. Provider-native mode verifies that no controlled slice, Docker
-resource limit, or residual cap remains. Mode transitions recreate
-serving from the already-verified local model and never redownload it.
+1. interactive / concurrency 1
+2. batch-heavy / concurrency 4
+3. batch-heavy / concurrency 8
 
-**Canary.** Before measured work in each comparison mode, a non-measured
-canary covers all ten scenarios once, exercises native `tool_calls` and
-`role=tool` round trips, and uses concurrency 8 for the
-controlled-resource headroom gate. Every task must terminate
-structurally (no endpoint, malformed call, invalid tool, timeout, or
-runtime error). Evaluator quality is not a gate. Failure writes a
-sanitized receipt, prepares a fresh teardown plan, and stops for destroy
-approval. Success continues into that mode's measured cells. Canary
-artifacts are diagnostic only.
+Three cells, 9 measured repetitions, 1,800 measured task observations.
+AWS and GCP later repeat this same matrix if quota permits.
 
-**Resume.** An external mode-0600 progress ledger is bound to the
-canonical commit, config digest, model and container digests, workload
-version, run tag, and exact matrix. Resume skips only repetitions whose
-manifest, result, observations, and digests all verify. Partial,
-corrupt, mismatched, or foreign artifacts are rejected. Completed
-genuine files are never overwritten. A host-resident systemd unit lets
-an active cell survive loss of the owner's SSH session. The watchdog
-recognizes `blackwell-cloud full-baseline` and remains a workload
-safeguard — it does not stop Akamai billing. No automatic provider
-deletion is authorized.
+**Canary.** One diagnostic-only canary on the same deployment covers all
+ten scenarios once, exercises native `tool_calls` and `role=tool` round
+trips, and fails closed on structural errors. Evaluator quality is
+recorded but is not a gate. Failure persists a sanitized external
+failure record, runs zero measured tasks, and tells the owner to
+generate a teardown plan from their laptop. Success continues into the
+three measured cells. An interrupted MVL is restarted later under a new
+run label; there is no resume ledger.
 
-**Ceilings (separately named from D-0014).** The six-hour / $25 pilot
-limit is unchanged. The full-baseline implementation ceiling is 230
-measured GPU-hours, 240 total live hours including setup and teardown
-allowance, and $720 maximum normalized exposure at the account-visible
-$3/hour rate. After each canary, a sanitized projection that exceeds
-the ceiling stops measured work and requires a new owner decision. These
-are implementation ceilings, not permission to apply resources.
+**Safety.** The existing six-hour infrastructure envelope is unchanged.
+The canary duration is used to check that measured work is reasonably
+projected to finish in the remaining session. The watchdog recognizes
+`blackwell-cloud mvl-baseline` and remains a workload safeguard — it
+does not stop Akamai billing. Completion or failure never deletes
+provider resources and never claims the GPU host generated a Terraform
+destroy plan. Teardown-plan must be run from the owner's laptop.
 
-**Rationale.** Owner authorization of 2026-09-08 (Phase 3B full Akamai
-baseline enablement). Implementation is code-and-review only until the
-owner issues the exact apply and full-baseline phrases.
+**Rationale.** Owner authorization of 2026-09-08 (Akamai minimum valuable
+lab). Implementation is code-and-review only until the owner issues the
+exact apply and `mvl-baseline` phrases.
