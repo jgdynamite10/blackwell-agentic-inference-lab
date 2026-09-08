@@ -24,7 +24,16 @@ APPROVED_VLLM_EXTRA_ARGS = (
     "--dtype bfloat16 --max-num-seqs 128 --enable-prefix-caching "
     "--async-scheduling --mamba-backend flashinfer "
     "--mamba-ssm-cache-dtype float16 --enable-mamba-cache-stochastic-rounding "
-    "--mamba-cache-philox-rounds 5"
+    "--mamba-cache-philox-rounds 5 "
+    "--reasoning-parser nemotron_v3 --tool-call-parser qwen3_coder "
+    "--enable-auto-tool-choice"
+)
+APPROVED_REASONING_PARSER = "nemotron_v3"
+APPROVED_TOOL_CALL_PARSER = "qwen3_coder"
+REQUIRED_VLLM_PARSER_FLAGS = (
+    "--reasoning-parser",
+    "--tool-call-parser",
+    "--enable-auto-tool-choice",
 )
 APPROVED_WATCHDOG_IDLE_MINUTES = "45"
 MAX_WATCHDOG_IDLE_MINUTES = 45
@@ -213,8 +222,10 @@ def validate_candidate_pins(text: str) -> list[str]:
     if served and served != APPROVED_SERVED_MODEL_NAME:
         problems.append("SERVED_MODEL_NAME differs from the reviewed candidate baseline")
     extra_args = assignments.get("VLLM_EXTRA_ARGS", "")
-    if extra_args and extra_args != APPROVED_VLLM_EXTRA_ARGS:
-        problems.append("VLLM_EXTRA_ARGS differs from the reviewed candidate baseline")
+    if extra_args:
+        problems.extend(validate_vllm_parser_flags(extra_args))
+        if extra_args != APPROVED_VLLM_EXTRA_ARGS:
+            problems.append("VLLM_EXTRA_ARGS differs from the reviewed candidate baseline")
 
     port = assignments.get("SERVING_PORT", "")
     if port:
@@ -232,6 +243,57 @@ def validate_candidate_pins(text: str) -> list[str]:
             )
         elif watchdog != APPROVED_WATCHDOG_IDLE_MINUTES:
             problems.append("WATCHDOG_IDLE_MINUTES differs from the reviewed candidate baseline")
+
+    return problems
+
+
+def validate_vllm_parser_flags(extra_args: str) -> list[str]:
+    """Require the NVIDIA Nemotron 3.5 Lightning / vLLM 0.27.1 parser trio.
+
+    Official sources (NVIDIA model card for vLLM 0.27.1; NVIDIA NIM
+    Nemotron 3.5 Lightning guide) name all three flags. Omission or a
+    second incompatible parser value fails closed.
+    """
+    tokens = extra_args.split()
+    problems: list[str] = []
+
+    def values_for(flag: str) -> list[str]:
+        found: list[str] = []
+        index = 0
+        while index < len(tokens):
+            if tokens[index] == flag:
+                if index + 1 >= len(tokens) or tokens[index + 1].startswith("--"):
+                    found.append("")
+                    index += 1
+                    continue
+                found.append(tokens[index + 1])
+                index += 2
+                continue
+            index += 1
+        return found
+
+    reasoning = values_for("--reasoning-parser")
+    tool_parser = values_for("--tool-call-parser")
+    auto_choice = [flag for flag in tokens if flag == "--enable-auto-tool-choice"]
+
+    if not reasoning:
+        problems.append("VLLM_EXTRA_ARGS is missing --reasoning-parser nemotron_v3")
+    elif len(reasoning) != 1:
+        problems.append("VLLM_EXTRA_ARGS has incompatible duplicate --reasoning-parser values")
+    elif reasoning[0] != APPROVED_REASONING_PARSER:
+        problems.append("VLLM_EXTRA_ARGS --reasoning-parser must be nemotron_v3")
+
+    if not tool_parser:
+        problems.append("VLLM_EXTRA_ARGS is missing --tool-call-parser qwen3_coder")
+    elif len(tool_parser) != 1:
+        problems.append("VLLM_EXTRA_ARGS has incompatible duplicate --tool-call-parser values")
+    elif tool_parser[0] != APPROVED_TOOL_CALL_PARSER:
+        problems.append("VLLM_EXTRA_ARGS --tool-call-parser must be qwen3_coder")
+
+    if not auto_choice:
+        problems.append("VLLM_EXTRA_ARGS is missing --enable-auto-tool-choice")
+    elif len(auto_choice) != 1:
+        problems.append("VLLM_EXTRA_ARGS has a duplicate --enable-auto-tool-choice flag")
 
     return problems
 

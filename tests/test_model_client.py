@@ -38,34 +38,41 @@ def turn_text(client: ModelClient, messages: list[Message]) -> str:
 
 
 def last_call(client: ModelClient, messages: list[Message]) -> dict:
-    text = turn_text(client, messages)
-    line = [x for x in text.splitlines() if x.startswith(TOOL_CALL_PREFIX)][-1]
-    return json.loads(line[len(TOOL_CALL_PREFIX) :])
+    events = list(client.stream_turn(messages, SETTINGS))
+    native = [event.tool_call for event in events if event.kind == "native_tool_call"]
+    assert native and native[-1] is not None
+    call = native[-1]
+    return {"tool": call.name, "arguments": call.arguments}
 
 
 def advance_past(client: ModelClient, messages: list[Message], sequence) -> list[Message]:
-    for step in sequence:
+    for index, step in enumerate(sequence):
         messages.append(Message("assistant", "..."))
-        messages.append(Message("tool", json.dumps({"tool": step["tool"], "result": {}})))
+        messages.append(
+            Message(
+                "tool",
+                json.dumps({"tool": step["tool"], "result": {}}),
+                tool_call_id=f"mock-advance-{index}",
+            )
+        )
     return messages
 
 
 class TestTypedStreamEvents:
-    def test_events_are_typed_and_content_chunks_only(self):
-        """The mock emits transport chunks only: no true token events and no
-        usage events, so nothing downstream can mistake its replay speed for
-        model token throughput."""
+    def test_events_are_typed_native_tool_calls(self):
+        """The mock emits a native tool-call event: no true token events and
+        no usage events, so nothing downstream can mistake its replay speed
+        for model token throughput."""
         events = list(DeterministicMockClient().stream_turn(conversation(), SETTINGS))
         assert events, "a turn must stream at least one event"
         assert all(isinstance(e, StreamEvent) for e in events)
-        assert {e.kind for e in events} == {"content_chunk"}
+        assert {e.kind for e in events} == {"native_tool_call"}
+        assert events[0].tool_call is not None
+        assert events[0].tool_call.call_id.startswith("mock-")
 
-    def test_chunks_are_multiword_transport_chunks_not_tokens(self):
-        """A multiword transport chunk must never be countable as one token:
-        the mock deliberately emits chunks carrying several words."""
+    def test_native_call_is_not_a_token_event(self):
         events = list(DeterministicMockClient().stream_turn(conversation(), SETTINGS))
-        multiword = [e for e in events if len(e.text.split()) > 1]
-        assert multiword, "mock chunks must carry multiple words each"
+        assert all(e.kind != "token" for e in events)
         assert all(e.output_tokens is None for e in events)
 
 
@@ -75,7 +82,7 @@ class TestDeterminism:
         first = list(client.stream_turn(conversation(), SETTINGS))
         second = list(client.stream_turn(conversation(), SETTINGS))
         assert first == second
-        assert len(first) > 1  # a genuine multi-chunk stream
+        assert first[0].kind == "native_tool_call"
 
     def test_two_client_instances_agree(self):
         assert list(DeterministicMockClient().stream_turn(conversation(), SETTINGS)) == list(

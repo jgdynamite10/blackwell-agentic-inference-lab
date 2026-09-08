@@ -57,10 +57,16 @@ from blackwell_lab.workload.model_client import (
     ModelClient,
     ModelClientError,
     ModelClientTimeout,
+    NativeToolCall,
     StreamEvent,
 )
+from blackwell_lab.workload.native_tools import (
+    TOOL_CHOICE,
+    ToolCallAssembler,
+    openai_tool_definitions,
+)
 
-OPENAI_CLIENT_VERSION = "1.0.0"
+OPENAI_CLIENT_VERSION = "2.0.0"
 
 #: Hostnames always accepted as local.
 _LOCAL_HOSTNAMES = frozenset({"localhost"})
@@ -130,10 +136,11 @@ class OpenAICompatibleClient(ModelClient):
     """Streams one turn from an OpenAI-compatible ``/v1/chat/completions``.
 
     Stateless per request (thread-safe: the runner issues concurrent tasks
-    against one instance). The lab's provider-neutral ``TOOL_CALL:`` text
-    protocol is preserved: tool results are sent back as user-role messages
-    prefixed with ``TOOL_RESULT:``, so no provider-specific function-calling
-    schema leaks into the workload definition.
+    against one instance). Each request carries the deterministic OpenAI
+    ``tools`` collection. Streamed ``delta.tool_calls`` fragments are
+    assembled into exactly one native call; tool results are returned as
+    ``role=tool`` messages with the matching ``tool_call_id``. The retired
+    ``TOOL_CALL:`` text protocol is never accepted.
     """
 
     name = "openai-compatible"
@@ -211,6 +218,10 @@ class OpenAICompatibleClient(ModelClient):
             "stream": True,
             # Authoritative token counts: the final stream chunk carries usage.
             "stream_options": {"include_usage": True},
+            "tools": openai_tool_definitions(),
+            # Official NIM/vLLM 0.27.1 pairing for Nemotron 3.5 Lightning.
+            "tool_choice": TOOL_CHOICE,
+            "parallel_tool_calls": False,
         }
         if settings.seed is not None:
             body["seed"] = settings.seed
@@ -219,8 +230,29 @@ class OpenAICompatibleClient(ModelClient):
     @staticmethod
     def _wire_message(message: Message) -> dict:
         if message.role == "tool":
-            # Provider-neutral tool protocol: results return as user text.
-            return {"role": "user", "content": f"TOOL_RESULT: {message.content}"}
+            if not message.tool_call_id:
+                raise ModelClientError("tool result is missing its tool_call_id")
+            return {
+                "role": "tool",
+                "tool_call_id": message.tool_call_id,
+                "content": message.content,
+            }
+        if message.role == "assistant" and message.tool_calls:
+            return {
+                "role": "assistant",
+                "content": message.content or None,
+                "tool_calls": [
+                    {
+                        "id": call.call_id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": json.dumps(call.arguments, sort_keys=True),
+                        },
+                    }
+                    for call in message.tool_calls
+                ],
+            }
         if message.role in ("system", "user", "assistant"):
             return {"role": message.role, "content": message.content}
         raise ModelClientError(f"unsupported message role: {message.role!r}")
@@ -232,6 +264,7 @@ class OpenAICompatibleClient(ModelClient):
         deadline: float | None,
         clock: Clock,
     ) -> Iterator[StreamEvent]:
+        assembler = ToolCallAssembler()
         for raw in lines:
             if deadline is not None and clock.monotonic() >= deadline:
                 raise ModelClientTimeout("turn deadline elapsed mid-stream")
@@ -240,7 +273,7 @@ class OpenAICompatibleClient(ModelClient):
                 continue
             payload = line[len("data:") :].strip()
             if payload == "[DONE]":
-                return
+                break
             try:
                 event = json.loads(payload)
             except json.JSONDecodeError:
@@ -252,11 +285,8 @@ class OpenAICompatibleClient(ModelClient):
 
             for choice in event.get("choices") or []:
                 delta = choice.get("delta") or {}
-                content = delta.get("content")
-                if isinstance(content, str) and content:
-                    # A transport text chunk — NEVER a token event: the
-                    # OpenAI-compatible stream has no per-token timing.
-                    yield StreamEvent(kind="content_chunk", text=content)
+                if isinstance(delta, dict):
+                    yield from assembler.consume_delta(delta)
 
             usage = event.get("usage")
             if isinstance(usage, dict):
@@ -266,4 +296,11 @@ class OpenAICompatibleClient(ModelClient):
                         "endpoint usage payload is malformed (completion_tokens "
                         "is not an integer); refusing to fabricate token counts"
                     )
+                assembler.observe_usage(completion_tokens)
                 yield StreamEvent(kind="usage", output_tokens=completion_tokens)
+
+        assembled = assembler.finalize()
+        if isinstance(assembled, NativeToolCall):
+            yield StreamEvent(kind="native_tool_call", tool_call=assembled)
+            return
+        raise assembled

@@ -22,7 +22,7 @@ resulting tool calls.
 | --- | --- | --- |
 | End-to-end task completion time | Benchmark driver submits the task — the actual driver submission instant, stamped the moment a bounded-scheduler slot becomes available and the worker claims the task (a task that has not entered a slot has not been submitted) | Terminal record handed to the evaluator (immediately on task termination — the implementation and this boundary agree) |
 | Queue time | Request accepted by the serving endpoint | First scheduling of the request onto the engine (from engine queue telemetry; if the engine reports none, queue time is recorded as **unavailable with a reason**, never approximated silently) |
-| Time to first token (TTFT) | Driver sends the request for a turn | Driver receives the **first non-empty content-bearing event** of that turn |
+| Time to first token (TTFT) | Driver sends the request for a turn | Driver receives the **first meaningful model-output event** of that turn: a content chunk, a reasoning-output event, or a native tool-call delta. Native tool calls may emit no `delta.content`; waiting only for content would under-count TTFT. SSE fragments are never tokens. |
 | Inter-token latency (ITL) | Token *n* received | Token *n+1* received; available **only when true per-token timing exists** — transport text chunks are never tokens, and without token events ITL is recorded as unavailable with a reason |
 | Model-serving time | Request dispatch to the serving endpoint | Final token of the turn received (includes queue time; queue time is also reported separately) |
 | Tool-execution time | Agent runtime invokes a simulated tool | Tool result returned to the agent runtime (simulated latencies are deterministic, recorded, and **consumed through the clock** — they occupy task duration, timeout budget, request pacing, and cell wall time) |
@@ -33,14 +33,22 @@ same host as the serving container to exclude WAN variability; the loopback /
 container-network path is recorded in the manifest.
 
 Model turns are consumed as **typed stream events** that distinguish
-transport text chunks, true token events, authoritative usage/token counts,
-and optional serving-queue telemetry. Output-token counts come only from
-authoritative usage data or the exact model tokenizer; network chunk counts
-are never reported as token counts. Durations use an injectable monotonic
-clock; task timing starts at actual driver submission — the instant the
-bounded scheduler's slot is claimed — so a task that has not entered a slot
-consumes none of its timeout budget, and any residual driver-side wait after
-submission (queue_wait) is part of end-to-end task time.
+transport text chunks, reasoning-output events, native tool-call deltas,
+true token events, authoritative usage/token counts, and optional
+serving-queue telemetry. Output-token counts come only from authoritative
+usage data or the exact model tokenizer; network chunk counts and SSE
+fragments are never reported as token counts. Durations use an injectable
+monotonic clock; task timing starts at actual driver submission — the
+instant the bounded scheduler's slot is claimed — so a task that has not
+entered a slot consumes none of its timeout budget, and any residual
+driver-side wait after submission (queue_wait) is part of end-to-end task
+time.
+
+Tool calls use the native OpenAI-compatible `tools` / `tool_calls` /
+`role=tool` path (decision D-0016). The retired textual `TOOL_CALL:`
+protocol is never accepted. Private gpu-mode manifests record
+`tool_call_transport`, `tool_call_parser`, and `reasoning_parser` so native
+results cannot be confused with the custom-text transport used by run-e.
 
 ## 3. Primary measures
 

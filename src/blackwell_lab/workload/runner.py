@@ -99,9 +99,9 @@ from blackwell_lab.workload.validation import (
     validate_runner_config,
 )
 
-MANIFEST_SCHEMA_VERSION = "3.0.0"
+MANIFEST_SCHEMA_VERSION = "3.1.0"
 RESULT_SCHEMA_VERSION = "3.0.0"
-OBSERVATION_SCHEMA_VERSION = "1.0.0"
+OBSERVATION_SCHEMA_VERSION = "1.1.0"
 
 #: Measurement defaults (measurement contract §5; decision D-0010).
 DEFAULT_REPETITIONS = 5
@@ -409,6 +409,11 @@ def _observation(outcome: TaskOutcome) -> dict:
             for trace in execution.tool_trace
         ],
         "terminal": terminal,
+        **(
+            {"tool_call_diagnostics": execution.tool_call_diagnostics}
+            if execution.tool_call_diagnostics
+            else {}
+        ),
         "evaluation": {
             "evaluator_version": outcome.evaluation.evaluator_version,
             "success": outcome.evaluation.success,
@@ -466,6 +471,7 @@ def build_manifest(
         "serving": {
             "engine": "mock",
             "engine_version": client.version,
+            "tool_call_transport": "openai-native-tools",
         },
         "host": _host_description(),
         "cloud": {

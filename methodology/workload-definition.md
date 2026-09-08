@@ -25,6 +25,14 @@ list — so the model selects among candidates rather than guessing a hidden
 string), a free-text `rationale` (diagnostic only, never a success gate), and
 a `remediation_id`.
 
+Each turn must produce exactly one native OpenAI-compatible function call.
+The six `TOOL_SPECS` contracts are projected onto deterministic OpenAI
+function definitions (`tools` on every chat-completions request;
+`tool_choice: "auto"`; `parallel_tool_calls: false`). Streamed
+`delta.tool_calls` fragments are assembled by index. Tool results return as
+`role=tool` messages with the matching `tool_call_id`. The retired textual
+`TOOL_CALL:` protocol is never accepted (decision D-0016).
+
 Tool arguments are strictly validated (`invalid_tool_arguments` on any
 violation): required strings must be non-empty, and every integer argument
 (`search_logs.limit`, `query_metrics.window_s`,
@@ -80,7 +88,7 @@ evidence. Predicates declare permitted **alternative evidence paths** (a
 reference and an alternative tool sequence both satisfy every predicate by
 construction, and tests prove it). Scenarios are versioned; the workload
 version appears in every run manifest. The Phase 2 catalog
-(`src/blackwell_lab/workload/scenarios.py`, workload version 2.2.0)
+(`src/blackwell_lab/workload/scenarios.py`, workload version 2.3.0)
 implements one scenario per class and is additionally **content-addressed**:
 the SHA-256 digest of the canonical catalog JSON is recorded in every run
 manifest under `workload.catalog_digest` (never as a model artifact hash).

@@ -1,5 +1,5 @@
 {
-  "schema_version": "3.0.0",
+  "schema_version": "3.1.0",
   "run_id": "EXAMPLE-0000-0000-0000-000000000000",
   "is_synthetic_example": true,
   "execution_mode": "gpu",
@@ -26,7 +26,10 @@
     "environment_overrides": {
       "EXAMPLE_BACKEND_SELECTION": "example"
     },
-    "container_cuda_runtime_version": "13.0-EXAMPLE"
+    "container_cuda_runtime_version": "13.0-EXAMPLE",
+    "tool_call_transport": "openai-native-tools",
+    "tool_call_parser": "qwen3_coder",
+    "reasoning_parser": "nemotron_v3"
   },
   "host": {
     "gpu_model": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
@@ -54,7 +57,7 @@
     "top_p": 0.95,
     "max_tokens": 4096,
     "seed": 12345,
-    "reasoning_mode": false
+    "reasoning_mode": true
   },
   "workload": {
     "name": "cloud-ops-agent",

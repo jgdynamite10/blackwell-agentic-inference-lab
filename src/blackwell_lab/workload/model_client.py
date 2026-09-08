@@ -21,8 +21,9 @@ A turn is streamed as :class:`StreamEvent` values, which distinguish:
 - ``queue_telemetry`` — optional serving-engine queue time reported by the
   engine itself (e.g. vLLM metrics). The mock client emits none.
 
-TTFT is measured at the first non-empty content-bearing event. Inter-token
-latency exists only when true ``token`` events are present.
+TTFT is measured at the first meaningful model-output event: content,
+reasoning output, or a native tool-call delta. Inter-token latency exists
+only when true ``token`` events are present.
 
 Deadlines
 ---------
@@ -32,14 +33,13 @@ deadline instead of blocking arbitrarily.
 
 Turn protocol
 -------------
-The final line of the assembled turn text must be:
-
-    ``TOOL_CALL: {"tool": "<name>", "arguments": {...}}``
-
-Calling the terminal tool ``recommend_remediation`` (with ``diagnosis_id``,
-``rationale``, and ``remediation_id``) ends the task. Anything unparseable is
-a malformed tool call and, with the measurement retry policy of ``retries=0``,
-fails the task visibly (measurement contract §7).
+Each turn must produce exactly one native OpenAI-compatible tool call
+(``StreamEvent.kind == "native_tool_call"``). The retired ``TOOL_CALL:``
+text protocol is never accepted. Calling the terminal tool
+``recommend_remediation`` (with ``diagnosis_id``, ``rationale``, and
+``remediation_id``) ends the task. Anything unparseable is a malformed
+tool call and, with the measurement retry policy of ``retries=0``, fails
+the task visibly (measurement contract §7).
 """
 
 from __future__ import annotations
@@ -52,8 +52,10 @@ from dataclasses import dataclass
 from blackwell_lab.workload.clock import SYSTEM_CLOCK, Clock
 from blackwell_lab.workload.scenarios import Scenario, catalog
 
-MOCK_CLIENT_VERSION = "3.0.0"
+MOCK_CLIENT_VERSION = "4.0.0"
 
+#: Retired text protocol. Kept only so tests and sanitizers can detect and
+#: reject it. Production clients never assemble a turn from this prefix.
 TOOL_CALL_PREFIX = "TOOL_CALL:"
 
 #: Words per transport chunk emitted by the mock client. Deliberately > 1 so
@@ -62,11 +64,22 @@ MOCK_WORDS_PER_CHUNK = 3
 
 
 @dataclass(frozen=True)
+class NativeToolCall:
+    """One complete native function call after stream assembly."""
+
+    call_id: str
+    name: str
+    arguments: dict
+
+
+@dataclass(frozen=True)
 class Message:
     """One conversation message. ``role`` is system, user, assistant, or tool."""
 
     role: str
-    content: str
+    content: str = ""
+    tool_calls: tuple[NativeToolCall, ...] = ()
+    tool_call_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,14 +97,31 @@ class GenerationSettings:
 class StreamEvent:
     """One typed event of a streamed model turn (see module docstring)."""
 
-    kind: str  # "content_chunk" | "token" | "usage" | "queue_telemetry"
+    kind: str
+    # "content_chunk" | "reasoning_chunk" | "native_tool_call" | "token" |
+    # "usage" | "queue_telemetry"
     text: str = ""
     output_tokens: int | None = None  # usage events only
     queue_time_ms: float | None = None  # queue_telemetry events only
+    tool_call: NativeToolCall | None = None
 
 
 class ModelClientError(Exception):
     """The serving endpoint (or its stand-in) failed to produce a turn."""
+
+
+class NativeToolCallError(ModelClientError):
+    """A streamed native tool call could not be assembled or validated.
+
+    The exception text is the sanitized failure category only. Structural
+    diagnostics live on :attr:`diagnostics` and must never include raw
+    prompts, completions, reasoning, or private paths.
+    """
+
+    def __init__(self, category: str, diagnostics: dict) -> None:
+        super().__init__(category)
+        self.category = category
+        self.diagnostics = diagnostics
 
 
 class ModelClientTimeout(ModelClientError):
@@ -168,11 +198,11 @@ class DeterministicMockClient(ModelClient):
     thread-safe. Two identical conversations always produce identical event
     streams.
 
-    The mock emits only multi-word ``content_chunk`` events: no ``token``
-    events (it has no true token timing) and no ``usage`` events (it has no
-    authoritative tokenizer). Downstream code must therefore record ITL and
-    token counts as unavailable for mock runs — mock Python replay speed is
-    never model tokens/sec.
+    The mock emits a single ``native_tool_call`` event per turn (except the
+    retired-text ``malformed_tool_call`` behavior). It has no true token
+    timing and no authoritative tokenizer, so ITL and token counts stay
+    unavailable for mock runs — mock Python replay speed is never model
+    tokens/sec.
 
     ``behavior`` selects a deterministic failure/adversarial mode for tests
     (see :data:`MOCK_BEHAVIORS`). ``response_delay_s`` delays the first event
@@ -208,11 +238,30 @@ class DeterministicMockClient(ModelClient):
 
         scenario = self._scenario_for(messages)
         turn_index = sum(1 for m in messages if m.role == "tool")
-        text = self._turn_text(scenario, turn_index)
-        for piece in _chunk(text):
-            if deadline is not None and clock.monotonic() >= deadline:
-                raise ModelClientTimeout("turn deadline elapsed mid-stream")
-            yield StreamEvent(kind="content_chunk", text=piece)
+        if self._behavior == "malformed_tool_call" and turn_index == 0:
+            # Emit the retired text protocol only: the agent/client must
+            # refuse it and never fall back to parsing TOOL_CALL lines.
+            text = (
+                "Investigating the incident now.\n"
+                f'{TOOL_CALL_PREFIX} {{"tool": "get_service_health", '
+                '"arguments": {{unclosed'
+            )
+            for piece in _chunk(text):
+                if deadline is not None and clock.monotonic() >= deadline:
+                    raise ModelClientTimeout("turn deadline elapsed mid-stream")
+                yield StreamEvent(kind="content_chunk", text=piece)
+            return
+        call = self._turn_call(scenario, turn_index)
+        if deadline is not None and clock.monotonic() >= deadline:
+            raise ModelClientTimeout("turn deadline elapsed mid-stream")
+        yield StreamEvent(
+            kind="native_tool_call",
+            tool_call=NativeToolCall(
+                call_id=f"mock-{scenario.scenario_id}-t{turn_index}",
+                name=call["tool"],
+                arguments=dict(call["arguments"]),
+            ),
+        )
 
     @staticmethod
     def _sleep_until(clock: Clock, delay_s: float, deadline: float | None) -> None:
@@ -265,6 +314,40 @@ class DeterministicMockClient(ModelClient):
             )
             return [step, step, step, step]
         return list(scenario.reference_tool_sequence)
+
+    def _turn_call(self, scenario: Scenario, turn_index: int) -> dict:
+        sequence = self._evidence_sequence(scenario)
+
+        if self._behavior == "no_terminal":
+            return {"tool": "get_service_health", "arguments": {}}
+
+        if turn_index < len(sequence):
+            call = sequence[turn_index]
+            if turn_index == 0:
+                if self._behavior == "unknown_tool":
+                    return {"tool": "reboot_datacenter", "arguments": {}}
+                if self._behavior == "bad_arguments":
+                    return {"tool": "query_metrics", "arguments": {"metric": 12345}}
+            return call
+
+        diagnosis_id = scenario.accepted_diagnoses[0]
+        rationale = scenario.root_cause_summary
+        remediation_id = scenario.accepted_remediations[0]
+        if self._behavior == "wrong_diagnosis":
+            diagnosis_id = scenario.distractor_diagnoses[0]
+        elif self._behavior == "keyword_rationale_wrong_diagnosis":
+            diagnosis_id = scenario.distractor_diagnoses[0]
+            rationale = f"It is not the case that: {scenario.root_cause_summary}"
+        if self._behavior == "wrong_remediation":
+            remediation_id = scenario.distractor_remediations[0]
+        return {
+            "tool": "recommend_remediation",
+            "arguments": {
+                "diagnosis_id": diagnosis_id,
+                "rationale": rationale,
+                "remediation_id": remediation_id,
+            },
+        }
 
     def _turn_text(self, scenario: Scenario, turn_index: int) -> str:
         sequence = self._evidence_sequence(scenario)

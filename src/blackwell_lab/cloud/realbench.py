@@ -49,6 +49,11 @@ from blackwell_lab.schemas import (
 from blackwell_lab.workload.clock import SYSTEM_CLOCK, Clock
 from blackwell_lab.workload.evaluator import EVALUATOR_VERSION, QUALITY_THRESHOLD
 from blackwell_lab.workload.model_client import GenerationSettings, ModelClient
+from blackwell_lab.workload.native_tools import (
+    REASONING_PARSER,
+    TOOL_CALL_PARSER,
+    TOOL_CALL_TRANSPORT,
+)
 from blackwell_lab.workload.runner import (
     DEFAULT_REPETITIONS,
     DEFAULT_TASKS_PER_REPETITION,
@@ -139,7 +144,7 @@ class RealRunSpec:
     generation: GenerationSettings = field(
         # Model-card recommended sampling (feasibility report §5); frozen
         # for the full baseline only after the pilot (decision D-0012).
-        default_factory=lambda: GenerationSettings(temperature=1.0, top_p=0.95)
+        default_factory=lambda: GenerationSettings(temperature=1.0, top_p=0.95, reasoning_mode=True)
     )
 
 
@@ -228,6 +233,9 @@ def build_real_manifest(
     }
     if spec.container_cuda_runtime_version:
         serving["container_cuda_runtime_version"] = spec.container_cuda_runtime_version
+    serving["tool_call_transport"] = TOOL_CALL_TRANSPORT
+    serving["tool_call_parser"] = TOOL_CALL_PARSER
+    serving["reasoning_parser"] = REASONING_PARSER
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "run_id": run_id,

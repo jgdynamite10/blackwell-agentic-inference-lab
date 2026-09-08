@@ -156,6 +156,19 @@
         "container_cuda_runtime_version": {
           "type": "string",
           "description": "Actual CUDA runtime version observed INSIDE the running serving container (e.g. torch.version.cuda) \u2014 a separate fact from the driver's maximum supported CUDA version."
+        },
+        "tool_call_transport": {
+          "type": "string",
+          "enum": ["openai-native-tools"],
+          "description": "Wire protocol used for tool calls. openai-native-tools is the native OpenAI-compatible tools/tool_calls/role=tool path. The retired TOOL_CALL text protocol is never recorded here."
+        },
+        "tool_call_parser": {
+          "type": "string",
+          "description": "vLLM --tool-call-parser identity (qwen3_coder for Nemotron 3.5 Lightning / vLLM 0.27.1)."
+        },
+        "reasoning_parser": {
+          "type": "string",
+          "description": "vLLM --reasoning-parser identity (nemotron_v3 for Nemotron 3.5 Lightning / vLLM 0.27.1)."
         }
       }
     },
@@ -337,7 +350,7 @@
             "boolean",
             "null"
           ],
-          "description": "Chat-template reasoning/thinking toggle if the model supports one."
+          "description": "Frozen Nemotron thinking policy. true means the bundled chat-template default (thinking on) with --reasoning-parser nemotron_v3 separating reasoning from tool calls; reasoning content is never persisted. false means thinking disabled via an official chat_template_kwargs override. null means not applicable (mock)."
         }
       }
     },

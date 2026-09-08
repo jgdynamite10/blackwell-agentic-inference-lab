@@ -645,3 +645,51 @@ correction to the open-kernel driver package, NVIDIA key-content pin, real
 `bootstrap.env` enforcement, and atomic containerized model fetch happened
 before any live GPU session and does not change the still-unvalidated
 status of these candidates.
+
+## 2026-09-08 — D-0016: Native OpenAI-compatible tool calling replaces the custom-text protocol before baseline freeze
+
+**No genuine baseline results predate this change.** Run-e proved
+infrastructure, serving, live provenance, result persistence, and teardown,
+and it produced genuine tokens. Its quality outcomes (59/60
+`malformed_tool_call`, one `quality_failed`) are **diagnostic only** and
+are **not** baseline evidence. No run-e performance comparison may be
+published as a final benchmark result.
+
+**Decision.**
+
+1. **Transport replacement.** The custom textual `TOOL_CALL:` / user-role
+   `TOOL_RESULT:` protocol is retired before baseline freeze. The provider-
+   neutral model adapter now uses native OpenAI-compatible `tools`, streamed
+   `delta.tool_calls`, and `role=tool` results with matching
+   `tool_call_id`. The retired text format is never accepted as a fallback.
+2. **Official vLLM 0.27.1 / Nemotron 3.5 Lightning pairing.** Launch
+   retains every existing digest, CUDA, driver, model-revision, network,
+   and resource pin, and adds `--reasoning-parser nemotron_v3`,
+   `--tool-call-parser qwen3_coder`, and `--enable-auto-tool-choice`.
+   Requests send `tool_choice: "auto"` (the documented pairing with
+   `--enable-auto-tool-choice` / `qwen3_coder`; `required` is not the
+   documented pairing and is known to empty or corrupt streamed arguments
+   with this parser) and `parallel_tool_calls: false`. The model's bundled
+   chat template is used; no custom template is invented.
+3. **Reasoning mode.** Official default thinking-on is frozen as
+   `reasoning_mode=True`. `--reasoning-parser nemotron_v3` separates
+   reasoning fields from executable tool calls. Reasoning is timing-only
+   (eligible for TTFT) and is never persisted. `force_nonempty_content` is
+   a coding-agent note only and is not added.
+4. **TTFT.** Time to first token is the first meaningful model-output
+   event: content, reasoning output, or a native tool-call delta. Token
+   counts continue to come only from authoritative API usage fields.
+5. **Identity.** Private gpu-mode manifests record
+   `tool_call_transport=openai-native-tools`,
+   `tool_call_parser=qwen3_coder`, and `reasoning_parser=nemotron_v3` so
+   native-tool results cannot be confused with run-e's custom-text
+   protocol. Observation schema 1.1.0 may carry sanitized structural
+   diagnostics only. The previous pilot-config digest `d4118755…` is
+   retired; this entry does not publish a replacement digest.
+
+**Rationale.** Run-e showed the custom text protocol could not drive the
+single-tool-per-turn agent loop on the pinned Nemotron / vLLM 0.27.1 path.
+The correction is bounded to the wire protocol, launch parser flags, and
+measurement-contract wording. Task definitions, evaluator rules, maximum
+turns, seeds, temperatures, top_p values, concurrency cells, and success
+criteria are unchanged. The full 12-cell baseline remains unauthorized.

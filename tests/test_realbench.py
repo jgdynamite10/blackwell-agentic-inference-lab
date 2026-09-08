@@ -231,6 +231,10 @@ class TestGenuineCell:
         assert manifest["execution_mode"] == "gpu"
         assert manifest["model"]["artifact_hash"].startswith("sha256:")
         assert manifest["serving"]["container_digest"] == CONTAINER_DIGEST
+        assert manifest["serving"]["tool_call_transport"] == "openai-native-tools"
+        assert manifest["serving"]["tool_call_parser"] == "qwen3_coder"
+        assert manifest["serving"]["reasoning_parser"] == "nemotron_v3"
+        assert manifest["generation"]["reasoning_mode"] is True
         assert manifest["host"]["gpu_model"].startswith("NVIDIA RTX PRO 6000")
         assert manifest["cloud"]["comparison_mode"] == "provider-native"
         assert result["execution_mode"] == "gpu"

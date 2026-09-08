@@ -97,11 +97,12 @@ sequenceDiagram
     R->>A: driver submission (a bounded-scheduler slot is claimed;<br/>E2E clock starts HERE; deadline = submission + timeout;<br/>unslotted tasks consume no timeout budget)
     loop each turn (until terminal tool, error, or timeout)
         A->>M: model request with deadline (TTFT + serving clocks)
-        M-->>A: typed stream events (content chunks;<br/>token/usage/queue events when the client has them)
-        Note over A,M: TTFT = first non-empty content event;<br/>chunks are never tokens
-        A->>A: parse + validate tool call (retries=0)
+        M-->>A: typed stream events (content/reasoning/native<br/>tool-call deltas; token/usage/queue when present)
+        Note over A,M: TTFT = first meaningful output<br/>(content, reasoning, or native tool-call delta);<br/>chunks are never tokens
+        A->>A: assemble + validate exactly one native tool call (retries=0)
         A->>T: execute simulated tool
         T-->>A: deterministic result (fixed latency<br/>CONSUMED through the clock: it spends<br/>task duration and timeout budget)
+        A->>M: next turn: assistant tool_calls + role=tool result
     end
     A->>T: recommend_remediation (diagnosis_id,<br/>rationale, remediation_id; the deadline is enforced<br/>after EVERY tool, including this terminal one)
     A->>E: terminal record handed to evaluator immediately
@@ -112,12 +113,16 @@ sequenceDiagram
 
 Measurement boundaries follow the measurement contract §2: end-to-end task
 time runs from actual driver submission to the terminal hand-off to the
-evaluator; TTFT is the first non-empty content event; ITL exists only with
-true per-token timing (transport chunks are never tokens); tool-execution
-time uses the fixed, documented simulated latencies — consumed through the
-injectable clock so they occupy task duration and timeout budget — and is
-separable from model-serving time. Unexpected exceptions are contained as a
-sanitized `agent_runtime_error`, so one task never aborts a repetition.
+evaluator; TTFT is the first meaningful model-output event (content,
+reasoning output, or a native tool-call delta); ITL exists only with true
+per-token timing (transport chunks and SSE fragments are never tokens);
+tool-execution time uses the fixed, documented simulated latencies —
+consumed through the injectable clock so they occupy task duration and
+timeout budget — and is separable from model-serving time. After a tool
+runs, the next request appends the assistant `tool_calls` entry and a
+`role=tool` result with the matching `tool_call_id` (never a user-role
+`TOOL_RESULT:` rewrite). Unexpected exceptions are contained as a sanitized
+`agent_runtime_error`, so one task never aborts a repetition.
 
 Mock execution is **functional-only**: GPU telemetry, primary latency,
 throughput, and SLO attainment are recorded as **unavailable with explicit

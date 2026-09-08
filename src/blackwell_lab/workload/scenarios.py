@@ -37,7 +37,7 @@ import json
 from dataclasses import asdict, dataclass, field
 
 WORKLOAD_NAME = "cloud-ops-agent"
-WORKLOAD_VERSION = "2.2.0"
+WORKLOAD_VERSION = "2.3.0"
 
 #: The ten incident condition classes required by
 #: methodology/workload-definition.md ("Incident catalog").
