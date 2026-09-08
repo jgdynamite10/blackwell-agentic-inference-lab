@@ -34,8 +34,10 @@ deadline instead of blocking arbitrarily.
 Turn protocol
 -------------
 Each turn must produce exactly one native OpenAI-compatible tool call
-(``StreamEvent.kind == "native_tool_call"``). The retired ``TOOL_CALL:``
-text protocol is never accepted. Calling the terminal tool
+(``StreamEvent.kind == "native_tool_call"``). A privacy-safe
+``native_tool_call_delta`` timing event is emitted at the first streamed
+tool-call fragment and contains no identifiers, names, arguments, or
+text. The retired ``TOOL_CALL:`` text protocol is never accepted. Calling the terminal tool
 ``recommend_remediation`` (with ``diagnosis_id``, ``rationale``, and
 ``remediation_id``) ends the task. Anything unparseable is a malformed
 tool call and, with the measurement retry policy of ``retries=0``, fails
@@ -45,7 +47,6 @@ the task visibly (measurement contract §7).
 from __future__ import annotations
 
 import abc
-import json
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
@@ -98,8 +99,8 @@ class StreamEvent:
     """One typed event of a streamed model turn (see module docstring)."""
 
     kind: str
-    # "content_chunk" | "reasoning_chunk" | "native_tool_call" | "token" |
-    # "usage" | "queue_telemetry"
+    # "content_chunk" | "reasoning_chunk" | "native_tool_call_delta" |
+    # "native_tool_call" | "token" | "usage" | "queue_telemetry"
     text: str = ""
     output_tokens: int | None = None  # usage events only
     queue_time_ms: float | None = None  # queue_telemetry events only
@@ -198,11 +199,11 @@ class DeterministicMockClient(ModelClient):
     thread-safe. Two identical conversations always produce identical event
     streams.
 
-    The mock emits a single ``native_tool_call`` event per turn (except the
-    retired-text ``malformed_tool_call`` behavior). It has no true token
-    timing and no authoritative tokenizer, so ITL and token counts stay
-    unavailable for mock runs — mock Python replay speed is never model
-    tokens/sec.
+    The mock emits a privacy-safe ``native_tool_call_delta`` timing event
+    and then one executable ``native_tool_call`` (except the retired-text
+    ``malformed_tool_call`` behavior). It has no true token timing and no
+    authoritative tokenizer, so ITL and token counts stay unavailable for
+    mock runs — mock Python replay speed is never model tokens/sec.
 
     ``behavior`` selects a deterministic failure/adversarial mode for tests
     (see :data:`MOCK_BEHAVIORS`). ``response_delay_s`` delays the first event
@@ -254,6 +255,7 @@ class DeterministicMockClient(ModelClient):
         call = self._turn_call(scenario, turn_index)
         if deadline is not None and clock.monotonic() >= deadline:
             raise ModelClientTimeout("turn deadline elapsed mid-stream")
+        yield StreamEvent(kind="native_tool_call_delta")
         yield StreamEvent(
             kind="native_tool_call",
             tool_call=NativeToolCall(
@@ -348,62 +350,3 @@ class DeterministicMockClient(ModelClient):
                 "remediation_id": remediation_id,
             },
         }
-
-    def _turn_text(self, scenario: Scenario, turn_index: int) -> str:
-        sequence = self._evidence_sequence(scenario)
-
-        if self._behavior == "no_terminal":
-            # Never recommend: keep polling health forever (agent enforces
-            # max_turns and reports no_terminal_recommendation).
-            call = {"tool": "get_service_health", "arguments": {}}
-            return self._render(f"Re-checking service health (turn {turn_index}).", call)
-
-        if turn_index < len(sequence):
-            call = sequence[turn_index]
-            if turn_index == 0:
-                if self._behavior == "malformed_tool_call":
-                    return (
-                        "Investigating the incident now.\n"
-                        f'{TOOL_CALL_PREFIX} {{"tool": "get_service_health", '
-                        '"arguments": {{unclosed'
-                    )
-                if self._behavior == "unknown_tool":
-                    call = {"tool": "reboot_datacenter", "arguments": {}}
-                elif self._behavior == "bad_arguments":
-                    call = {"tool": "query_metrics", "arguments": {"metric": 12345}}
-            reasoning = (
-                f"Step {turn_index + 1}: consulting {call['tool']} to narrow down the "
-                f"cause of the {scenario.incident_class} incident."
-            )
-            return self._render(reasoning, call)
-
-        # Evidence gathering complete: submit the terminal recommendation.
-        diagnosis_id = scenario.accepted_diagnoses[0]
-        rationale = scenario.root_cause_summary
-        remediation_id = scenario.accepted_remediations[0]
-        if self._behavior == "wrong_diagnosis":
-            diagnosis_id = scenario.distractor_diagnoses[0]
-        elif self._behavior == "keyword_rationale_wrong_diagnosis":
-            # Adversarial: a rationale stuffed with (negated) ground-truth
-            # wording must not rescue a wrong diagnosis id.
-            diagnosis_id = scenario.distractor_diagnoses[0]
-            rationale = f"It is not the case that: {scenario.root_cause_summary}"
-        if self._behavior == "wrong_remediation":
-            remediation_id = scenario.distractor_remediations[0]
-        call = {
-            "tool": "recommend_remediation",
-            "arguments": {
-                "diagnosis_id": diagnosis_id,
-                "rationale": rationale,
-                "remediation_id": remediation_id,
-            },
-        }
-        summary = (
-            "Evidence gathered is consistent with a single root cause; submitting "
-            "the remediation recommendation."
-        )
-        return self._render(summary, call)
-
-    @staticmethod
-    def _render(reasoning: str, call: dict) -> str:
-        return f"{reasoning}\n{TOOL_CALL_PREFIX} {json.dumps(call, sort_keys=True)}"

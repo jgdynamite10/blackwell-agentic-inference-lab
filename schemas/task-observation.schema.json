@@ -145,7 +145,7 @@
       "properties": {
         "ttft_ms": { "type": ["number", "null"], "minimum": 0, "description": "Time to the first meaningful model-output event (content, reasoning output, or native tool-call delta); null when the turn produced none." },
         "serving_time_ms": { "type": "number", "minimum": 0 },
-        "chunk_count": { "type": "integer", "minimum": 0, "description": "Transport chunks observed (NOT a token count)." },
+        "chunk_count": { "type": "integer", "minimum": 0, "description": "Privacy-safe output-event count: content chunks, reasoning-output events, and the first native tool-call delta. Not a token count and not the later assembled native_tool_call." },
         "content_chars": { "type": "integer", "minimum": 0 },
         "itl_available": { "type": "boolean" },
         "itl_unavailable_reason": { "type": ["string", "null"] },

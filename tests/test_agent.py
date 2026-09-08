@@ -118,8 +118,8 @@ class TestHappyPath:
         for turn in execution.turns:
             assert turn.ttft_ms is not None and turn.ttft_ms >= 0
             assert turn.serving_time_ms >= turn.ttft_ms
-            # The mock emits a native tool-call event with no content text.
-            assert turn.chunk_count == 0
+            # The mock emits a privacy-safe first-delta event and no content.
+            assert turn.chunk_count == 1
             assert turn.content_chars == 0
             # The mock has no true token events and no authoritative usage:
             # ITL and token counts are unavailable with reasons, never chunk

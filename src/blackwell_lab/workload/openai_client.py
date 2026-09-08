@@ -137,10 +137,12 @@ class OpenAICompatibleClient(ModelClient):
 
     Stateless per request (thread-safe: the runner issues concurrent tasks
     against one instance). Each request carries the deterministic OpenAI
-    ``tools`` collection. Streamed ``delta.tool_calls`` fragments are
-    assembled into exactly one native call; tool results are returned as
-    ``role=tool`` messages with the matching ``tool_call_id``. The retired
-    ``TOOL_CALL:`` text protocol is never accepted.
+    ``tools`` collection. The first streamed tool-call fragment yields a
+    privacy-safe ``native_tool_call_delta`` timing event (no identifiers or
+    arguments). Fragments are then assembled into exactly one executable
+    ``native_tool_call``; tool results are returned as ``role=tool``
+    messages with the matching ``tool_call_id``. The retired ``TOOL_CALL:``
+    text protocol is never accepted.
     """
 
     name = "openai-compatible"

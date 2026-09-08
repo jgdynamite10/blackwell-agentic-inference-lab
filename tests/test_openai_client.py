@@ -250,6 +250,10 @@ class TestStreamParsing:
             )
         )
         events = list(make_client(transport).stream_turn(MESSAGES, SETTINGS))
+        kinds = [e.kind for e in events]
+        assert kinds[0] == "native_tool_call_delta"
+        assert events[0].text == ""
+        assert events[0].tool_call is None
         native = [e for e in events if e.kind == "native_tool_call"]
         assert len(native) == 1
         assert native[0].tool_call is not None
@@ -257,6 +261,7 @@ class TestStreamParsing:
         assert native[0].tool_call.name == "search_logs"
         assert native[0].tool_call.arguments == arguments
         assert any(e.kind == "usage" and e.output_tokens == 11 for e in events)
+        assert "token" not in kinds
 
     def test_usage_event_carries_authoritative_completion_tokens(self):
         transport = RecordingTransport(sse(valid_health_stream()))
@@ -272,7 +277,10 @@ class TestStreamParsing:
             *sse([{"choices": [{"delta": {}}]}, *valid_health_stream()]),
         ]
         events = list(make_client(RecordingTransport(lines)).stream_turn(MESSAGES, SETTINGS))
-        assert [e.kind for e in events if e.kind != "usage"] == ["native_tool_call"]
+        assert [e.kind for e in events if e.kind != "usage"] == [
+            "native_tool_call_delta",
+            "native_tool_call",
+        ]
 
     def test_malformed_json_payload_raises_a_sanitized_client_error(self):
         transport = RecordingTransport([b"data: {not json}\n"])
@@ -470,6 +478,35 @@ class TestNativeRejections:
         assert error.category == "parallel_or_multiple_tool_calls"
         assert error.diagnostics["tool_call_count"] == 2
 
+    @pytest.mark.parametrize(
+        "bad_index",
+        [pytest.param(None, id="missing"), True, "0", -1, 1.5],
+    )
+    def test_malformed_stream_index_is_rejected_without_coercion(self, bad_index):
+        fragment: dict = {"function": {"name": "get_service_health", "arguments": "{}"}}
+        if bad_index is not None:
+            fragment["index"] = bad_index
+        else:
+            fragment.pop("index", None)
+        _events, error = drain_until_error(
+            make_client(
+                RecordingTransport(
+                    sse(
+                        [
+                            {"choices": [{"delta": {"tool_calls": [fragment]}}]},
+                            usage_line(2),
+                            "[DONE]",
+                        ]
+                    )
+                )
+            )
+        )
+        assert error.category == "malformed_tool_call_index"
+        blob = json.dumps(error.diagnostics)
+        assert "get_service_health" not in blob
+        assert "{}" not in blob
+        assert "1.5" not in blob
+
     def test_reasoning_then_valid_tool_call_succeeds(self):
         transport = RecordingTransport(
             sse(
@@ -484,7 +521,9 @@ class TestNativeRejections:
         events = list(make_client(transport).stream_turn(MESSAGES, SETTINGS))
         kinds = [e.kind for e in events]
         assert kinds[0] == "reasoning_chunk"
+        assert "native_tool_call_delta" in kinds
         assert "native_tool_call" in kinds
+        assert kinds.index("native_tool_call_delta") < kinds.index("native_tool_call")
         native = next(e for e in events if e.kind == "native_tool_call")
         assert native.tool_call is not None
         assert native.tool_call.name == "get_service_health"
@@ -664,30 +703,27 @@ class TestAgentLoopIntegration:
         assert all(body["tool_choice"] == "auto" for body in recorded)
         assert all(body["parallel_tool_calls"] is False for body in recorded)
 
-    def test_ttft_starts_on_the_first_tool_call_delta(self):
+    def test_ttft_equals_first_fragment_delay_not_final_assembly(self):
         clock = FakeClock()
+        scenario = catalog()["elevated-latency-001"]
+        arguments = {
+            "diagnosis_id": scenario.accepted_diagnoses[0],
+            "rationale": "ttft",
+            "remediation_id": scenario.accepted_remediations[0],
+        }
+        raw = json.dumps(arguments, sort_keys=True)
 
         def transport(url, body, headers, timeout_s):
-            clock.sleep(0.012)
-            yield from sse(
-                [
-                    *split_native_call(
-                        call_id="ttft-1",
-                        name="recommend_remediation",
-                        arguments={
-                            "diagnosis_id": catalog()["elevated-latency-001"].accepted_diagnoses[0],
-                            "rationale": "ttft",
-                            "remediation_id": catalog()[
-                                "elevated-latency-001"
-                            ].accepted_remediations[0],
-                        },
-                    ),
-                    usage_line(3),
-                    "[DONE]",
-                ]
-            )
+            clock.sleep(0.010)
+            yield from sse([tool_delta(index=0, call_id="ttft-1")])
+            clock.sleep(0.040)
+            yield from sse([tool_delta(index=0, name="recommend_remediation")])
+            for start in range(0, len(raw), 3):
+                clock.sleep(0.020)
+                yield from sse([tool_delta(index=0, arguments=raw[start : start + 3])])
+            clock.sleep(0.030)
+            yield from sse([usage_line(7), "[DONE]"])
 
-        scenario = catalog()["elevated-latency-001"]
         execution = run_task(
             scenario,
             make_client(transport),
@@ -697,7 +733,12 @@ class TestAgentLoopIntegration:
             clock=clock,
         )
         assert execution.status == "completed"
-        assert execution.turns[0].ttft_ms == pytest.approx(12.0)
+        turn = execution.turns[0]
+        assert turn.ttft_ms == pytest.approx(10.0)
+        assert turn.serving_time_ms > turn.ttft_ms + 80.0
+        assert turn.output_tokens == 7
+        assert turn.chunk_count == 1
+        assert turn.content_chars == 0
 
     def test_legacy_text_response_fails_the_task_without_raw_output(self):
         scenario = catalog()["elevated-latency-001"]
@@ -727,10 +768,102 @@ class TestAgentLoopIntegration:
         assert execution.error_category == "malformed_tool_call"
         assert execution.tool_call_diagnostics is not None
         assert execution.tool_call_diagnostics["failure_category"] == "legacy_text_tool_call"
-        blob = json.dumps(execution.tool_call_diagnostics)
+        assert len(execution.turns) == 1
+        assert execution.turns[0].output_tokens == 17
+        blob = json.dumps(execution.tool_call_diagnostics) + repr(execution.__dict__)
         assert "secret rationale text" not in blob
         assert "TOOL_CALL" not in blob
         assert "Submitting" not in blob
+
+    def _failed_native_task(self, events, clock=None):
+        clock = clock if clock is not None else FakeClock()
+        scenario = catalog()["elevated-latency-001"]
+
+        def transport(url, body, headers, timeout_s):
+            yield from sse([*events, usage_line(13), "[DONE]"])
+
+        return run_task(
+            scenario,
+            make_client(transport),
+            SimulatedToolbox(scenario, clock=clock),
+            SETTINGS,
+            timeout_s=60.0,
+            clock=clock,
+        )
+
+    def test_malformed_arguments_retain_measured_turn_without_raw_output(self):
+        execution = self._failed_native_task(
+            [
+                tool_delta(index=0, call_id="bad-json", name="search_logs", arguments='{"query":'),
+            ]
+        )
+        assert execution.error_category == "malformed_tool_call"
+        assert execution.tool_call_diagnostics["failure_category"] == "malformed_argument_json"
+        assert len(execution.turns) == 1
+        turn = execution.turns[0]
+        assert turn.ttft_ms is not None
+        assert turn.serving_time_ms >= turn.ttft_ms
+        assert turn.chunk_count == 1
+        assert turn.output_tokens == 13
+        blob = json.dumps(execution.tool_call_diagnostics) + repr(execution.__dict__)
+        assert "query" not in blob
+        assert "search_logs" not in blob
+        assert "bad-json" not in blob
+
+    def test_unknown_tool_retains_turn_and_maps_taxonomy(self):
+        execution = self._failed_native_task(
+            split_native_call(call_id="unk-1", name="reboot_datacenter", arguments={})
+        )
+        assert execution.error_category == "invalid_tool_name"
+        assert execution.tool_call_diagnostics["failure_category"] == "unknown_tool"
+        assert len(execution.turns) == 1
+        assert execution.turns[0].output_tokens == 13
+        assert execution.turns[0].ttft_ms is not None
+        blob = json.dumps(execution.tool_call_diagnostics)
+        assert "reboot_datacenter" not in blob
+        assert "unk-1" not in blob
+
+    def test_invalid_arguments_retain_turn_and_map_taxonomy(self):
+        execution = self._failed_native_task(
+            split_native_call(
+                call_id="type-1",
+                name="query_metrics",
+                arguments={"metric": 12345},
+            )
+        )
+        assert execution.error_category == "invalid_tool_arguments"
+        assert execution.tool_call_diagnostics["failure_category"] == "invalid_arguments"
+        assert len(execution.turns) == 1
+        assert execution.turns[0].output_tokens == 13
+        blob = json.dumps(execution.tool_call_diagnostics) + repr(execution.__dict__)
+        assert "12345" not in blob
+        assert "query_metrics" not in blob
+        assert "type-1" not in blob
+
+    @pytest.mark.parametrize(
+        "bad_index",
+        [pytest.param(None, id="missing"), True, "0", -1, 1.5],
+    )
+    def test_malformed_index_retains_turn_and_maps_taxonomy(self, bad_index):
+        fragment: dict = {
+            "id": "idx-secret",
+            "function": {"name": "get_service_health", "arguments": "{}"},
+        }
+        if bad_index is not None:
+            fragment["index"] = bad_index
+        execution = self._failed_native_task([{"choices": [{"delta": {"tool_calls": [fragment]}}]}])
+        assert execution.error_category == "malformed_tool_call"
+        assert execution.tool_call_diagnostics["failure_category"] == ("malformed_tool_call_index")
+        assert len(execution.turns) == 1
+        turn = execution.turns[0]
+        assert turn.serving_time_ms >= 0.0
+        assert turn.output_tokens == 13
+        assert turn.chunk_count == 0
+        blob = json.dumps(execution.tool_call_diagnostics) + repr(execution.__dict__)
+        assert "get_service_health" not in blob
+        assert "idx-secret" not in blob
+        assert "{}" not in blob
+        assert "1.5" not in blob
 
     def test_concurrency_isolation_between_requests(self):
         barrier = threading.Barrier(2, timeout=5)

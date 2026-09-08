@@ -118,6 +118,21 @@ def sanitized_diagnostics(
     }
 
 
+MALFORMED_TOOL_CALL_INDEX = "malformed_tool_call_index"
+
+
+def _valid_tool_call_index(value: object) -> int | None:
+    """Return a non-negative int index, or None when the value is unusable.
+
+    A missing, boolean, non-integer, or negative index is never coerced to
+    zero: OpenAI fragments identify a call by index, and a silent default
+    would merge unrelated fragments.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 @dataclass
 class ToolCallAssembler:
     """Assembles streamed native ``delta.tool_calls`` fragments by index."""
@@ -128,6 +143,8 @@ class ToolCallAssembler:
     reasoning_chars: int = 0
     usage_completion_tokens: int | None = None
     saw_legacy_tool_call: bool = False
+    emitted_first_tool_call_delta: bool = False
+    index_failure: str | None = None
 
     def note(self, event_type: str) -> None:
         if event_type not in self.event_types:
@@ -157,11 +174,17 @@ class ToolCallAssembler:
         if isinstance(tool_calls, list) and tool_calls:
             self.note("tool_calls")
             for fragment in tool_calls:
-                if not isinstance(fragment, dict):
+                if not isinstance(fragment, dict) or "index" not in fragment:
+                    self.index_failure = MALFORMED_TOOL_CALL_INDEX
                     continue
-                raw_index = fragment.get("index", 0)
-                if isinstance(raw_index, bool) or not isinstance(raw_index, int):
-                    raw_index = 0
+                raw_index = _valid_tool_call_index(fragment["index"])
+                if raw_index is None:
+                    self.index_failure = MALFORMED_TOOL_CALL_INDEX
+                    continue
+                if not self.emitted_first_tool_call_delta:
+                    # Timing only: no call ID, name, arguments, or text.
+                    self.emitted_first_tool_call_delta = True
+                    events.append(StreamEvent(kind="native_tool_call_delta"))
                 slot = self.slots.setdefault(raw_index, {"id": "", "name": "", "arguments": ""})
                 call_id = fragment.get("id")
                 if isinstance(call_id, str) and call_id:
@@ -178,6 +201,8 @@ class ToolCallAssembler:
 
     def finalize(self) -> NativeToolCall | NativeToolCallError:
         """Return a complete native call or a sanitized assembly error."""
+        if self.index_failure:
+            return self._error(self.index_failure, tool_call_count=len(self.slots))
         if self.saw_legacy_tool_call and not self.slots:
             return self._error("legacy_text_tool_call", tool_call_count=0)
         if not self.slots:

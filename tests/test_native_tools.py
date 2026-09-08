@@ -13,6 +13,7 @@ from blackwell_lab.cloud.bootstrap_pins import (
     validate_candidate_pins,
     validate_vllm_parser_flags,
 )
+from blackwell_lab.workload.model_client import NativeToolCallError
 from blackwell_lab.workload.native_tools import (
     REASONING_PARSER,
     TOOL_CALL_PARSER,
@@ -53,6 +54,41 @@ class TestOpenAIToolDefinitions:
         assert TOOL_CALL_PARSER == "qwen3_coder"
         assert REASONING_PARSER == "nemotron_v3"
         assert TOOL_CHOICE == "auto"
+
+
+class TestAssemblerIndexes:
+    def test_valid_index_emits_privacy_safe_first_delta(self):
+        assembler = ToolCallAssembler()
+        events = assembler.consume_delta(
+            {"tool_calls": [{"index": 0, "id": "secret-id", "function": {"name": "get"}}]}
+        )
+        assert [event.kind for event in events] == ["native_tool_call_delta"]
+        assert events[0].text == ""
+        assert events[0].tool_call is None
+        later = assembler.consume_delta(
+            {
+                "tool_calls": [
+                    {"index": 0, "function": {"name": "service_health", "arguments": "{}"}}
+                ]
+            }
+        )
+        assert later == []
+
+    @pytest.mark.parametrize("bad_index", [True, "0", -1, 1.5, None])
+    def test_invalid_indexes_are_not_coerced_to_zero(self, bad_index):
+        assembler = ToolCallAssembler()
+        fragment: dict = {"function": {"name": "get_service_health", "arguments": "{}"}}
+        if bad_index is not None:
+            fragment["index"] = bad_index
+        events = assembler.consume_delta({"tool_calls": [fragment]})
+        assert events == []
+        error = assembler.finalize()
+        assert isinstance(error, NativeToolCallError)
+        assert error.category == "malformed_tool_call_index"
+        blob = json.dumps(error.diagnostics)
+        assert "get_service_health" not in blob
+        assert "secret" not in blob
+        assert error.diagnostics["tool_call_count"] == 0
 
 
 class TestAssemblerPrivacy:

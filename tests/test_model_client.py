@@ -66,9 +66,11 @@ class TestTypedStreamEvents:
         events = list(DeterministicMockClient().stream_turn(conversation(), SETTINGS))
         assert events, "a turn must stream at least one event"
         assert all(isinstance(e, StreamEvent) for e in events)
-        assert {e.kind for e in events} == {"native_tool_call"}
-        assert events[0].tool_call is not None
-        assert events[0].tool_call.call_id.startswith("mock-")
+        assert [e.kind for e in events] == ["native_tool_call_delta", "native_tool_call"]
+        assert events[0].tool_call is None
+        assert events[0].text == ""
+        assert events[1].tool_call is not None
+        assert events[1].tool_call.call_id.startswith("mock-")
 
     def test_native_call_is_not_a_token_event(self):
         events = list(DeterministicMockClient().stream_turn(conversation(), SETTINGS))
@@ -82,7 +84,7 @@ class TestDeterminism:
         first = list(client.stream_turn(conversation(), SETTINGS))
         second = list(client.stream_turn(conversation(), SETTINGS))
         assert first == second
-        assert first[0].kind == "native_tool_call"
+        assert [e.kind for e in first] == ["native_tool_call_delta", "native_tool_call"]
 
     def test_two_client_instances_agree(self):
         assert list(DeterministicMockClient().stream_turn(conversation(), SETTINGS)) == list(

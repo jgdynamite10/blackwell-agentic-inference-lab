@@ -22,7 +22,7 @@ resulting tool calls.
 | --- | --- | --- |
 | End-to-end task completion time | Benchmark driver submits the task — the actual driver submission instant, stamped the moment a bounded-scheduler slot becomes available and the worker claims the task (a task that has not entered a slot has not been submitted) | Terminal record handed to the evaluator (immediately on task termination — the implementation and this boundary agree) |
 | Queue time | Request accepted by the serving endpoint | First scheduling of the request onto the engine (from engine queue telemetry; if the engine reports none, queue time is recorded as **unavailable with a reason**, never approximated silently) |
-| Time to first token (TTFT) | Driver sends the request for a turn | Driver receives the **first meaningful model-output event** of that turn: a content chunk, a reasoning-output event, or a native tool-call delta. Native tool calls may emit no `delta.content`; waiting only for content would under-count TTFT. SSE fragments are never tokens. |
+| Time to first token (TTFT) | Driver sends the request for a turn | Driver receives the **first meaningful model-output event** of that turn: a content chunk, a reasoning-output event, or a privacy-safe `native_tool_call_delta` emitted at the **first streamed tool-call fragment**. The later assembled `native_tool_call` does not start TTFT. Native tool calls may emit no `delta.content`; waiting only for content would under-count TTFT. A tool-call delta is not a token. SSE fragments are never tokens. |
 | Inter-token latency (ITL) | Token *n* received | Token *n+1* received; available **only when true per-token timing exists** — transport text chunks are never tokens, and without token events ITL is recorded as unavailable with a reason |
 | Model-serving time | Request dispatch to the serving endpoint | Final token of the turn received (includes queue time; queue time is also reported separately) |
 | Tool-execution time | Agent runtime invokes a simulated tool | Tool result returned to the agent runtime (simulated latencies are deterministic, recorded, and **consumed through the clock** — they occupy task duration, timeout budget, request pacing, and cell wall time) |
@@ -33,11 +33,18 @@ same host as the serving container to exclude WAN variability; the loopback /
 container-network path is recorded in the manifest.
 
 Model turns are consumed as **typed stream events** that distinguish
-transport text chunks, reasoning-output events, native tool-call deltas,
-true token events, authoritative usage/token counts, and optional
-serving-queue telemetry. Output-token counts come only from authoritative
-usage data or the exact model tokenizer; network chunk counts and SSE
-fragments are never reported as token counts. Durations use an injectable
+transport text chunks, reasoning-output events, first-fragment native
+tool-call deltas (timing only), the later assembled executable native
+tool call, true token events, authoritative usage/token counts, and
+optional serving-queue telemetry. Per-turn `chunk_count` is a
+privacy-safe output-event count (content, reasoning, first tool-call
+delta) and is never a token count. Output-token counts come only from
+authoritative usage data or the exact model tokenizer; network chunk
+counts, tool-call deltas, and SSE fragments are never reported as token
+counts. A turn that finishes streaming but fails native-call assembly or
+validation still retains its completed turn record (TTFT when available,
+serving time, output-event count, content character count, usage, and
+queue telemetry when supplied) plus sanitized structural diagnostics. Durations use an injectable
 monotonic clock; task timing starts at actual driver submission — the
 instant the bounded scheduler's slot is claimed — so a task that has not
 entered a slot consumes none of its timeout budget, and any residual

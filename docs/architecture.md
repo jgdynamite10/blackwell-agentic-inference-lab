@@ -98,7 +98,7 @@ sequenceDiagram
     loop each turn (until terminal tool, error, or timeout)
         A->>M: model request with deadline (TTFT + serving clocks)
         M-->>A: typed stream events (content/reasoning/native<br/>tool-call deltas; token/usage/queue when present)
-        Note over A,M: TTFT = first meaningful output<br/>(content, reasoning, or native tool-call delta);<br/>chunks are never tokens
+        Note over A,M: TTFT = first meaningful output<br/>(content, reasoning, or first tool-call fragment);<br/>assembled native_tool_call is not TTFT;<br/>chunks and deltas are never tokens
         A->>A: assemble + validate exactly one native tool call (retries=0)
         A->>T: execute simulated tool
         T-->>A: deterministic result (fixed latency<br/>CONSUMED through the clock: it spends<br/>task duration and timeout budget)
