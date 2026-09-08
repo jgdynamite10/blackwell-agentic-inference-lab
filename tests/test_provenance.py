@@ -126,7 +126,9 @@ def fake_http_get(
     }
 
     def http_get(url: str) -> dict:
-        if url.endswith("/version"):
+        if url.endswith("/v1/version"):
+            raise AssertionError(f"vLLM /version is not under the OpenAI /v1 prefix; refused {url}")
+        if url == "http://127.0.0.1:8000/version":
             return {"version": engine_version}
         if url.startswith(METADATA_BASE):
             return payload
@@ -284,6 +286,47 @@ class TestObservationFailuresNeverFallBackToConfig:
     def test_incomplete_metadata_response_fails(self):
         with pytest.raises(ProvenanceError, match="incomplete"):
             observe_instance_identity(http_get=lambda url: {"id": "1", "type": "", "region": ""})
+
+
+class TestVersionEndpointUrl:
+    @pytest.mark.parametrize(
+        ("base_url", "expected"),
+        [
+            ("http://127.0.0.1:8000/v1", "http://127.0.0.1:8000/version"),
+            ("http://127.0.0.1:8000/v1/", "http://127.0.0.1:8000/version"),
+            ("http://127.0.0.1:8000", "http://127.0.0.1:8000/version"),
+            ("http://127.0.0.1:8000/proxy/v1", "http://127.0.0.1:8000/proxy/version"),
+        ],
+    )
+    def test_exact_url_equality(self, base_url, expected):
+        assert provenance.version_endpoint_url(base_url) == expected
+
+    @pytest.mark.parametrize(
+        ("base_url", "expected"),
+        [
+            ("http://127.0.0.1:8000/v1", "http://127.0.0.1:8000/version"),
+            ("http://127.0.0.1:8000/v1/", "http://127.0.0.1:8000/version"),
+            ("http://127.0.0.1:8000", "http://127.0.0.1:8000/version"),
+            ("http://127.0.0.1:8000/proxy/v1", "http://127.0.0.1:8000/proxy/version"),
+        ],
+    )
+    def test_observe_engine_version_requests_the_exact_live_url(self, base_url, expected):
+        seen: list[str] = []
+
+        def http_get(url: str) -> dict:
+            if url.endswith("/v1/version"):
+                raise AssertionError(
+                    f"vLLM /version is not under the OpenAI /v1 prefix; refused {url}"
+                )
+            seen.append(url)
+            return {"version": ENGINE_VERSION}
+
+        assert observe_engine_version(base_url, http_get=http_get) == ENGINE_VERSION
+        assert seen == [expected]
+
+    def test_version_endpoint_keeps_loopback_enforcement(self):
+        with pytest.raises(ProvenanceError, match="public or named host"):
+            provenance.version_endpoint_url("http://example.com/v1")
 
 
 class TestEndpointSafety:

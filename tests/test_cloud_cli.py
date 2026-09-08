@@ -298,6 +298,78 @@ class TestPilotGate:
         assert len(run_calls) == 1
         assert "container digest" in capsys.readouterr().err
 
+    def test_pilot_observes_vllm_version_at_service_root_not_openai_prefix(
+        self, tmp_path, monkeypatch
+    ):
+        from blackwell_lab.cloud import provenance, realbench, telemetry
+
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        ledger = pilot_ready_ledger()
+        ledger["resources"][0]["region"] = "us-sea"
+        lifecycle.write_private_json(paths.ledger_path, ledger)
+
+        config = pilot_config(tmp_path)
+        approved = json.loads(config.read_text(encoding="utf-8"))
+        assert approved["endpoint"]["base_url"] == "http://127.0.0.1:8000/v1"
+        requested: list[str] = []
+
+        def http_get(url: str) -> dict:
+            if url.endswith("/v1/version"):
+                raise AssertionError(
+                    f"vLLM /version is not under the OpenAI /v1 prefix; refused {url}"
+                )
+            requested.append(url)
+            if url == "http://127.0.0.1:8000/version":
+                return {"version": approved["serving"]["engine_version"]}
+            if url.startswith(provenance.METADATA_BASE):
+                return {
+                    "id": "42",
+                    "type": approved["cloud"]["instance_type"],
+                    "region": approved["cloud"]["region"],
+                    "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
+                }
+            raise AssertionError(f"unexpected URL observed: {url}")
+
+        real_verify = provenance.verify_live_provenance
+
+        def verify_with_injected_http(**kwargs):
+            kwargs["http_get"] = http_get
+            return real_verify(**kwargs)
+
+        monkeypatch.setattr(provenance, "verify_live_provenance", verify_with_injected_http)
+        monkeypatch.setattr(
+            telemetry,
+            "resolve_container_digest",
+            lambda *args, **kwargs: approved["serving"]["container_digest"],
+        )
+        monkeypatch.setattr(
+            telemetry,
+            "verify_model_artifact",
+            lambda *args, **kwargs: approved["model"]["artifact_hash"],
+        )
+        monkeypatch.setattr(
+            telemetry, "observe_container_cuda_version", lambda *args, **kwargs: "13.0"
+        )
+        monkeypatch.setattr(
+            telemetry, "collect_host_facts", lambda **kwargs: dict(approved["host"])
+        )
+        monkeypatch.setattr(
+            telemetry,
+            "collect_gpu_facts",
+            lambda *args, **kwargs: {
+                "gpu_model": "NVIDIA RTX PRO 6000 Blackwell",
+                "driver_version": "580",
+            },
+        )
+        monkeypatch.setattr(realbench, "run_real_cell", lambda *args, **kwargs: [])
+
+        assert main(pilot_argv(config)) == 0
+        version_urls = [url for url in requested if url.endswith("/version")]
+        assert version_urls == ["http://127.0.0.1:8000/version"] * 3
+
     def test_pilot_rejects_relative_config_path(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
         config = pilot_config(tmp_path)

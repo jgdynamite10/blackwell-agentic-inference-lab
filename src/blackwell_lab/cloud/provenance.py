@@ -71,10 +71,30 @@ def default_http_get_json(url: str) -> dict:
         return json.load(response)
 
 
+def version_endpoint_url(base_url: str) -> str:
+    """Map an OpenAI-compatible API base URL to vLLM's live ``/version``.
+
+    The approved chat API lives under ``/v1`` (for example
+    ``http://127.0.0.1:8000/v1``). vLLM reports its version at the service
+    root (``http://127.0.0.1:8000/version``), not under the OpenAI prefix.
+    Exactly one terminal ``/v1`` path segment is removed; any reverse-proxy
+    prefix is preserved; trailing slashes are ignored. The result is still
+    subject to loopback/private-address enforcement.
+    """
+    _require_local_or_private(base_url)
+    parts = urllib.parse.urlsplit(base_url)
+    stripped = (parts.path or "").rstrip("/")
+    if stripped.endswith("/v1"):
+        stripped = stripped[: -len("/v1")]
+    service_path = stripped.rstrip("/")
+    version_path = f"{service_path}/version" if service_path else "/version"
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, version_path, "", ""))
+
+
 def observe_engine_version(base_url: str, *, http_get: HttpGetJson = default_http_get_json) -> str:
     """The engine version reported BY the running service (vLLM ``/version``)."""
     try:
-        payload = http_get(f"{base_url.rstrip('/')}/version")
+        payload = http_get(version_endpoint_url(base_url))
     except ProvenanceError:
         raise
     except Exception:
