@@ -374,3 +374,100 @@ def test_canary_requires_native_tools():
     ]
     with pytest.raises(Exception, match="native tool"):
         evaluate_canary(outcomes)
+
+
+def test_frozen_mvl_canary_uses_container_digest_when_image_absent(tmp_path, monkeypatch, capsys):
+    """Reproduce the live KeyError: frozen MVL serving has no ``image`` key.
+
+    ``verify_live_provenance`` must inspect ``serving.container_digest`` and
+    the structural canary must still run (not be skipped) on stubbed I/O.
+    """
+    from blackwell_lab.cloud import mvl, provenance, realbench, telemetry
+
+    config_path = write_mvl_config(tmp_path)
+    approved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "image" not in approved["serving"]
+    inspect_refs: list[str] = []
+    canary_calls: list[list[object]] = []
+
+    def capture_inspect(image: str, runner=None) -> str:
+        inspect_refs.append(image)
+        return approved["serving"]["container_digest"]
+
+    original_evaluate = mvl.evaluate_canary
+
+    def capturing_evaluate(outcomes):
+        canary_calls.append(list(outcomes))
+        return original_evaluate(outcomes)
+
+    monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+    monkeypatch.setattr(cli, "_git_head", lambda: COMMIT)
+    monkeypatch.setattr(cli, "_tree_clean", lambda: True)
+    monkeypatch.setattr(telemetry, "resolve_container_digest", capture_inspect)
+    monkeypatch.setattr(
+        telemetry, "verify_model_artifact", lambda *_args, **_kwargs: FROZEN_MODEL_ARTIFACT_HASH
+    )
+    monkeypatch.setattr(
+        telemetry, "observe_container_cuda_version", lambda *_args, **_kwargs: "13.0"
+    )
+    monkeypatch.setattr(provenance, "observe_engine_version", lambda *_args, **_kwargs: "0.27.1")
+    monkeypatch.setattr(
+        provenance,
+        "observe_instance_identity",
+        lambda **_kwargs: {
+            "provider_id": "42",
+            "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
+            "region": "us-sea",
+            "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
+        },
+    )
+    monkeypatch.setattr(
+        telemetry,
+        "collect_host_facts",
+        lambda **_kwargs: {
+            "storage_description": "plan NVMe",
+            "network_description": "plan default",
+        },
+    )
+    monkeypatch.setattr(
+        telemetry,
+        "collect_gpu_facts",
+        lambda *_args, **_kwargs: {
+            "gpu_model": "RTX PRO 6000 Blackwell",
+            "driver_version": "580",
+        },
+    )
+    monkeypatch.setattr(mvl, "evaluate_canary", capturing_evaluate)
+
+    calls: list[object] = []
+
+    def fake_run(spec, *_args, **_kwargs):
+        calls.append(spec)
+        if spec.tasks_per_repetition == 10:
+            return [
+                _FakeRecord(
+                    run_id="canary",
+                    outcomes=_canary_outcomes(),
+                    written_files=("canary.result.json",),
+                )
+            ]
+        return [
+            _FakeRecord(run_id=f"{spec.run_label}-r{index}", outcomes=[], written_files=())
+            for index in range(1, spec.repetitions + 1)
+        ]
+
+    monkeypatch.setattr(realbench, "run_real_cell", fake_run)
+    external = tmp_path / "external"
+    monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+    paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+    lifecycle.write_private_json(paths.ledger_path, ready_ledger())
+
+    assert main(mvl_argv(config_path)) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["workflow"] == "mvl-baseline"
+    assert inspect_refs
+    assert inspect_refs[0] == approved["serving"]["container_digest"]
+    assert len(canary_calls) == 1
+    assert len(canary_calls[0]) == 10
+    original_evaluate(canary_calls[0])
+    assert [spec.tasks_per_repetition for spec in calls] == [10, 200, 200, 200]

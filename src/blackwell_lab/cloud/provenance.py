@@ -283,9 +283,14 @@ def verify_live_provenance(
     """
     mismatches: list[str] = []
 
-    observed_digest = telemetry.resolve_container_digest(
-        approved["serving"]["image"], runner=runner
-    )
+    serving = approved["serving"]
+    # Pilot configs name the inspect reference as serving.image. The frozen
+    # MVL config records the same pin only as serving.container_digest
+    # (repo@sha256:...). Looking up image alone KeyError'd the structural canary.
+    image_ref = serving.get("image") or serving.get("container_digest")
+    if not isinstance(image_ref, str) or not image_ref.strip():
+        raise ProvenanceError("the approved serving configuration has no image or container_digest")
+    observed_digest = telemetry.resolve_container_digest(image_ref, runner=runner)
     if observed_digest != approved["serving"]["container_digest"]:
         mismatches.append("container digest differs from the approved pilot configuration")
 
