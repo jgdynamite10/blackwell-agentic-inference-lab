@@ -253,7 +253,7 @@ class TestBootstrapScripts:
         (tmp_path / "bootstrap.env.example").write_text(example, encoding="utf-8")
         (tmp_path / "bootstrap.env").write_text(
             example.replace(
-                'NVIDIA_DRIVER_PACKAGE_VERSION="580.173.02-0ubuntu0.24.04.1"',
+                'NVIDIA_DRIVER_PACKAGE_VERSION="580.178.04-0ubuntu0.24.04.1"',
                 'NVIDIA_DRIVER_PACKAGE_VERSION=""',
             ),
             encoding="utf-8",
@@ -373,7 +373,7 @@ exit 0
         assert pins["MODEL_REVISION"] == "a9904d24bcc1d289a1950fa9d2b978c47cf903b9"
         assert pins["NVIDIA_DRIVER_PACKAGE"] == "nvidia-driver-580-server-open"
         assert pins["NVIDIA_DRIVER_PACKAGE"] != "nvidia-driver-580-server"
-        assert pins["NVIDIA_DRIVER_PACKAGE_VERSION"] == "580.173.02-0ubuntu0.24.04.1"
+        assert pins["NVIDIA_DRIVER_PACKAGE_VERSION"] == "580.178.04-0ubuntu0.24.04.1"
         assert pins["NVIDIA_REPO_KEY_SHA256"] == (
             "sha256:c880576d6cf75a48e5027a871bac70fd0421ab07d2b55f30877b21f1c87959c9"
         )
@@ -397,7 +397,7 @@ exit 0
 
         env_example = (BOOTSTRAP_DIR / "bootstrap.env.example").read_text(encoding="utf-8")
         floating = env_example.replace(
-            'NVIDIA_DRIVER_PACKAGE_VERSION="580.173.02-0ubuntu0.24.04.1"',
+            'NVIDIA_DRIVER_PACKAGE_VERSION="580.178.04-0ubuntu0.24.04.1"',
             'NVIDIA_DRIVER_PACKAGE_VERSION="latest"',
         )
         assert any("floating" in problem for problem in validate_candidate_pins(floating))
@@ -416,3 +416,27 @@ exit 0
             'VLLM_IMAGE="docker.io/vllm/vllm-openai:latest"',
         )
         assert any("floating" in problem for problem in validate_candidate_pins(latest_image))
+
+    def test_retired_open_driver_pin_is_absent_and_new_pin_is_required(self):
+        from blackwell_lab.cloud.bootstrap_pins import (
+            APPROVED_DRIVER_PACKAGE_VERSION,
+            validate_candidate_pins,
+        )
+
+        current = "580.178.04-0ubuntu0.24.04.1"
+        retired = "580.173.02-0ubuntu0.24.04.1"
+        env_example = (BOOTSTRAP_DIR / "bootstrap.env.example").read_text(encoding="utf-8")
+        pins_sh = (BOOTSTRAP_DIR / "pins.sh").read_text(encoding="utf-8")
+        assert APPROVED_DRIVER_PACKAGE_VERSION == current
+        assert f'NVIDIA_DRIVER_PACKAGE_VERSION="{current}"' in env_example
+        assert f'APPROVED_DRIVER_PACKAGE_VERSION="{current}"' in pins_sh
+        assert retired not in env_example
+        assert retired not in pins_sh
+        assignment = env_example.split("NVIDIA_DRIVER_PACKAGE_VERSION", 1)[1].splitlines()[0]
+        assert "latest" not in assignment
+        stale = env_example.replace(
+            f'NVIDIA_DRIVER_PACKAGE_VERSION="{current}"',
+            f'NVIDIA_DRIVER_PACKAGE_VERSION="{retired}"',
+        )
+        problems = validate_candidate_pins(stale)
+        assert any("NVIDIA_DRIVER_PACKAGE_VERSION" in problem for problem in problems)

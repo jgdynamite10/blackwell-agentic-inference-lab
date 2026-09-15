@@ -15,7 +15,7 @@ from collections.abc import Mapping
 #: before bootstrap mutates a host. Empty or floating values fail closed.
 APPROVED_DRIVER_PACKAGE = "nvidia-driver-580-server-open"
 PROPRIETARY_DRIVER_PACKAGE = "nvidia-driver-580-server"
-APPROVED_DRIVER_PACKAGE_VERSION = "580.173.02-0ubuntu0.24.04.1"
+APPROVED_DRIVER_PACKAGE_VERSION = "580.178.04-0ubuntu0.24.04.1"
 APPROVED_OS_ID = "ubuntu"
 APPROVED_OS_VERSION = "24.04"
 APPROVED_SERVED_MODEL_NAME = "nemotron-3.5-lightning-30b-a3b-bf16"

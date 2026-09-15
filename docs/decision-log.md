@@ -730,7 +730,7 @@ AWS and GCP will later repeat this same MVL matrix if quota permits.
 | Per-file digests | host-resident sha256sum manifest at `MODEL_DIGEST_MANIFEST`; live re-verified; never committed |
 | Precision | BF16 only |
 | Serving | vLLM 0.27.1 linux/amd64 `sha256:c2f3b1b964e47809b722b5e75b61b1e7b39a50f70388cf2bf2418f16a9f31da2` |
-| CUDA / driver / Docker / CTK | existing exact pins (CUDA 13.0, open driver 580.173.02, docker.io 29.1.3, CTK 1.20.0-1) |
+| CUDA / driver / Docker / CTK | existing exact pins (CUDA 13.0, open driver 580.178.04, docker.io 29.1.3, CTK 1.20.0-1); driver pin restated by D-0018 |
 | Tool transport | native OpenAI `tools` / `tool_choice=auto` / `parallel_tool_calls=false` |
 | Parsers | `--reasoning-parser nemotron_v3`, `--tool-call-parser qwen3_coder`, auto tool choice enabled |
 | Reasoning mode | true |
@@ -767,3 +767,27 @@ destroy plan. Teardown-plan must be run from the owner's laptop.
 **Rationale.** Owner authorization of 2026-09-08 (Akamai minimum valuable
 lab). Implementation is code-and-review only until the owner issues the
 exact apply and `mvl-baseline` phrases.
+
+## 2026-09-15 — D-0018: Replace the unavailable open-driver pin
+
+**No genuine MVL results predate this change.** The first authorized
+`p3-mvl-20260910a` apply reached a clean reconcile and then stopped in
+reviewed bootstrap. The instance and firewall were owner-destroyed and
+confirmed absent. No measured MVL observations were collected.
+
+**Decision.** Replace only the active NVIDIA open-driver package pin:
+
+- retired: `nvidia-driver-580-server-open=580.173.02-0ubuntu0.24.04.1`
+- current: `nvidia-driver-580-server-open=580.178.04-0ubuntu0.24.04.1`
+
+The new value is the exact installable version in the official Ubuntu
+24.04 `noble-updates` restricted `linux/amd64` Packages index, retrieved
+2026-09-15. Required sibling `580-server` packages in that pocket are
+the same version. The pin remains exact and non-floating. CUDA, Docker,
+NVIDIA Container Toolkit, vLLM, the model, the workload, MVL counts,
+sampling, evaluation, Terraform, and lifecycle behavior are unchanged.
+
+**Rationale.** On the live Ubuntu 24.04 GPU image, apt resolved sibling
+packages from `noble-updates` to `580.178.04-0ubuntu0.24.04.1`, so the
+retired `580.173.02` metapackage was not installable. This is a
+blocker-only pin correction, not a serving or methodology expansion.
