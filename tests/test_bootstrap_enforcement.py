@@ -175,7 +175,7 @@ class TestPinValidationStopsMutation:
         ("old", "new", "needle"),
         [
             (
-                'NVIDIA_DRIVER_PACKAGE_VERSION="580.173.02-0ubuntu0.24.04.1"',
+                'NVIDIA_DRIVER_PACKAGE_VERSION="580.178.04-0ubuntu0.24.04.1"',
                 'NVIDIA_DRIVER_PACKAGE_VERSION=""',
                 "empty",
             ),
@@ -307,7 +307,7 @@ verify_installed_gpu_packages
         assert "never accepted" in output or "differs from reviewed" in output
         assert log.exists()
         text = log.read_text(encoding="utf-8")
-        assert "nvidia-driver-580-server-open=580.173.02-0ubuntu0.24.04.1" in text
+        assert "nvidia-driver-580-server-open=580.178.04-0ubuntu0.24.04.1" in text
         assert "latest" not in text
 
     def test_completion_marker_does_not_skip_version_verification(self, bash, tmp_path):
@@ -612,7 +612,7 @@ exit 1
             bin_dir / "nvidia-smi",
             """#!/usr/bin/env bash
 case " $* " in
-  *'--query-gpu=driver_version'*) printf '580.173.02\\n' ;;
+  *'--query-gpu=driver_version'*) printf '580.178.04\\n' ;;
   *'--query-gpu=name'*)
     printf 'NVIDIA RTX PRO 6000 Blackwell Server Edition\\n'
     ;;
@@ -620,7 +620,7 @@ case " $* " in
     printf 'GPU 0: NVIDIA RTX PRO 6000 Blackwell Server Edition\\n'
     ;;
   *)
-    printf '| NVIDIA-SMI 580.173.02    Driver Version: 580.173.02    CUDA Version: 13.0 |\\n'
+    printf '| NVIDIA-SMI 580.178.04    Driver Version: 580.178.04    CUDA Version: 13.0 |\\n'
     ;;
 esac
 """,
@@ -633,7 +633,7 @@ if [[ "$args" == *nvidia-driver-580-server-open* ]]; then
   if [[ "$args" == *Status* ]]; then
     printf "install ok installed\\n"
   else
-    printf "580.173.02-0ubuntu0.24.04.1\\n"
+    printf "580.178.04-0ubuntu0.24.04.1\\n"
   fi
   exit 0
 fi

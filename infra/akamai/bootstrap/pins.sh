@@ -4,7 +4,7 @@
 # Reviewed candidate baseline: Blackwell requires NVIDIA open kernel modules.
 APPROVED_DRIVER_PACKAGE="nvidia-driver-580-server-open"
 PROPRIETARY_DRIVER_PACKAGE="nvidia-driver-580-server"
-APPROVED_DRIVER_PACKAGE_VERSION="580.173.02-0ubuntu0.24.04.1"
+APPROVED_DRIVER_PACKAGE_VERSION="580.178.04-0ubuntu0.24.04.1"
 MAX_WATCHDOG_IDLE_MINUTES="45"
 CTK_PACKAGES="nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1"
 
