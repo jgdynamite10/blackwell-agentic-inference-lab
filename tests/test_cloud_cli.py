@@ -664,6 +664,32 @@ class TestOrphanReportGate:
         assert "BLOCKED" in capsys.readouterr().err
 
 
+class TestRecoverEmptyApplyGate:
+    def test_recover_empty_apply_requires_a_local_token(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
+        monkeypatch.delenv("LINODE_TOKEN", raising=False)
+        assert main(["recover-empty-apply", "--run-tag", RUN_TAG]) == 1
+        err = capsys.readouterr().err
+        assert "read-only" in err
+        assert "LINODE_TOKEN" in err or "provider check" in err
+
+    def test_recover_empty_apply_does_not_print_injected_secrets(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
+        monkeypatch.setenv("LINODE_TOKEN", "tok_" + ("E" * 40))
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("raw token LINODE_TOKEN=supersecret and 203.0.113.9")
+
+        monkeypatch.setattr(lifecycle, "recover_verified_empty_apply", explode)
+        assert main(["recover-empty-apply", "--run-tag", RUN_TAG]) == 1
+        err = capsys.readouterr().err
+        assert "supersecret" not in err
+        assert "203.0.113.9" not in err
+        assert "details suppressed" in err
+
+
 class TestVerifyResults:
     @pytest.fixture()
     def persisted_run(self, tmp_path, monkeypatch):

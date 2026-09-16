@@ -11,6 +11,10 @@ Subcommands map one-to-one to the separated workflows required by Phase 3A:
                       approval phrase naming the run tag AND plan digest;
                       refused in hosted/CI environments; reconciles after.
 - ``reconcile``       inspect external state vs provider, update the ledger.
+- ``recover-empty-apply``
+                      clear a pending apply only after a provider-verified
+                      empty ledger, empty Terraform state, and clean orphan
+                      report; never marks the run reconciled.
 - ``pilot``           the short, owner-approved compatibility/headroom pilot
                       (RunMode.REAL): blocked until reconciliation is clean,
                       provider-native only, live provenance verified first.
@@ -380,6 +384,18 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     report = lifecycle.reconcile(args.run_tag, paths=paths, fetch=fetch, token=token)
     print(json.dumps(report, indent=2))
     return 0 if report["reconciled"] else 1
+
+
+def cmd_recover_empty_apply(args: argparse.Namespace) -> int:
+    from blackwell_lab.cloud import lifecycle
+
+    paths = _paths_for(args.run_tag)
+    fetch, token = _read_only_provider_access()
+    report = lifecycle.recover_verified_empty_apply(
+        args.run_tag, paths=paths, fetch=fetch, token=token
+    )
+    print(json.dumps(report, indent=2))
+    return 0
 
 
 def cmd_teardown_plan(args: argparse.Namespace) -> int:
@@ -1175,6 +1191,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reconcile_parser.add_argument("--run-tag", required=True)
 
+    recover_parser = sub.add_parser(
+        "recover-empty-apply",
+        help=(
+            "Clear a pending apply only when Terraform state, the ledger, "
+            "and a read-only provider check are all verified empty."
+        ),
+    )
+    recover_parser.add_argument("--run-tag", required=True)
+
     pilot_parser = sub.add_parser(
         "pilot", help="Short owner-approved compatibility/headroom pilot (provider-native only)."
     )
@@ -1273,6 +1298,7 @@ _HANDLERS = {
     "plan": cmd_plan,
     "apply": cmd_apply,
     "reconcile": cmd_reconcile,
+    "recover-empty-apply": cmd_recover_empty_apply,
     "pilot": cmd_pilot,
     "mvl-baseline": cmd_mvl_baseline,
     "full-baseline": cmd_full_baseline,
