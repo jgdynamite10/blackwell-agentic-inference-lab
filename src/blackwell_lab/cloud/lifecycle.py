@@ -32,7 +32,11 @@ Safety model (cost guardrails; AGENTS.md section 1; decisions D-0012/D-0013):
   label, project tag, run tag, and instance region) — never a combined
   numeric-ID set. Any missing, extra, duplicate, conflicting, or unverified
   resource leaves ``reconciled=false``. The pilot is blocked until
-  reconciliation is clean.
+  reconciliation is clean. A failed apply that created **zero** resources
+  may clear the pending apply record only through
+  ``recover_verified_empty_apply`` after a provider-verified empty ledger,
+  empty state, and clean orphan report; that path never marks the run
+  reconciled.
 - **Teardown is identity-safe.** Destroy requires that every target's
   Terraform address, resource type, provider id, project tag, run tag, and
   expected label match the ledger, the current state, and (when a read-only
@@ -47,6 +51,8 @@ Safety model (cost guardrails; AGENTS.md section 1; decisions D-0012/D-0013):
   owner; deletion always remains a separate, ledger-verified action.
 - **Sanitized output.** No raw provider responses, tokens, absolute private
   paths, or arbitrary exception text are ever placed in error messages.
+  Failed apply stdout/stderr is sanitized in memory and persisted only as a
+  bounded diagnostic receipt under the external lifecycle directory.
 """
 
 from __future__ import annotations
@@ -105,6 +111,9 @@ _PLAN_META_SCHEMA_VERSION = "1.0.0"
 
 #: A saved plan older than this is stale and must be regenerated.
 MAX_PLAN_AGE_S = 3600.0
+
+#: Bound on each sanitized Terraform stream stored in an apply diagnostic.
+_MAX_DIAGNOSTIC_STREAM_CHARS = 16384
 
 #: Deletion confirmation polling: Akamai Blackwell instance deletion can take
 #: several minutes; poll read-only until confirmed or the window closes.
@@ -253,6 +262,15 @@ class LifecyclePaths:
     def session_path(self) -> Path:
         return self.run_dir / "session.json"
 
+    def apply_diagnostic_path(self, stamp: str) -> Path:
+        return self.run_dir / f"apply-diagnostic-{stamp}.json"
+
+    def apply_failure_path(self, stamp: str) -> Path:
+        return self.run_dir / f"apply-failure-{stamp}.json"
+
+    def empty_apply_recovery_path(self, stamp: str) -> Path:
+        return self.run_dir / f"empty-apply-recovery-{stamp}.json"
+
 
 def lifecycle_paths(results_dir: Path, run_tag: str) -> LifecyclePaths:
     """Resolves (and privately creates) the run's external lifecycle dir."""
@@ -384,13 +402,237 @@ def init_backend(
 # -- saved, reviewed plans -------------------------------------------------------
 
 _IPV4_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
+_IPV6_RE = re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b")
 _SSH_KEY_RE = re.compile(r"(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa)\s+[A-Za-z0-9+/=]+")
+_PEM_RE = re.compile(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+_BEARER_RE = re.compile(r"(?i)\b(?:bearer|token)\s+[A-Za-z0-9._\-+=/]{8,}")
+_AUTH_HEADER_RE = re.compile(r"(?i)authorization\s*[:=][^\n]+")
+_ENV_SECRET_RE = re.compile(
+    r"(?i)\b([A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL|AUTH)[A-Z0-9_]*)"
+    r"\s*[=:]\s*\S+"
+)
+_TF_VAR_FLAG_RE = re.compile(r"-var(?:=|\s+)\S+")
+_TF_SENSITIVE_ASSIGN_RE = re.compile(
+    r"(?i)\b((?:var\.)?[A-Za-z0-9_]*(?:token|password|secret|key|ssh)[A-Za-z0-9_]*)"
+    r'\s*=\s*"[^"]*"'
+)
+_HOME_PATH_RE = re.compile(r"(?i)(?:/Users|/home)/[^\s:\"']+|C:\\Users\\[^\s:\"']+")
+_PRIVATE_PATH_RE = re.compile(r"(?<![\w.-])/(?:var|opt|tmp|private|root)/[^\s:\"']+")
+_UUID_RE = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+_LONG_HEX_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+_LONG_B64_RE = re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b")
+_LONG_ID_RE = re.compile(r"\b\d{5,}\b")
+_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
+_PRIVATE_HOST_RE = re.compile(
+    r"(?i)\b(?:[a-z0-9-]+\.)+(?:internal|local|lan|linodeusercontent\.com)\b"
+)
+_ADDRESS_RE = re.compile(r"\blinode_(?:instance|firewall)\.[A-Za-z0-9_-]+\b")
+_HTTP_STATUS_RE = re.compile(
+    r"(?i)(?:HTTP(?:\s+status)?(?:\s+code)?|status(?:\s+code)?)\s*[:=]?\s*([1-5]\d\d)"
+    r"|\b([1-5]\d\d)\s+(?:Bad Request|Unauthorized|Forbidden|Not Found|"
+    r"Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable|"
+    r"Gateway Timeout)\b"
+    r"|\[([1-5]\d\d)\]"
+)
+_OPERATION_RE = re.compile(r"(?i)\b(creating|created|updating|updated|deleting|deleted|reading)\b")
+_CATEGORY_RULES = (
+    ("timeout", re.compile(r"(?i)\b(?:timeout|timed out|deadline exceeded|i/o timeout)\b")),
+    ("rate_limit", re.compile(r"(?i)\b(?:rate.?limit|too many requests|429)\b")),
+    (
+        "authorization",
+        re.compile(r"(?i)\b(?:unauthorized|forbidden|permission|401|403|authentication)\b"),
+    ),
+    ("validation", re.compile(r"(?i)\b(?:invalid|validation|bad request|400)\b")),
+    ("capacity", re.compile(r"(?i)\b(?:capacit|sold out|insufficient|unavailable|no stock)\b")),
+    ("provider_plugin", re.compile(r"(?i)\b(?:plugin|provider.*crash|panic:|rpc error)\b")),
+    (
+        "network",
+        re.compile(
+            r"(?i)\b(?:connection reset|connection refused|network unreachable|"
+            r"tls handshake|eof)\b"
+        ),
+    ),
+)
 
 
 def redact_plan_text(text: str) -> str:
     """Removes addresses and key material from the human-readable plan."""
     text = _SSH_KEY_RE.sub(r"\1 [REDACTED]", text)
     return _IPV4_RE.sub("[REDACTED-IPV4]", text)
+
+
+def sanitize_terraform_output(text: str) -> str:
+    """Redact credentials, identifiers, endpoints, and private paths.
+
+    Used only for the bounded apply diagnostic receipt. The raw Terraform
+    streams are never written to disk.
+    """
+    if not text:
+        return ""
+    text = _PEM_RE.sub("[REDACTED-PEM]", text)
+    text = _SSH_KEY_RE.sub(r"\1 [REDACTED]", text)
+    text = _AUTH_HEADER_RE.sub("Authorization: [REDACTED]", text)
+    text = _BEARER_RE.sub("Bearer [REDACTED]", text)
+    text = _ENV_SECRET_RE.sub(r"\1=[REDACTED]", text)
+    text = _TF_VAR_FLAG_RE.sub("-var=[REDACTED]", text)
+    text = _TF_SENSITIVE_ASSIGN_RE.sub(r'\1="[REDACTED]"', text)
+    text = _UUID_RE.sub("[REDACTED-UUID]", text)
+    text = _LONG_HEX_RE.sub("[REDACTED-HEX]", text)
+    text = _LONG_B64_RE.sub("[REDACTED-B64]", text)
+    text = _LONG_ID_RE.sub("[REDACTED-ID]", text)
+    text = _IPV6_RE.sub("[REDACTED-IPV6]", text)
+    text = _IPV4_RE.sub("[REDACTED-IPV4]", text)
+    text = _HOME_PATH_RE.sub("[REDACTED-PATH]", text)
+    text = _PRIVATE_PATH_RE.sub("[REDACTED-PATH]", text)
+    text = _EMAIL_RE.sub("[REDACTED-ACCOUNT]", text)
+    text = _PRIVATE_HOST_RE.sub("[REDACTED-ENDPOINT]", text)
+    return text
+
+
+def _bound_diagnostic_stream(text: str) -> str:
+    if len(text) <= _MAX_DIAGNOSTIC_STREAM_CHARS:
+        return text
+    return text[:_MAX_DIAGNOSTIC_STREAM_CHARS] + "\n[truncated]\n"
+
+
+def _utc_filename_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%S.%fZ")
+
+
+def _http_status_codes(text: str) -> list[int]:
+    codes: list[int] = []
+    for match in _HTTP_STATUS_RE.finditer(text):
+        raw = next((group for group in match.groups() if group), None)
+        if raw is None:
+            continue
+        code = int(raw)
+        if 400 <= code <= 599 and code not in codes:
+            codes.append(code)
+    return codes
+
+
+def _operations(text: str) -> list[str]:
+    mapping = {
+        "creating": "create",
+        "created": "create",
+        "updating": "update",
+        "updated": "update",
+        "deleting": "delete",
+        "deleted": "delete",
+        "reading": "read",
+    }
+    found: list[str] = []
+    for match in _OPERATION_RE.finditer(text):
+        mapped = mapping[match.group(1).lower()]
+        if mapped not in found:
+            found.append(mapped)
+    return found
+
+
+def classify_apply_diagnostics(stdout: str, stderr: str) -> dict:
+    """Extract safe categories and sanitized streams from captured apply output."""
+    combined = f"{stdout or ''}\n{stderr or ''}"
+    categories = [name for name, pattern in _CATEGORY_RULES if pattern.search(combined)]
+    return {
+        "categories": categories or ["unclassified"],
+        "http_status_codes": _http_status_codes(combined),
+        "http_status_classes": sorted(
+            {f"{code // 100}xx" for code in _http_status_codes(combined)}
+        ),
+        "resource_addresses": sorted(set(_ADDRESS_RE.findall(combined))),
+        "operations": _operations(combined),
+        "sanitized_stdout": _bound_diagnostic_stream(sanitize_terraform_output(stdout or "")),
+        "sanitized_stderr": _bound_diagnostic_stream(sanitize_terraform_output(stderr or "")),
+    }
+
+
+def persist_failed_apply_diagnostics(
+    run_tag: str,
+    *,
+    paths: LifecyclePaths,
+    result: CommandResult,
+) -> dict:
+    """Sanitize captured apply streams in memory and persist a bounded receipt."""
+    classified = classify_apply_diagnostics(result.stdout, result.stderr)
+    stamp = _utc_filename_stamp()
+    document = {
+        "schema": "apply-diagnostic/1",
+        "run_tag": run_tag,
+        "stage": "apply",
+        "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
+        "terraform_exit_code": result.returncode,
+        "diagnostic_categories": classified["categories"],
+        "http_status_codes": classified["http_status_codes"],
+        "http_status_classes": classified["http_status_classes"],
+        "resource_addresses": classified["resource_addresses"],
+        "operations": classified["operations"],
+        "sanitized_stdout": classified["sanitized_stdout"],
+        "sanitized_stderr": classified["sanitized_stderr"],
+    }
+    target = paths.apply_diagnostic_path(stamp)
+    sha256 = write_private_json(target, document)
+    return {"filename": target.name, "sha256": sha256, "stamp": stamp}
+
+
+def persist_apply_failure_receipt(
+    run_tag: str,
+    *,
+    paths: LifecyclePaths,
+    terraform_exit_code: int,
+    report: dict,
+    diagnostic: dict,
+) -> dict:
+    """Write the apply-failure receipt and link the sanitized diagnostic."""
+    stamp = diagnostic.get("stamp") or _utc_filename_stamp()
+    document = {
+        "schema": "apply-failure/1",
+        "run_tag": run_tag,
+        "stage": "apply",
+        "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
+        "terraform_exit_code": terraform_exit_code,
+        "reconciled": bool(report.get("reconciled")),
+        "resource_count": report.get("resource_count"),
+        "provider_checked": bool(report.get("provider_checked")),
+        "pending_operation": "apply",
+        "diagnostic_filename": diagnostic["filename"],
+        "diagnostic_sha256": diagnostic["sha256"],
+    }
+    target = paths.apply_failure_path(stamp)
+    sha256 = write_private_json(target, document)
+    return {"filename": target.name, "sha256": sha256}
+
+
+def _attach_apply_failure_to_ledger(
+    paths: LifecyclePaths, *, failure: dict, diagnostic: dict
+) -> None:
+    if not paths.ledger_path.is_file():
+        return
+    try:
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(ledger, dict):
+        return
+    recovery = dict(ledger.get("recovery") or {})
+    recovery["apply_failure"] = failure
+    recovery["apply_diagnostic"] = {
+        "filename": diagnostic["filename"],
+        "sha256": diagnostic["sha256"],
+    }
+    recovery.setdefault(
+        "note",
+        (
+            "terraform apply failed; a sanitized diagnostic receipt and a "
+            "failure receipt were written. Resources MAY have been created."
+        ),
+    )
+    ledger["recovery"] = recovery
+    write_private_json(paths.ledger_path, ledger)
 
 
 def classify_plan_actions(plan_json: dict) -> list[dict]:
@@ -972,11 +1214,28 @@ def apply(
         directory,
         _tf_env(paths),
     )
+    diagnostic = None
+    if result.returncode != 0:
+        diagnostic = persist_failed_apply_diagnostics(run_tag, paths=paths, result=result)
     report = reconcile(
         run_tag, paths=paths, tf_dir=directory, runner=runner, fetch=fetch, token=token
     )
-    record_session_event(paths, "apply_attempted", {"exit_ok": result.returncode == 0})
+    session_detail: dict = {"exit_ok": result.returncode == 0}
+    if diagnostic is not None:
+        session_detail["apply_diagnostic"] = {
+            "filename": diagnostic["filename"],
+            "sha256": diagnostic["sha256"],
+        }
+    record_session_event(paths, "apply_attempted", session_detail)
     if result.returncode != 0:
+        failure = persist_apply_failure_receipt(
+            run_tag,
+            paths=paths,
+            terraform_exit_code=result.returncode,
+            report=report,
+            diagnostic=diagnostic,
+        )
+        _attach_apply_failure_to_ledger(paths, failure=failure, diagnostic=diagnostic)
         raise LifecycleError(
             "terraform apply failed. A recovery record and a reconciliation "
             "report were written to the run's external lifecycle directory; "
@@ -1494,4 +1753,171 @@ def orphan_report(token: str, *, fetch: Fetch, ledger: dict | None = None) -> di
             "always requires separate explicit owner approval and targets only "
             "ledger-recorded resources."
         ),
+    }
+
+
+def recover_verified_empty_apply(
+    run_tag: str,
+    *,
+    paths: LifecyclePaths,
+    tf_dir: Path | None = None,
+    runner: CommandRunner = default_runner,
+    fetch: Fetch | None = None,
+    token: str | None = None,
+) -> dict:
+    """Clear a pending APPLY only when state, ledger, and provider are empty.
+
+    Read-only. Never marks the run reconciled. Writes a 0600 recovery receipt
+    before clearing the pending apply record and retains failed-apply history.
+    """
+    validate_run_tag(run_tag)
+    if fetch is None or not token:
+        raise LifecycleError(
+            "verified-empty apply recovery requires a successful read-only "
+            "provider check; set LINODE_TOKEN locally"
+        )
+    if not paths.pending_path.is_file():
+        raise LifecycleError("no pending lifecycle operation exists for this run")
+    try:
+        pending = json.loads(paths.pending_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LifecycleError("the pending record is unreadable or malformed") from exc
+    if not isinstance(pending, dict):
+        raise LifecycleError("the pending record is unreadable or malformed")
+    if pending.get("run_tag") != run_tag:
+        raise LifecycleError("the pending record run tag does not match this run")
+    operation = pending.get("operation")
+    if operation != "apply":
+        raise LifecycleError(
+            "verified-empty recovery applies only to a pending apply; "
+            "other pending operations must use their own workflow"
+        )
+    prior_digest = pending.get("plan_sha256")
+    if not isinstance(prior_digest, str) or not prior_digest.strip():
+        raise LifecycleError("the pending apply record is missing its plan digest")
+
+    directory = tf_dir or default_terraform_dir()
+    show = runner(["terraform", "show", "-json"], directory, _tf_env(paths))
+    if show.returncode != 0:
+        raise LifecycleError("terraform state is unreadable; pending apply was not cleared")
+    try:
+        state_resources = _state_resources(json.loads(show.stdout))
+    except json.JSONDecodeError as exc:
+        raise LifecycleError(
+            "terraform state is unreadable; pending apply was not cleared"
+        ) from exc
+    if state_resources:
+        raise LifecycleError(
+            "terraform state is not empty; verified-empty recovery refuses to clear pending"
+        )
+
+    if not paths.ledger_path.is_file():
+        raise LifecycleError("the resource ledger is missing; pending apply was not cleared")
+    try:
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LifecycleError("the resource ledger is unreadable or malformed") from exc
+    if not isinstance(ledger, dict):
+        raise LifecycleError("the resource ledger is unreadable or malformed")
+    ledger_resources = ledger.get("resources")
+    if not isinstance(ledger_resources, list):
+        raise LifecycleError("the resource ledger is empty or malformed")
+    if ledger_resources:
+        raise LifecycleError(
+            "the ledger still records resources; verified-empty recovery refuses to clear pending"
+        )
+
+    try:
+        orphan = orphan_report(token, fetch=fetch, ledger=ledger)
+    except LifecycleError:
+        raise
+    if not orphan.get("clean"):
+        raise LifecycleError(
+            "the orphan report is not clean; verified-empty recovery refuses to clear pending"
+        )
+    if orphan.get("unrecorded_findings"):
+        raise LifecycleError(
+            "untracked provider resources exist; verified-empty recovery refuses to clear pending"
+        )
+
+    from blackwell_lab.cloud.preflight import _paginated
+
+    try:
+        instances = _paginated(fetch, "/linode/instances", token)
+        firewalls = _paginated(fetch, "/networking/firewalls", token)
+        volumes = _paginated(fetch, "/volumes", token)
+    except Exception:
+        raise LifecycleError(
+            "the read-only provider check failed; pending apply was not cleared"
+        ) from None
+
+    for instance in instances:
+        tags = instance.get("tags") or []
+        untagged_gpu = not tags and str(instance.get("type", "")).startswith("g")
+        if PROJECT_TAG in tags or untagged_gpu:
+            raise LifecycleError(
+                "project-tagged or untracked instances exist; pending apply was not cleared"
+            )
+    for firewall in firewalls:
+        if PROJECT_TAG in (firewall.get("tags") or []):
+            raise LifecycleError("project-tagged firewalls exist; pending apply was not cleared")
+    for volume in volumes:
+        if PROJECT_TAG in (volume.get("tags") or []):
+            raise LifecycleError("project-tagged volumes exist; pending apply was not cleared")
+
+    stamp = _utc_filename_stamp()
+    receipt = {
+        "schema": "empty-apply-recovery/1",
+        "run_tag": run_tag,
+        "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
+        "prior_pending_operation": "apply",
+        "prior_pending_plan_sha256": prior_digest,
+        "provider_checked": True,
+        "terraform_state_resource_count": 0,
+        "ledger_resource_count": 0,
+        "orphan_clean": True,
+        "untracked_count": 0,
+        "terminal_state": "aborted_verified_empty_apply",
+        "note": (
+            "Pending apply was cleared after a provider-verified empty "
+            "ledger and state. This is not a successful apply; reconciled "
+            "remains false."
+        ),
+    }
+    target = paths.empty_apply_recovery_path(stamp)
+    sha256 = write_private_json(target, receipt)
+    updated = dict(ledger)
+    updated["reconciled"] = False
+    updated["terminal_state"] = "aborted_verified_empty_apply"
+    updated["state_readable"] = True
+    reconciliation = dict(updated.get("reconciliation") or {})
+    reconciliation["provider_checked"] = True
+    reconciliation["untracked_billable"] = []
+    reconciliation["missing_from_provider"] = []
+    updated["reconciliation"] = reconciliation
+    recovery = dict(updated.get("recovery") or {})
+    recovery["empty_apply_recovery"] = {
+        "filename": target.name,
+        "sha256": sha256,
+        "pending_cleared": True,
+        "prior_pending_plan_sha256": prior_digest,
+    }
+    recovery["note"] = receipt["note"]
+    updated["recovery"] = recovery
+    write_private_json(paths.ledger_path, updated)
+    _clear_pending(paths)
+    record_session_event(
+        paths,
+        "apply_aborted_verified_empty",
+        {"recovery_filename": target.name, "recovery_sha256": sha256},
+    )
+    return {
+        "run_tag": run_tag,
+        "pending_cleared": True,
+        "reconciled": False,
+        "terminal_state": "aborted_verified_empty_apply",
+        "provider_checked": True,
+        "recovery_filename": target.name,
+        "recovery_sha256": sha256,
+        "note": receipt["note"],
     }

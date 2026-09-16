@@ -7,6 +7,7 @@ terraform binary.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -83,6 +84,8 @@ class FakeRunner:
         show_state_rc=0,
         plan_text="Plan: 2 to add. ip 203.0.113.9 ssh-ed25519 AAAAC3Nza key",
         commit=COMMIT,
+        apply_stdout="",
+        apply_stderr="",
     ):
         self.plan_rc = plan_rc
         self.apply_rc = apply_rc
@@ -92,6 +95,8 @@ class FakeRunner:
         self.show_state_rc = show_state_rc
         self.plan_text = plan_text
         self.commit = commit
+        self.apply_stdout = apply_stdout
+        self.apply_stderr = apply_stderr
         self.calls: list[list[str]] = []
         self.envs: list[dict] = []
 
@@ -115,7 +120,7 @@ class FakeRunner:
         if argv[1] == "show" and "-no-color" in argv:
             return CommandResult(0, self.plan_text)
         if argv[1] == "apply":
-            return CommandResult(self.apply_rc, "")
+            return CommandResult(self.apply_rc, self.apply_stdout, self.apply_stderr)
         raise AssertionError(f"unexpected command: {argv}")
 
 
@@ -1191,3 +1196,485 @@ class TestRunTagAndHostedGuards:
             with pytest.raises(LifecycleError, match="hosted"):
                 lifecycle.refuse_hosted_execution({marker: "1"})
         lifecycle.refuse_hosted_execution({})  # local: no exception
+
+
+def _empty_provider_fetch(path, token=None):
+    return {"data": [], "pages": 1}
+
+
+def _injected_apply_streams():
+    token = "tok_" + ("Q" * 40)
+    hex_blob = "aa" * 20
+    ssh_body = "AAAAC3Nza" + ("C" * 32)
+    pem_body = "MIIEow" + ("X" * 24)
+    stdout = "\n".join(
+        [
+            "Error: creating linode_firewall.gpu_baseline: [400] Invalid rule",
+            f"Authorization: Bearer {token}",
+            f"LINODE_TOKEN={token}",
+            "instance id 99887766 at 203.0.113.77",
+            "endpoint https://nines.ip.linodeusercontent.com",
+            "path /Users/operator/secrets/token.json",
+            f"ssh-ed25519 {ssh_body}",
+            'var.ssh_public_key = "ssh-ed25519 AAAA"',
+            f"-var=linode_token={token}",
+            "-----BEGIN RSA PRIVATE KEY-----",
+            pem_body,
+            "-----END RSA PRIVATE KEY-----",
+            f"hex {hex_blob}",
+            "account operator@example.test",
+            "ipv6 2001:db8:0:0:0:0:0:1",
+        ]
+    )
+    stderr = "\n".join(
+        [
+            "provider linode: HTTP 429 Too Many Requests",
+            "HOME=/home/operator/private/cache",
+            f"Authorization: {token}",
+            "timeout talking to 198.51.100.10",
+            "C:\\Users\\operator\\kube\\config",
+            "plugin crashed: rpc error",
+        ]
+    )
+    secrets = [
+        token,
+        hex_blob,
+        "99887766",
+        "203.0.113.77",
+        "/Users/operator",
+        "linodeusercontent.com",
+        "operator@example.test",
+        "2001:db8:0:0:0:0:0:1",
+        "198.51.100.10",
+        ssh_body,
+        pem_body,
+        "/home/operator",
+        r"C:\Users\operator",
+    ]
+    return stdout, stderr, secrets
+
+
+def _all_run_dir_text(paths):
+    chunks = []
+    for item in paths.run_dir.rglob("*"):
+        if item.is_file():
+            chunks.append(item.read_text(encoding="utf-8", errors="replace"))
+    return "\n".join(chunks)
+
+
+class TestApplyDiagnostics:
+    def test_successful_apply_does_not_write_a_diagnostic(self, paths, tf_dir):
+        meta, runner = make_plan(paths, tf_dir)
+        lifecycle.apply(
+            RUN_TAG,
+            apply_phrase(meta),
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=runner,
+            environ={},
+            fetch=_reconcile_fetch(),
+            token="t",
+        )
+        assert list(paths.run_dir.glob("apply-diagnostic-*.json")) == []
+        assert list(paths.run_dir.glob("apply-failure-*.json")) == []
+
+    def test_failed_apply_persists_sanitized_diagnostic_and_links_failure_receipt(
+        self, paths, tf_dir
+    ):
+        stdout, stderr, secrets = _injected_apply_streams()
+        meta, _ = make_plan(paths, tf_dir)
+        runner = FakeRunner(
+            apply_rc=1,
+            show_state=state_json([]),
+            apply_stdout=stdout,
+            apply_stderr=stderr,
+        )
+        with pytest.raises(LifecycleError, match="MAY be billing") as excinfo:
+            lifecycle.apply(
+                RUN_TAG,
+                apply_phrase(meta),
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                environ={},
+                fetch=_empty_provider_fetch,
+                token="t",
+            )
+        message = str(excinfo.value)
+        diagnostics = list(paths.run_dir.glob("apply-diagnostic-*.json"))
+        failures = list(paths.run_dir.glob("apply-failure-*.json"))
+        assert len(diagnostics) == 1
+        assert len(failures) == 1
+        assert stat.S_IMODE(os.stat(diagnostics[0]).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(failures[0]).st_mode) == 0o600
+        diagnostic = json.loads(diagnostics[0].read_text(encoding="utf-8"))
+        failure = json.loads(failures[0].read_text(encoding="utf-8"))
+        persisted = _all_run_dir_text(paths)
+        for secret in secrets:
+            assert secret not in message
+            assert secret not in persisted
+        assert diagnostic["run_tag"] == RUN_TAG
+        assert diagnostic["stage"] == "apply"
+        assert diagnostic["terraform_exit_code"] == 1
+        assert "validation" in diagnostic["diagnostic_categories"]
+        assert "rate_limit" in diagnostic["diagnostic_categories"]
+        assert "timeout" in diagnostic["diagnostic_categories"]
+        assert "provider_plugin" in diagnostic["diagnostic_categories"]
+        assert 400 in diagnostic["http_status_codes"]
+        assert 429 in diagnostic["http_status_codes"]
+        assert "4xx" in diagnostic["http_status_classes"]
+        assert "linode_firewall.gpu_baseline" in diagnostic["resource_addresses"]
+        assert "create" in diagnostic["operations"]
+        assert "Invalid rule" in diagnostic["sanitized_stderr"] + diagnostic["sanitized_stdout"]
+        assert failure["diagnostic_filename"] == diagnostics[0].name
+        assert (
+            failure["diagnostic_sha256"] == hashlib.sha256(diagnostics[0].read_bytes()).hexdigest()
+        )
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert ledger["recovery"]["apply_diagnostic"]["filename"] == diagnostics[0].name
+        assert ledger["recovery"]["apply_failure"]["filename"] == failures[0].name
+        session = json.loads(paths.session_path.read_text(encoding="utf-8"))
+        attempted = [e for e in session["events"] if e["event"] == "apply_attempted"]
+        assert attempted[0]["detail"]["apply_diagnostic"]["filename"] == diagnostics[0].name
+
+    def test_oversized_apply_output_is_truncated(self, paths, tf_dir):
+        token = "tok_" + ("W" * 40)
+        huge = ("noise " * 8000) + f"LINODE_TOKEN={token}"
+        meta, _ = make_plan(paths, tf_dir)
+        runner = FakeRunner(
+            apply_rc=1,
+            show_state=state_json([]),
+            apply_stdout=huge,
+            apply_stderr="Error: creating linode_instance.gpu_baseline timed out",
+        )
+        with pytest.raises(LifecycleError):
+            lifecycle.apply(
+                RUN_TAG,
+                apply_phrase(meta),
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                environ={},
+                fetch=_empty_provider_fetch,
+                token="t",
+            )
+        diagnostic = json.loads(next(paths.run_dir.glob("apply-diagnostic-*.json")).read_text())
+        assert token not in json.dumps(diagnostic)
+        assert "[truncated]" in diagnostic["sanitized_stdout"]
+        assert len(diagnostic["sanitized_stdout"]) <= lifecycle._MAX_DIAGNOSTIC_STREAM_CHARS + 20
+        assert "timeout" in diagnostic["diagnostic_categories"]
+
+
+class TestVerifiedEmptyApplyRecovery:
+    def _pending_empty(self, paths, tf_dir, fetch=_empty_provider_fetch):
+        lifecycle.write_pending(
+            paths, run_tag=RUN_TAG, operation="apply", plan_sha256="plan-digest-aaa"
+        )
+        lifecycle.reconcile(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=FakeRunner(show_state=state_json([])),
+            fetch=fetch,
+            token="t",
+        )
+        assert paths.pending_path.is_file()
+
+    def test_clears_pending_apply_when_provider_verified_empty(self, paths, tf_dir):
+        self._pending_empty(paths, tf_dir)
+        runner = FakeRunner(show_state=state_json([]))
+        report = lifecycle.recover_verified_empty_apply(
+            RUN_TAG,
+            paths=paths,
+            tf_dir=tf_dir,
+            runner=runner,
+            fetch=_empty_provider_fetch,
+            token="t",
+        )
+        assert report["pending_cleared"] is True
+        assert report["reconciled"] is False
+        assert report["terminal_state"] == "aborted_verified_empty_apply"
+        assert report["provider_checked"] is True
+        assert not paths.pending_path.is_file()
+        receipts = list(paths.run_dir.glob("empty-apply-recovery-*.json"))
+        assert len(receipts) == 1
+        assert stat.S_IMODE(os.stat(receipts[0]).st_mode) == 0o600
+        receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+        assert receipt["prior_pending_plan_sha256"] == "plan-digest-aaa"
+        assert receipt["provider_checked"] is True
+        assert receipt["terraform_state_resource_count"] == 0
+        assert receipt["ledger_resource_count"] == 0
+        assert receipt["orphan_clean"] is True
+        assert report["recovery_sha256"] == hashlib.sha256(receipts[0].read_bytes()).hexdigest()
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        assert ledger["reconciled"] is False
+        assert ledger["terminal_state"] == "aborted_verified_empty_apply"
+        assert ledger["resources"] == []
+        assert not any(call[1] == "apply" for call in runner.calls)
+
+    def test_refuses_without_provider_token(self, paths, tf_dir):
+        self._pending_empty(paths, tf_dir)
+        with pytest.raises(LifecycleError, match="read-only"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_when_provider_authentication_fails(self, paths, tf_dir):
+        self._pending_empty(paths, tf_dir)
+
+        def failing(path, token=None):
+            raise RuntimeError("401 unauthorized account-id-999")
+
+        with pytest.raises(LifecycleError, match="resource sweep failed") as excinfo:
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=failing,
+                token="t",
+            )
+        assert "account-id-999" not in str(excinfo.value)
+        assert paths.pending_path.is_file()
+
+    def test_refuses_unreadable_state(self, paths, tf_dir):
+        self._pending_empty(paths, tf_dir)
+        with pytest.raises(LifecycleError, match="unreadable"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state_rc=1, show_state=state_json([])),
+                fetch=_empty_provider_fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_when_state_has_resources(self, paths, tf_dir):
+        self._pending_empty(paths, tf_dir)
+        with pytest.raises(LifecycleError, match="state is not empty"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(),
+                fetch=_empty_provider_fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_when_ledger_has_resources(self, paths, tf_dir):
+        lifecycle.write_pending(
+            paths, run_tag=RUN_TAG, operation="apply", plan_sha256="plan-digest-aaa"
+        )
+        lifecycle.write_private_json(
+            paths.ledger_path,
+            {
+                "run_tag": RUN_TAG,
+                "resources": [{"address": "linode_instance.gpu_baseline"}],
+                "reconciled": False,
+            },
+        )
+        with pytest.raises(LifecycleError, match="ledger still records"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=_empty_provider_fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_project_tagged_instance(self, paths, tf_dir):
+        self._pending_empty(paths, tf_dir)
+        with pytest.raises(LifecycleError, match="orphan report is not clean"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=_reconcile_fetch(),
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_untagged_gpu_orphan(self, paths, tf_dir):
+        self._pending_empty(paths, tf_dir)
+
+        def fetch(path, token=None):
+            if path.startswith("/linode/instances"):
+                return {
+                    "data": [
+                        {
+                            "id": 44,
+                            "label": "mystery",
+                            "type": "g3-gpu-rtxpro6000-blackwell-1",
+                            "tags": [],
+                        }
+                    ],
+                    "pages": 1,
+                }
+            return {"data": [], "pages": 1}
+
+        with pytest.raises(LifecycleError, match="orphan report is not clean"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_project_tagged_firewall(self, paths, tf_dir):
+        self._pending_empty(paths, tf_dir)
+
+        def fetch(path, token=None):
+            if path.startswith("/networking/firewalls"):
+                return {
+                    "data": [{"id": 9, "label": "fw", "tags": ["blackwell-lab"]}],
+                    "pages": 1,
+                }
+            return {"data": [], "pages": 1}
+
+        with pytest.raises(LifecycleError, match="orphan report is not clean"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_project_tagged_volume(self, paths, tf_dir):
+        self._pending_empty(paths, tf_dir)
+
+        def fetch(path, token=None):
+            if path.startswith("/volumes"):
+                return {
+                    "data": [{"id": 3, "label": "vol", "tags": ["blackwell-lab"]}],
+                    "pages": 1,
+                }
+            return {"data": [], "pages": 1}
+
+        with pytest.raises(LifecycleError, match="orphan report is not clean"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_pending_destroy(self, paths, tf_dir):
+        lifecycle.write_pending(
+            paths, run_tag=RUN_TAG, operation="destroy", plan_sha256="plan-digest-aaa"
+        )
+        lifecycle.write_private_json(
+            paths.ledger_path, {"run_tag": RUN_TAG, "resources": [], "reconciled": False}
+        )
+        with pytest.raises(LifecycleError, match="only to a pending apply"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=_empty_provider_fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_run_tag_mismatch(self, paths, tf_dir):
+        lifecycle.write_private_json(
+            paths.pending_path,
+            {
+                "run_tag": "other-run-20260916z",
+                "operation": "apply",
+                "plan_sha256": "plan-digest-aaa",
+            },
+        )
+        lifecycle.write_private_json(
+            paths.ledger_path, {"run_tag": RUN_TAG, "resources": [], "reconciled": False}
+        )
+        with pytest.raises(LifecycleError, match="run tag does not match"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=_empty_provider_fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_malformed_pending(self, paths, tf_dir):
+        paths.pending_path.write_text("{not-json", encoding="utf-8")
+        lifecycle.write_private_json(
+            paths.ledger_path, {"run_tag": RUN_TAG, "resources": [], "reconciled": False}
+        )
+        with pytest.raises(LifecycleError, match="malformed"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=_empty_provider_fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_missing_plan_digest(self, paths, tf_dir):
+        lifecycle.write_private_json(paths.pending_path, {"run_tag": RUN_TAG, "operation": "apply"})
+        lifecycle.write_private_json(
+            paths.ledger_path, {"run_tag": RUN_TAG, "resources": [], "reconciled": False}
+        )
+        with pytest.raises(LifecycleError, match="plan digest"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=_empty_provider_fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_malformed_ledger(self, paths, tf_dir):
+        lifecycle.write_pending(
+            paths, run_tag=RUN_TAG, operation="apply", plan_sha256="plan-digest-aaa"
+        )
+        paths.ledger_path.write_text('{"run_tag": "p3-pilot-20260907a"}', encoding="utf-8")
+        with pytest.raises(LifecycleError, match="empty or malformed"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=_empty_provider_fetch,
+                token="t",
+            )
+        assert paths.pending_path.is_file()
+
+    def test_refuses_when_no_pending_record_exists(self, paths, tf_dir):
+        lifecycle.write_private_json(
+            paths.ledger_path, {"run_tag": RUN_TAG, "resources": [], "reconciled": False}
+        )
+        with pytest.raises(LifecycleError, match="no pending"):
+            lifecycle.recover_verified_empty_apply(
+                RUN_TAG,
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=FakeRunner(show_state=state_json([])),
+                fetch=_empty_provider_fetch,
+                token="t",
+            )

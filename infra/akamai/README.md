@@ -217,6 +217,10 @@ every attempt. If reconciliation is not clean — including when the provider
 lookup fails after a successful apply — a dirty recovery ledger is written,
 the pending record is retained, and the pilot remains blocked.
 
+A failed apply writes a bounded sanitized Terraform diagnostic receipt
+(0600) next to the apply-failure receipt. The console message stays
+generic; raw Terraform output is never printed or persisted.
+
 ### 5. Reconcile with the provider API
 
 Reconciliation uses **GET-only** provider calls:
@@ -234,6 +238,24 @@ leaves `reconciled=false` and blocks the pilot. Without a token, or when the
 provider lookup fails, the ledger records `reconciled=false`, writes a
 sanitized recovery explanation, and retains any pending record.
 
+### 5a. Verified-empty failed-apply recovery
+
+When a pending apply created **zero** resources — readable empty Terraform
+state, empty ledger, successful read-only provider check, zero
+project-tagged or untracked resources, and a clean orphan report — the
+pending apply record may be cleared without destroy:
+
+```bash
+blackwell-cloud recover-empty-apply --run-tag p3-pilot-20260907a
+```
+
+This command never mutates the provider. It fails closed if authentication
+fails, Terraform state is unreadable, any resource exists, the pending
+operation is not apply, the run identity differs, or evidence is
+incomplete. It does **not** set `reconciled=true`. A mode-0600 recovery
+receipt is written before the pending record is cleared; failed-apply
+history is retained.
+
 ### 5b. Immediate emergency teardown-plan (before bootstrap)
 
 As soon as reconciliation is clean, generate the identity-verified destroy
@@ -250,8 +272,8 @@ digest-bearing destroy approval. Plans older than one hour are stale.
 ## Where each step runs
 
 Lifecycle and Terraform operations (`init`, `plan`, `apply`, `reconcile`,
-`teardown-plan`, `destroy`, orphan report, session summary) run on the
-**owner's laptop**. Bootstrap, local serving, live provenance, and
+`recover-empty-apply`, `teardown-plan`, `destroy`, orphan report, session
+summary) run on the **owner's laptop**. Bootstrap, local serving, live provenance, and
 `blackwell-cloud pilot` run on the **GPU instance**, because instance
 metadata, Docker, `nvidia-smi`, and the loopback serving endpoint are
 instance-local.
