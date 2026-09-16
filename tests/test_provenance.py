@@ -217,12 +217,45 @@ class TestObservedFactsAreReturned:
         assert observed.host_facts == HOST_FACTS
         assert observed.gpu_facts == GPU_FACTS
 
+    def test_run_c_repodigest_matches_frozen_mvl_tag_at_digest(self, model_dir):
+        """p3-mvl-20260915c canary: same hex, docker RepoDigests omit the tag.
+
+        The frozen MVL pin is repo:tag@sha256:<hex>. Live ``docker inspect``
+        returns repo@sha256:<hex>. String equality failed provenance even
+        though the immutable digest was the approved pin.
+        """
+        from blackwell_lab.cloud.mvl import FROZEN_CONTAINER_DIGEST, FROZEN_VLLM_IMAGE_DIGEST
+
+        _, _, artifact_hash = model_dir
+        approved = make_approved(artifact_hash)
+        del approved["serving"]["image"]
+        approved["serving"]["container_digest"] = FROZEN_CONTAINER_DIGEST
+        observed_inspect = f"docker.io/vllm/vllm-openai@{FROZEN_VLLM_IMAGE_DIGEST}"
+        observed = run_verify(
+            model_dir,
+            approved=approved,
+            runner=fake_runner(digest=observed_inspect),
+        )
+        assert observed.container_digest == observed_inspect
+        assert observed.container_digest != FROZEN_CONTAINER_DIGEST
+
 
 class TestFabricatedFactsFailVisibly:
     def test_container_digest_mismatch_fails(self, model_dir):
         runner = fake_runner(digest=f"vllm/vllm-openai@sha256:{'b' * 64}")
         with pytest.raises(ProvenanceError, match="container digest"):
             run_verify(model_dir, runner=runner)
+
+    def test_run_c_digest_hex_mismatch_still_fails_across_representations(self, model_dir):
+        from blackwell_lab.cloud.mvl import FROZEN_CONTAINER_DIGEST
+
+        _, _, artifact_hash = model_dir
+        approved = make_approved(artifact_hash)
+        del approved["serving"]["image"]
+        approved["serving"]["container_digest"] = FROZEN_CONTAINER_DIGEST
+        runner = fake_runner(digest=f"docker.io/vllm/vllm-openai@sha256:{'b' * 64}")
+        with pytest.raises(ProvenanceError, match="container digest"):
+            run_verify(model_dir, approved=approved, runner=runner)
 
     def test_tampered_model_file_fails(self, model_dir):
         artifact_dir, _, _ = model_dir
