@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
@@ -57,6 +58,17 @@ HttpRequestJson = Callable[[str, str, dict[str, str]], object]
 
 class ProvenanceError(RuntimeError):
     """An observed fact does not match the approved configuration/ledger."""
+
+
+_IMMUTABLE_DIGEST_HEX = re.compile(r"(?:.+@)?sha256:([0-9a-f]{64})$")
+
+
+def _immutable_digest_hex(value: object) -> str | None:
+    """Return the sha256 hex of a repo@, repo:tag@, or bare digest pin."""
+    if not isinstance(value, str):
+        return None
+    match = _IMMUTABLE_DIGEST_HEX.fullmatch(value.strip())
+    return match.group(1) if match else None
 
 
 def _require_local_or_private(url: str) -> None:
@@ -291,7 +303,12 @@ def verify_live_provenance(
     if not isinstance(image_ref, str) or not image_ref.strip():
         raise ProvenanceError("the approved serving configuration has no image or container_digest")
     observed_digest = telemetry.resolve_container_digest(image_ref, runner=runner)
-    if observed_digest != approved["serving"]["container_digest"]:
+    # docker inspect RepoDigests[0] is repo@sha256:<hex>. The frozen MVL pin is
+    # repo:tag@sha256:<hex> (or a bare sha256:<hex>). Compare the immutable hex
+    # only; do not accept a different digest or rewrite the observation.
+    if _immutable_digest_hex(observed_digest) != _immutable_digest_hex(
+        approved["serving"]["container_digest"]
+    ):
         mismatches.append("container digest differs from the approved pilot configuration")
 
     observed_model_hash = telemetry.verify_model_artifact(artifact_dir, digest_manifest)
