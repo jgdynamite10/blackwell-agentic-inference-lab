@@ -144,6 +144,9 @@ class RealRunSpec:
     generation: GenerationSettings = field(
         default_factory=lambda: GenerationSettings(temperature=1.0, top_p=0.95, reasoning_mode=True)
     )
+    template_ids: tuple[str, ...] | None = None
+    artifact_family: str = "real-runs"
+    workload_version: str | None = None
 
 
 def _validate_spec(spec: RealRunSpec) -> Profile:
@@ -195,6 +198,15 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
         raise ConfigError("list_price_usd_per_hour must be >= 0")
     if not spec.instance_type or not spec.region:
         raise ConfigError("instance_type and region are required for genuine runs")
+    if spec.artifact_family not in {"real-runs", "qualification-runs"}:
+        raise ConfigError("artifact_family must be real-runs or qualification-runs")
+    if spec.template_ids is not None:
+        known = catalog()
+        missing = [template_id for template_id in spec.template_ids if template_id not in known]
+        if missing:
+            raise ConfigError(f"unknown scenario ids: {missing}")
+        if not spec.template_ids:
+            raise ConfigError("template_ids must not be empty")
     return PROFILES[spec.profile_name]
 
 
@@ -254,7 +266,7 @@ def build_real_manifest(
         },
         "workload": {
             "name": WORKLOAD_NAME,
-            "version": WORKLOAD_VERSION,
+            "version": spec.workload_version or WORKLOAD_VERSION,
             "catalog_digest": catalog_digest(),
             "profile": profile.name,
             "concurrency": spec.concurrency,
@@ -520,9 +532,9 @@ def run_real_cell(
     if resolved is None:  # pragma: no cover - RunMode.REAL never returns None
         raise RequiredMeasurementError("no external results directory was resolved")
     results_dir = resolved
-    target_dir = results_dir / "real-runs" / spec.run_label
+    target_dir = results_dir / spec.artifact_family / spec.run_label
     target_dir.mkdir(parents=True, exist_ok=True)
-    for directory in (results_dir / "real-runs", target_dir):
+    for directory in (results_dir / spec.artifact_family, target_dir):
         with contextlib.suppress(OSError):
             os.chmod(directory, 0o700)
     existing = sorted(target_dir.glob("*.result.json")) + sorted(target_dir.glob("*.manifest.json"))
@@ -530,7 +542,7 @@ def run_real_cell(
         raise ConfigError("refusing to overwrite existing genuine artifacts in this run label")
 
     full_catalog = catalog()
-    template_ids = list(full_catalog)
+    template_ids = list(spec.template_ids) if spec.template_ids is not None else list(full_catalog)
     settings = GenerationSettings(
         temperature=spec.generation.temperature,
         top_p=spec.generation.top_p,

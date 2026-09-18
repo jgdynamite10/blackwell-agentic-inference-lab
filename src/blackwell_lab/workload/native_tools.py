@@ -42,12 +42,19 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "an optional window_s limits how far back points are returned."
     ),
     "search_logs": (
-        "Search synthetic service logs for a query string. An optional "
-        "positive limit caps the number of returned lines."
+        "Search synthetic service logs for a query string. Gather log "
+        "evidence for log-dependent incidents — errors, crashes, "
+        "config-release messages, DNS failures, rate-limit events, and "
+        "similar symptoms — instead of recommending a remediation from the "
+        "incident title alone. An optional positive limit caps the number "
+        "of returned lines."
     ),
     "retrieve_runbook": (
-        "Retrieve a synthetic runbook by key, including published diagnosis "
-        "candidates for this incident."
+        "Retrieve a published runbook. The key identifies the affected "
+        "service or system inferred from the evidence. A successful result "
+        "(found=true) contains runbook.remediation_ids, the valid "
+        "remediation IDs for that service. found=false means the key did "
+        "not identify a published runbook."
     ),
     "check_recent_changes": (
         "List recent synthetic change events. An optional window_s limits "
@@ -55,7 +62,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "recommend_remediation": (
         "Submit the terminal recommendation: one published diagnosis_id, a "
-        "short rationale, and one published remediation_id."
+        "short evidence-based rationale, and one remediation_id that was "
+        "returned in runbook.remediation_ids by a prior successful "
+        "retrieve_runbook call. Do not invent a remediation ID."
     ),
 }
 

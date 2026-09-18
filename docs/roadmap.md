@@ -7,9 +7,12 @@ authorized phase** ([AGENTS.md](../AGENTS.md), section 7).
 Phase status: **Phases 1 and 2 are complete.** **Phase 3A is complete.**
 **Phase 3B D-0014 pilot is complete as a diagnostic.** Decision **D-0017
 authorizes implementation** of the Akamai minimum valuable lab
-(provider-native, three cells); **live execution still requires separate
-digest-bearing approval phrases**. **Phase 4 and later phases remain
-unauthorized.**
+(provider-native, three cells). MVL-F is diagnostic-only and is not the
+comparative reference (D-0019). Decision **D-0019 authorizes
+implementation** of the bounded agent-quality qualification
+(`blackwell-cloud qualify-agent`); **live execution still requires
+separate digest-bearing approval phrases**. **Phase 4 and later phases
+remain unauthorized.**
 
 ## Phase 1 — Repository foundation and feasibility *(complete)*
 
@@ -89,10 +92,14 @@ pins, provider-native only, three cells (interactive/1, batch-heavy/4,
 batch-heavy/8), 1 warm-up + 3 × 200 tasks (1,800 measured observations).
 p50 and p95 are primary; p99 is exploratory. Live apply and
 `mvl-baseline` still require their separate digest-bearing phrases. The
-D-0014 six-hour / $25 envelope stays separately named. Controlled-resource
-mode, additional engines, and a 12-cell matrix remain optional future
-work. Phase 4 remains unauthorized. Every provisioning action follows
-[AGENTS.md](../AGENTS.md) §1 and [cost-guardrails.md](cost-guardrails.md).
+D-0014 six-hour / $25 envelope stays separately named. Decision **D-0019**
+authorizes a bounded agent-quality qualification after MVL-F's quality
+outcome disqualified it as the comparative reference; live
+`qualify-agent` still requires its own digest-bearing phrase.
+Controlled-resource mode, additional engines, and a 12-cell matrix remain
+optional future work. Phase 4 remains unauthorized. Every provisioning
+action follows [AGENTS.md](../AGENTS.md) §1 and
+[cost-guardrails.md](cost-guardrails.md).
 
 ## Phase 4 — NVIDIA optimization
 

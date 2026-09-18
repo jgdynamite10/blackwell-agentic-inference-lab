@@ -56,6 +56,29 @@ class TestFullBaselineGate:
         assert "mvl-baseline" in err
 
 
+class TestQualifyAgentRegistration:
+    def test_qualify_agent_is_a_parser_command(self):
+        parser = cli.build_parser()
+        args = parser.parse_args(
+            [
+                "qualify-agent",
+                "--run-tag",
+                "p3-qual-20260918a",
+                "--run-label",
+                "qual-a",
+                "--candidate",
+                "C1",
+                "--stage",
+                "development",
+                "--config",
+                "/absolute/outside/qualify.json",
+            ]
+        )
+        assert args.command == "qualify-agent"
+        assert args.candidate == "C1"
+        assert args.stage == "development"
+
+
 def pilot_config(tmp_path, comparison_mode="provider-native", **overrides):
     config = {
         "endpoint": {"base_url": "http://127.0.0.1:8000/v1", "model": "m"},

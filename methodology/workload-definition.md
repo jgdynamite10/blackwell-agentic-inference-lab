@@ -13,17 +13,21 @@ remediation using only its simulated tools:
 | --- | --- |
 | `get_service_health()` | Returns synthetic service/component health states for the scenario |
 | `query_metrics()` | Returns synthetic time-series slices (latency, error rate, saturation) |
-| `search_logs()` | Returns synthetic log lines matching a query, seeded per scenario |
-| `retrieve_runbook()` | Returns the synthetic runbook entry for a service or symptom |
+| `search_logs()` | Returns synthetic log lines matching a query, seeded per scenario. Workload 2.4.0 requires gathering log evidence for log-dependent incidents. |
+| `retrieve_runbook()` | Looks up a published runbook by **service/system key**. A hit (`found=true`) returns `runbook.remediation_ids` for that service; `found=false` means the key did not identify a published runbook. |
 | `check_recent_changes()` | Returns synthetic deploy/config-change events |
-| `recommend_remediation()` | Terminal action: the agent submits `diagnosis_id`, `rationale`, and `remediation_id` |
+| `recommend_remediation()` | Terminal action: the agent submits `diagnosis_id`, `rationale`, and a `remediation_id` returned by a prior successful `retrieve_runbook` |
 
 The terminal tool takes structured arguments: the agent submits an exact
 `diagnosis_id` (valid candidate ids are published through the task prompt and
 tool evidence — e.g. `retrieve_runbook` returns the scenario's candidate
 list — so the model selects among candidates rather than guessing a hidden
 string), a free-text `rationale` (diagnostic only, never a success gate), and
-a `remediation_id`.
+a `remediation_id` sourced from `runbook.remediation_ids`. Valid
+remediation IDs are **not** placed in the task prompt (decision D-0019).
+Workload **2.4.0** is the qualification tool-contract correction; the
+scenario catalog, accepted answers, evidence IDs, and evaluator 3.1.0
+remain unchanged.
 
 Each turn must produce exactly one native OpenAI-compatible function call.
 The six `TOOL_SPECS` contracts are projected onto deterministic OpenAI
@@ -88,7 +92,8 @@ evidence. Predicates declare permitted **alternative evidence paths** (a
 reference and an alternative tool sequence both satisfy every predicate by
 construction, and tests prove it). Scenarios are versioned; the workload
 version appears in every run manifest. The Phase 2 catalog
-(`src/blackwell_lab/workload/scenarios.py`, workload version 2.3.0)
+(`src/blackwell_lab/workload/scenarios.py`, catalog version 2.3.0;
+qualification tool-contract revision 2.4.0)
 implements one scenario per class and is additionally **content-addressed**:
 the SHA-256 digest of the canonical catalog JSON is recorded in every run
 manifest under `workload.catalog_digest` (never as a model artifact hash).
