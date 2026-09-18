@@ -20,6 +20,9 @@ Subcommands map one-to-one to the separated workflows required by Phase 3A:
                       provider-native only, live provenance verified first.
 - ``mvl-baseline``    owner-approved D-0017 Akamai minimum valuable lab
                       (provider-native, three cells; fail-closed).
+- ``qualify-agent``   owner-approved D-0019 bounded agent-quality
+                      qualification (C1/C2, frozen dev/holdout/freeze;
+                      fail-closed; no infrastructure changes).
 - ``full-baseline``   DISABLED: the research-grade 12-cell baseline is not
                       part of the MVL.
 - ``verify-results``  external verification of persisted genuine results;
@@ -1048,6 +1051,233 @@ def cmd_mvl_baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def _qualify_stop(message: str, *, results_dir: Path | None, run_label: str) -> int:
+    from blackwell_lab.cloud.artifacts import write_private_json
+    from blackwell_lab.cloud.qualification import failure_record
+
+    if results_dir is not None:
+        write_private_json(
+            results_dir / "qualification-runs" / f"{run_label}-failure.json",
+            failure_record(message),
+        )
+    print(f"BLOCKED: {message}", file=sys.stderr)
+    return 1
+
+
+def cmd_qualify_agent(args: argparse.Namespace) -> int:
+    from blackwell_lab.cloud import lifecycle, provenance, qualification, realbench, telemetry
+    from blackwell_lab.workload.model_client import GenerationSettings
+    from blackwell_lab.workload.openai_client import OpenAICompatibleClient
+
+    lifecycle.refuse_hosted_execution()
+    try:
+        run_label = qualification.require_safe_run_label(args.run_label)
+        candidate_id = args.candidate
+        stage = args.stage
+        if candidate_id not in qualification.AUTHORIZED_CANDIDATES:
+            raise ConfigError("qualification candidate must be C1 or C2")
+        if stage not in qualification.AUTHORIZED_STAGES:
+            raise ConfigError("qualification stage must be development, holdout, or freeze")
+        qualification.require_frozen_split()
+        qualification.refuse_mvl_identities(
+            run_tag=args.run_tag,
+            run_label=run_label,
+            config={"candidate_id": candidate_id, "stage": stage},
+            artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
+        )
+        config_path = qualification.require_external_config(args.config, _repo_root())
+        config, config_sha256 = qualification.load_qualification_config(
+            config_path, candidate_id=candidate_id, stage=stage
+        )
+        qualification.refuse_mvl_identities(
+            run_tag=args.run_tag,
+            run_label=run_label,
+            config=config,
+            artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
+        )
+        qualification.require_approval(
+            args.approve,
+            run_tag=args.run_tag,
+            run_label=run_label,
+            candidate_id=candidate_id,
+            config_sha256=config_sha256,
+        )
+        qualification.require_clean_canonical_commit(
+            config, git_head=_git_head(), tree_clean=_tree_clean()
+        )
+    except (ConfigError, qualification.QualificationError) as exc:
+        print(f"BLOCKED: {exc}", file=sys.stderr)
+        return 1
+
+    results_dir = _resolve_real_results_dir()
+    paths = lifecycle.lifecycle_paths(results_dir, args.run_tag)
+    if not paths.ledger_path.is_file():
+        return _qualify_stop(
+            "the resource ledger is missing for this run. Run "
+            "'blackwell-cloud init', apply, and 'blackwell-cloud reconcile' "
+            "before any qualification execution.",
+            results_dir=results_dir,
+            run_label=run_label,
+        )
+    ledger = lifecycle.load_ledger(paths.ledger_path)
+    blockers = lifecycle.pilot_blockers(ledger, pending=lifecycle.has_pending(paths))
+    if blockers:
+        return _qualify_stop(
+            "qualification cannot run until every lifecycle gate passes. " + "; ".join(blockers),
+            results_dir=results_dir,
+            run_label=run_label,
+        )
+
+    spec = qualification.stage_spec(stage)
+    cell_label = qualification.output_label(run_label, stage, candidate_id)
+    qualification.refuse_mvl_identities(
+        run_tag=args.run_tag,
+        run_label=cell_label,
+        config=config,
+        artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
+    )
+    endpoint = config["endpoint"]
+    lifecycle.record_session_event(
+        paths,
+        "qualification_started",
+        {
+            "run_label": run_label,
+            "candidate_id": candidate_id,
+            "stage": stage,
+            "config_sha256": config_sha256,
+        },
+    )
+
+    try:
+        observed = provenance.verify_live_provenance(
+            run_tag=args.run_tag,
+            approved=config,
+            ledger=ledger,
+            artifact_dir=Path(config["model_verification"]["artifact_dir"]),
+            digest_manifest=Path(config["model_verification"]["digest_manifest"]),
+            serving_base_url=endpoint["base_url"],
+        )
+        if observed.model_artifact_hash != qualification.FROZEN_MODEL_ARTIFACT_HASH:
+            raise qualification.QualificationError(
+                "live model digest drifted from the frozen aggregate"
+            )
+        digest = str(observed.container_digest)
+        if digest not in {
+            qualification.FROZEN_CONTAINER_DIGEST,
+            qualification.FROZEN_VLLM_IMAGE_DIGEST,
+        } and not digest.endswith(qualification.FROZEN_VLLM_IMAGE_DIGEST):
+            raise qualification.QualificationError(
+                "live container digest drifted from the frozen image"
+            )
+        host = {**observed.host_facts, **observed.gpu_facts}
+        model = dict(config["model"])
+        model["artifact_hash"] = observed.model_artifact_hash
+        run_spec = realbench.RealRunSpec(
+            profile_name=spec["profile"],
+            concurrency=spec["concurrency"],
+            comparison_mode=qualification.FROZEN_COMPARISON_MODE,
+            instance_type=observed.instance["instance_type"],
+            region=observed.instance["region"],
+            list_price_usd_per_hour=config["cloud"]["list_price_usd_per_hour"],
+            price_source_date=config["cloud"]["price_source_date"],
+            model=model,
+            engine=config["serving"]["engine"],
+            engine_version=observed.engine_version,
+            container_digest=observed.container_digest,
+            container_cuda_runtime_version=observed.container_cuda_runtime_version,
+            repetitions=spec["repetitions"],
+            warmup_passes=spec["warmup_passes"],
+            tasks_per_repetition=spec["tasks"],
+            seed=qualification.FROZEN_SEED,
+            run_label=cell_label,
+            generation=GenerationSettings(
+                temperature=qualification.candidate_temperature(candidate_id),
+                top_p=qualification.FROZEN_TOP_P,
+                seed=qualification.FROZEN_SEED,
+                reasoning_mode=qualification.FROZEN_REASONING_MODE,
+            ),
+            template_ids=spec["template_ids"],
+            artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
+            workload_version=qualification.QUALIFICATION_WORKLOAD_VERSION,
+        )
+        client = OpenAICompatibleClient(
+            endpoint["base_url"],
+            endpoint["model"],
+            api_key_env=endpoint.get("api_key_env"),
+        )
+        records = realbench.run_real_cell(
+            run_spec,
+            client,
+            host=host,
+            sampler_factory=telemetry.GpuSamplerThread,
+            results_dir=results_dir,
+        )
+        if len(records) != spec["repetitions"]:
+            raise qualification.QualificationError(
+                "qualification must persist exactly one measured repetition"
+            )
+        outcomes = qualification.outcomes_from_records(records)
+        if len(outcomes) != spec["tasks"]:
+            raise qualification.QualificationError(
+                f"qualification {stage} must produce exactly {spec['tasks']} measured tasks"
+            )
+        verification_ok = True
+        for record in records:
+            result = getattr(record, "result", None)
+            manifest = getattr(record, "manifest", None)
+            measured = getattr(record, "measured_observations", None)
+            if result is None or manifest is None:
+                continue
+            validate_benchmark_result(result)
+            validate_run_manifest(manifest)
+            if isinstance(measured, dict):
+                validate_task_observations(measured)
+            validate_result_semantics(
+                manifest,
+                result,
+                measured_observations=measured if isinstance(measured, dict) else None,
+                warmup_observations=getattr(record, "warmup_observations", None),
+            )
+        metrics = qualification.compute_qualification_metrics(
+            outcomes, provenance_ok=True, verification_ok=verification_ok
+        )
+        gates = qualification.evaluate_stage_thresholds(stage, metrics)
+        files = [name for record in records for name in getattr(record, "written_files", ())]
+        receipt = qualification.sanitized_receipt(
+            run_label=cell_label,
+            candidate_id=candidate_id,
+            stage=stage,
+            config_sha256=config_sha256,
+            identity_digest=qualification.candidate_identity_digest(candidate_id),
+            gates=gates,
+            files=files,
+            stopped=bool(gates["stopped"]),
+        )
+        from blackwell_lab.cloud.artifacts import write_private_json
+
+        write_private_json(
+            results_dir
+            / qualification.QUALIFICATION_ARTIFACT_FAMILY
+            / f"{cell_label}-receipt.json",
+            receipt,
+        )
+    except Exception as exc:
+        message = (
+            str(exc)
+            if isinstance(exc, (qualification.QualificationError, ConfigError))
+            else f"qualification aborted: {type(exc).__name__}"
+        )
+        return _qualify_stop(message, results_dir=results_dir, run_label=run_label)
+
+    lifecycle.record_session_event(
+        paths,
+        "qualification_completed" if not gates["stopped"] else "qualification_stopped",
+        {"stage": stage, "candidate_id": candidate_id, "stopped": gates["stopped"]},
+    )
+    print(json.dumps(receipt, indent=2))
+    return 1 if gates["stopped"] else 0
+
+
 # -- external result verification ----------------------------------------------
 
 
@@ -1155,8 +1385,10 @@ def build_parser() -> argparse.ArgumentParser:
             "run tag and the reviewed plan digest) and run only in the "
             "owner's local environment. Every lifecycle artifact lives in "
             "the external private LAB_RESULTS_DIR. Decision D-0017 authorizes "
-            "the Akamai minimum valuable lab (mvl-baseline); live apply and "
-            "MVL execution still require their separate digest-bearing phrases."
+            "the Akamai minimum valuable lab (mvl-baseline) and the D-0019 "
+            "agent-quality qualification (qualify-agent); live apply, MVL, "
+            "and qualification execution still require their separate "
+            "digest-bearing phrases."
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1231,6 +1463,40 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mvl_parser.add_argument("--approve", help="The exact MVL approval phrase.")
 
+    qualify_parser = sub.add_parser(
+        "qualify-agent",
+        help=(
+            "Owner-approved D-0019 bounded agent-quality qualification "
+            "(C1/C2, frozen development/holdout/freeze stages)."
+        ),
+    )
+    qualify_parser.add_argument("--run-tag", required=True)
+    qualify_parser.add_argument("--run-label", required=True)
+    qualify_parser.add_argument(
+        "--candidate",
+        required=True,
+        choices=("C1", "C2"),
+        help="Frozen candidate C1 (temperature 1.0) or fallback C2 (temperature 0.2).",
+    )
+    qualify_parser.add_argument(
+        "--stage",
+        required=True,
+        choices=("development", "holdout", "freeze"),
+        help="Frozen qualification stage.",
+    )
+    qualify_parser.add_argument(
+        "--config",
+        required=True,
+        help=(
+            "Existing absolute path to the approved D-0019 qualification config "
+            "JSON; must live outside this repository."
+        ),
+    )
+    qualify_parser.add_argument(
+        "--approve",
+        help="The exact qualification approval phrase naming run, candidate, and config digest.",
+    )
+
     sub.add_parser(
         "full-baseline",
         help="DISABLED: the research-grade 12-cell baseline is not part of the MVL.",
@@ -1301,6 +1567,7 @@ _HANDLERS = {
     "recover-empty-apply": cmd_recover_empty_apply,
     "pilot": cmd_pilot,
     "mvl-baseline": cmd_mvl_baseline,
+    "qualify-agent": cmd_qualify_agent,
     "full-baseline": cmd_full_baseline,
     "verify-results": cmd_verify_results,
     "teardown-plan": cmd_teardown_plan,
@@ -1318,11 +1585,13 @@ def _sanitized_error_types() -> tuple[type[BaseException], ...]:
     from blackwell_lab.cloud.lifecycle import LifecycleError
     from blackwell_lab.cloud.mvl import MvlError
     from blackwell_lab.cloud.provenance import ProvenanceError
+    from blackwell_lab.cloud.qualification import QualificationError
     from blackwell_lab.cloud.realbench import RequiredMeasurementError
     from blackwell_lab.cloud.telemetry import ArtifactVerificationError, TelemetryUnavailable
 
     return (
         MvlError,
+        QualificationError,
         LifecycleError,
         ProvenanceError,
         RequiredMeasurementError,

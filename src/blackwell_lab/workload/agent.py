@@ -231,18 +231,34 @@ def _completed_turn_record(
     )
 
 
-def _system_prompt(scenario: Scenario) -> str:
+def system_prompt(scenario: Scenario) -> str:
+    """Generic system prompt for workload 2.4.0 (tool-contract correction).
+
+    The prompt is scenario-independent: it must not name accepted
+    remediations or other scenario-specific answers (decision D-0019).
+    """
     del scenario
-    return (
-        "You are a Cloud Operations Agent working a synthetic incident. "
-        "Diagnose the incident using only the provided tools, then submit "
-        f"exactly one recommendation via {TERMINAL_TOOL} with a diagnosis_id "
-        "chosen from the published candidate list, a short rationale, and a "
-        "remediation_id. Call exactly one tool per turn."
-    )
+    steps = [
+        "You are a Cloud Operations Agent working a synthetic incident.",
+        "Diagnose the incident using only the provided tools.",
+        "Call exactly one tool per turn.",
+        "Required workflow:",
+        "(1) inspect relevant metrics, changes, logs, and other evidence;",
+        "(2) select the exact diagnosis ID from the published diagnosis candidates;",
+        "(3) infer the affected service or system from the evidence;",
+        "(4) call retrieve_runbook using that service/system key;",
+        "(5) select an exact remediation ID returned in runbook.remediation_ids;",
+        "(6) call recommend_remediation with that exact ID and an evidence-based rationale.",
+        "When an incident may depend on log evidence, gather that evidence "
+        "with search_logs before recommending remediation.",
+        f"Submit exactly one recommendation via {TERMINAL_TOOL}.",
+    ]
+    return " ".join(steps)
 
 
-def _task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
+def task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
+    """User task prompt. Publishes diagnosis candidates only — never
+    remediation IDs (decision D-0019)."""
     candidates = "\n".join(f"- {d}" for d in scenario.candidate_diagnoses)
     surface = f"{instance.surface_variant_text()}\n" if instance is not None else ""
     return (
@@ -253,6 +269,14 @@ def _task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
         f"{scenario.description}\n\n"
         f"Candidate diagnosis ids (submit exactly one):\n{candidates}"
     )
+
+
+def _system_prompt(scenario: Scenario) -> str:
+    return system_prompt(scenario)
+
+
+def _task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
+    return task_prompt(scenario, instance)
 
 
 def run_task(

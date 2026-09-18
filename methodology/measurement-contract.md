@@ -120,6 +120,32 @@ SLO targets are **owner-approved and fixed** (decision D-0010):
 A task attains the SLO only if it succeeds on quality **and** meets the
 latency target. Mock execution never reports SLO attainment (section 13).
 
+Interactive qualification wording is not reversed: **TTFT is compared
+with 2,500 ms**; **end-to-end task latency is compared with 60,000 ms**
+(decision D-0019).
+
+Decision D-0019 records two **project-defined** quality levels. They are
+not industry standards.
+
+**Study-entry qualification gate** (passing it only permits a
+configuration to enter comparative measurement; it is not called
+production-grade):
+
+- aggregate quality success ≥ 70%; every scenario ≥ 40%;
+- valid native tool-call rate ≥ 99%; invalid tool-name rate = 0;
+  invalid-argument rate ≤ 1%; request/inference error rate ≤ 1%;
+  timeouts = 0;
+- interactive TTFT p95 ≤ 2,500 ms; interactive end-to-end p95 ≤ 60,000 ms;
+- provenance and result verification pass.
+
+**Project-defined production-like target** (a measured configuration may
+fail this target without invalidating its measurement; the study must
+report that failure):
+
+- aggregate quality success ≥ 90%; every scenario ≥ 80%;
+- the same structural, error, timeout, latency, provenance, and integrity
+  requirements.
+
 ## 5. Repetitions, sample plan, and warm-up
 
 - **Five measured repetitions per cell** (a cell = provider × mode × serving

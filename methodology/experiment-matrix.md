@@ -84,8 +84,12 @@ Before any full-baseline measurement, one short owner-approved
   tasks (1,800 measured observations). Pilot output remains diagnostic.
   Live MVL execution still requires a separate digest-bearing
   `mvl-baseline` approval phrase. p50 and p95 are primary; p99 is
-  exploratory. Controlled-resource mode remains optional future work. AWS
-  and GCP later repeat this same three-cell matrix if quota permits.
+  exploratory. MVL-F is diagnostic-only and is not the comparative
+  reference (decision D-0019). A bounded agent-quality qualification
+  (`blackwell-cloud qualify-agent`) must pass the study-entry gate before
+  a configuration may enter comparative measurement. Controlled-resource
+  mode remains optional future work. AWS and GCP later repeat this same
+  three-cell matrix if quota permits.
 
 ## Phase 4 — optimization (Akamai)
 
