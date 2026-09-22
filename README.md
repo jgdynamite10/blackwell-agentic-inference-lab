@@ -172,7 +172,8 @@ and do not represent Akamai Technologies, AWS, Google Cloud, NVIDIA, or any
 other provider. Product and company names are the property of their respective
 owners. References do not imply sponsorship or endorsement.
 
-No benchmark findings exist or have been released. Nothing in this repository
-should be interpreted as a performance or superiority claim about any cloud
-provider, GPU, model, or serving stack, and no provider-superiority claim may
-ever exceed the evidence.
+No public benchmark findings have been released. The private diagnostic
+MVL-F findings remain external to Git and are not approved for publication.
+Nothing in this repository should be interpreted as a performance or
+superiority claim about any cloud provider, GPU, model, or serving stack,
+and no provider-superiority claim may ever exceed the evidence.
