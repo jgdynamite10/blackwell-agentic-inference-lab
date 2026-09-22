@@ -16,7 +16,6 @@ from typing import Any
 
 from blackwell_lab.workload.model_client import NativeToolCall, NativeToolCallError, StreamEvent
 from blackwell_lab.workload.tools import TOOL_SPECS, validate_tool_call
-from blackwell_lab.workload.validation import ConfigError
 
 #: Identity recorded in private gpu-mode manifests so native-tool results
 #: cannot be confused with run-e's custom-text TOOL_CALL protocol.
@@ -101,6 +100,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = TOOL_DESCRIPTIONS_V230
 def require_workload_version(version: str | None) -> str:
     """Resolve and accept only a known executed workload contract."""
     from blackwell_lab.workload.scenarios import WORKLOAD_VERSION
+    from blackwell_lab.workload.validation import ConfigError
 
     resolved = version or WORKLOAD_VERSION
     if resolved not in TOOL_DESCRIPTIONS_BY_VERSION:

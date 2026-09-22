@@ -497,48 +497,6 @@ class TestVersionBoundContracts:
             leaked = openai_tool_definitions("2.4.0" if version == "2.3.0" else "2.3.0")
             assert body["tools"] != leaked
 
-    def test_manifest_version_matches_the_executed_contract(self, tmp_path, monkeypatch):
-        from blackwell_lab.cloud.realbench import run_real_cell
-        from tests.test_realbench import HOST, FakeSampler, UsageMockClient, make_spec
-
-        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
-        for version, label in (("2.3.0", "legacy-v230"), ("2.4.0", "qual-v240")):
-            recording = _RecordingClient()
-            records = run_real_cell(
-                make_spec(
-                    workload_version=version,
-                    generation=GenerationSettings(
-                        temperature=1.0,
-                        top_p=0.95,
-                        reasoning_mode=True,
-                        workload_version=version,
-                    ),
-                    run_label=label,
-                    warmup_passes=0,
-                    tasks_per_repetition=10,
-                ),
-                recording,
-                host=HOST,
-                sampler_factory=FakeSampler,
-            )
-            assert records[0].manifest["workload"]["version"] == version
-            assert recording.seen
-            assert recording.seen[0][1].workload_version == version
-            assert (
-                recording.seen[0][0][0].content
-                == {
-                    "2.3.0": SYSTEM_PROMPT_V230,
-                    "2.4.0": SYSTEM_PROMPT_V240,
-                }[version]
-            )
-        with pytest.raises(ConfigError, match="unknown workload version"):
-            run_real_cell(
-                make_spec(workload_version="9.9.9", run_label="unknown-version"),
-                UsageMockClient(),
-                host=HOST,
-                sampler_factory=FakeSampler,
-            )
-
 
 class TestCandidates:
     def test_c1_retains_temperature_and_top_p(self):

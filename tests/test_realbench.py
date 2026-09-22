@@ -21,8 +21,13 @@ from blackwell_lab.cloud.realbench import (
 )
 from blackwell_lab.cloud.telemetry import GpuSample, TelemetryUnavailable, summarize_gpu_samples
 from blackwell_lab.paths import ResultsLocationError
+from blackwell_lab.workload.agent import SYSTEM_PROMPT_V230, SYSTEM_PROMPT_V240
 from blackwell_lab.workload.clock import SYSTEM_CLOCK
-from blackwell_lab.workload.model_client import DeterministicMockClient, StreamEvent
+from blackwell_lab.workload.model_client import (
+    DeterministicMockClient,
+    GenerationSettings,
+    StreamEvent,
+)
 from blackwell_lab.workload.validation import ConfigError
 
 MODEL_BLOCK = {
@@ -362,6 +367,58 @@ class TestFailVisible:
         assert record["error_type"] == "RequiredMeasurementError"
         # No valid result document exists for the failed repetition.
         assert not list(run_dir.glob("*.result.json"))
+
+
+class _RecordingUsageClient(UsageMockClient):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.seen: list[tuple] = []
+
+    def stream_turn(self, messages, settings, *, deadline=None, clock=SYSTEM_CLOCK):
+        self.seen.append((list(messages), settings))
+        yield from super().stream_turn(messages, settings, deadline=deadline, clock=clock)
+
+
+class TestWorkloadVersionBinding:
+    def test_manifest_version_matches_the_executed_contract(self, real_results_dir):
+        for version, label in (("2.3.0", "legacy-v230"), ("2.4.0", "qual-v240")):
+            recording = _RecordingUsageClient()
+            records = run_real_cell(
+                make_spec(
+                    workload_version=version,
+                    generation=GenerationSettings(
+                        temperature=1.0,
+                        top_p=0.95,
+                        reasoning_mode=True,
+                        workload_version=version,
+                    ),
+                    run_label=label,
+                    warmup_passes=0,
+                    tasks_per_repetition=10,
+                ),
+                recording,
+                host=HOST,
+                sampler_factory=FakeSampler,
+                clock=FakeClock(),
+            )
+            assert records[0].manifest["workload"]["version"] == version
+            assert recording.seen
+            assert recording.seen[0][1].workload_version == version
+            assert (
+                recording.seen[0][0][0].content
+                == {
+                    "2.3.0": SYSTEM_PROMPT_V230,
+                    "2.4.0": SYSTEM_PROMPT_V240,
+                }[version]
+            )
+        with pytest.raises(ConfigError, match="unknown workload version"):
+            run_real_cell(
+                make_spec(workload_version="9.9.9", run_label="unknown-version"),
+                UsageMockClient(),
+                host=HOST,
+                sampler_factory=FakeSampler,
+                clock=FakeClock(),
+            )
 
 
 class TestVerifiability:
