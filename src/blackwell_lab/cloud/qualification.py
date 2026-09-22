@@ -39,8 +39,9 @@ from blackwell_lab.workload.native_tools import (
     REASONING_PARSER,
     TOOL_CALL_PARSER,
     TOOL_CALL_TRANSPORT,
-    TOOL_DESCRIPTIONS,
+    tool_descriptions,
 )
+from blackwell_lab.workload.sampling import generate_task_instances
 from blackwell_lab.workload.scenarios import WORKLOAD_VERSION, catalog
 from blackwell_lab.workload.stats import percentile_nearest_rank
 from blackwell_lab.workload.validation import ConfigError
@@ -79,6 +80,7 @@ FREEZE_WARMUP_PASSES = 1
 STAGE_REPETITIONS = 1
 STAGE_PROFILE = "interactive"
 STAGE_CONCURRENCY = 1
+MEASURED_REPETITION_SEED = FROZEN_SEED + 1
 
 DEVELOPMENT_QUALITY_FLOOR = 0.40
 HOLDOUT_QUALITY_FLOOR = 0.50
@@ -196,6 +198,44 @@ def validate_stage_request(stage: str, *, template_ids: Sequence[str], tasks: in
         raise ConfigError(f"qualification {stage} templates must equal the frozen split")
     if tasks != spec["tasks"]:
         raise ConfigError(f"qualification {stage} must use exactly {spec['tasks']} tasks")
+
+
+def expected_stage_distribution(stage: str) -> Counter[str]:
+    """Deterministic per-template counts from the frozen seed, templates, and tasks."""
+    spec = stage_spec(stage)
+    instances = generate_task_instances(
+        spec["template_ids"],
+        spec["tasks"],
+        MEASURED_REPETITION_SEED,
+    )
+    return Counter(instance.template_id for instance in instances)
+
+
+def require_complete_stage_evidence(stage: str, outcomes: Sequence[object]) -> None:
+    """Fail closed unless measured observations match the frozen stage schedule."""
+    spec = stage_spec(stage)
+    expected_ids = tuple(spec["template_ids"])
+    expected_count = int(spec["tasks"])
+    if len(outcomes) != expected_count:
+        raise QualificationError(
+            f"qualification {stage} must produce exactly {expected_count} measured tasks"
+        )
+    observed_ids = [str(_field(outcome, "template_id") or "") for outcome in outcomes]
+    if any(not template_id for template_id in observed_ids):
+        raise QualificationError("qualification observations contain a blank template ID")
+    observed_set = set(observed_ids)
+    expected_set = set(expected_ids)
+    if observed_set - expected_set:
+        raise QualificationError("qualification observations include unexpected template IDs")
+    missing = [template_id for template_id in expected_ids if template_id not in observed_set]
+    if missing:
+        raise QualificationError("qualification observations are missing expected templates")
+    if observed_set != expected_set:
+        raise QualificationError("qualification observations must equal the stage template set")
+    if Counter(observed_ids) != expected_stage_distribution(stage):
+        raise QualificationError(
+            "qualification observations do not match the frozen per-template distribution"
+        )
 
 
 def candidate_temperature(candidate_id: str) -> float:
@@ -562,11 +602,20 @@ class QualificationMetrics:
     verification_ok: bool
 
 
+def _tool_trace(outcome: object) -> list[object]:
+    if isinstance(outcome, dict):
+        trace = outcome.get("tool_trace") or []
+        return list(trace) if isinstance(trace, list) else []
+    trace = getattr(outcome, "tool_trace", None)
+    return list(trace) if trace else []
+
+
 def compute_qualification_metrics(
     outcomes: Sequence[object],
     *,
     provenance_ok: bool,
     verification_ok: bool,
+    expected_template_ids: Sequence[str] | None = None,
 ) -> QualificationMetrics:
     attempted = len(outcomes)
     if attempted < 1:
@@ -578,7 +627,8 @@ def compute_qualification_metrics(
     invalid_args = 0
     inference_errors = 0
     timeouts = 0
-    structural = 0
+    valid_tool_calls = 0
+    invalid_tool_calls = 0
     e2e_values: list[float] = []
     ttft_values: list[float] = []
     for outcome in outcomes:
@@ -596,25 +646,39 @@ def compute_qualification_metrics(
             inference_errors += 1
         if category in TIMEOUT_CATEGORIES:
             timeouts += 1
+        valid_tool_calls += len(_tool_trace(outcome))
         if category in STRUCTURAL_TOOL_FAILURES:
-            structural += 1
+            invalid_tool_calls += 1
         e2e = _field(outcome, "e2e_ms")
         if isinstance(e2e, (int, float)):
             e2e_values.append(float(e2e))
         ttft = _field(outcome, "ttft_ms")
         if isinstance(ttft, (int, float)):
             ttft_values.append(float(ttft))
-    scenario_quality = {
-        template_id: (scenario_success[template_id] / count if count else 0.0)
-        for template_id, count in scenario_attempted.items()
-    }
+    tool_attempts = valid_tool_calls + invalid_tool_calls
+    if tool_attempts < 1:
+        raise QualificationError("qualification observed no native tool-call attempts")
+    if expected_template_ids is not None:
+        scenario_quality = {
+            template_id: (
+                scenario_success[template_id] / scenario_attempted[template_id]
+                if scenario_attempted[template_id]
+                else 0.0
+            )
+            for template_id in expected_template_ids
+        }
+    else:
+        scenario_quality = {
+            template_id: (scenario_success[template_id] / count if count else 0.0)
+            for template_id, count in scenario_attempted.items()
+        }
     return QualificationMetrics(
         attempted=attempted,
         succeeded=succeeded,
         aggregate_quality=succeeded / attempted,
         scenario_quality=scenario_quality,
         scenario_attempted=dict(scenario_attempted),
-        valid_native_tool_call_rate=(attempted - structural) / attempted,
+        valid_native_tool_call_rate=valid_tool_calls / tool_attempts,
         invalid_tool_name_rate=invalid_names / attempted,
         invalid_argument_rate=invalid_args / attempted,
         request_inference_error_rate=inference_errors / attempted,
@@ -820,12 +884,13 @@ def failure_record(message: str) -> dict[str, Any]:
 
 
 def tool_contract_mentions_required_workflow() -> bool:
-    system = TOOL_DESCRIPTIONS["retrieve_runbook"] + TOOL_DESCRIPTIONS["recommend_remediation"]
+    descriptions = tool_descriptions(QUALIFICATION_WORKLOAD_VERSION)
+    system = descriptions["retrieve_runbook"] + descriptions["recommend_remediation"]
     return (
-        "service or system" in TOOL_DESCRIPTIONS["retrieve_runbook"]
-        and "remediation_ids" in TOOL_DESCRIPTIONS["retrieve_runbook"]
-        and "found=false" in TOOL_DESCRIPTIONS["retrieve_runbook"]
-        and "retrieve_runbook" in TOOL_DESCRIPTIONS["recommend_remediation"]
-        and "log-dependent" in TOOL_DESCRIPTIONS["search_logs"]
+        "service or system" in descriptions["retrieve_runbook"]
+        and "remediation_ids" in descriptions["retrieve_runbook"]
+        and "found=false" in descriptions["retrieve_runbook"]
+        and "retrieve_runbook" in descriptions["recommend_remediation"]
+        and "log-dependent" in descriptions["search_logs"]
         and "service or system" in system
     )

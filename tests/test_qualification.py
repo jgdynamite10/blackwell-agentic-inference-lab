@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from blackwell_lab.cloud.qualification import (
     QUALIFICATION_ARTIFACT_FAMILY,
     QUALIFICATION_WORKLOAD_VERSION,
     SPLIT_SEED,
+    STRUCTURAL_TOOL_FAILURES,
     QualificationError,
     approval_phrase,
     candidate_identity_digest,
@@ -41,19 +43,39 @@ from blackwell_lab.cloud.qualification import (
     evaluate_production_like_target,
     evaluate_stage_thresholds,
     evaluate_study_entry_gate,
+    expected_stage_distribution,
     freeze_template_split,
     frozen_candidate_fields,
     refuse_mvl_identities,
     require_approval,
+    require_complete_stage_evidence,
     sanitized_receipt,
     serialize_candidate,
     stage_spec,
     validate_authorized_qualification_config,
     validate_stage_request,
 )
-from blackwell_lab.workload.agent import system_prompt, task_prompt
+from blackwell_lab.workload.agent import (
+    SYSTEM_PROMPT_V230,
+    SYSTEM_PROMPT_V240,
+    run_task,
+    system_prompt,
+    task_prompt,
+)
 from blackwell_lab.workload.evaluator import EVALUATOR_VERSION, QUALITY_THRESHOLD
-from blackwell_lab.workload.native_tools import TOOL_DESCRIPTIONS, openai_tool_definitions
+from blackwell_lab.workload.model_client import (
+    DeterministicMockClient,
+    GenerationSettings,
+    StreamEvent,
+)
+from blackwell_lab.workload.native_tools import (
+    TOOL_DESCRIPTIONS,
+    TOOL_DESCRIPTIONS_V230,
+    TOOL_DESCRIPTIONS_V240,
+    openai_tool_definitions,
+    require_workload_version,
+    tool_descriptions,
+)
 from blackwell_lab.workload.scenarios import WORKLOAD_VERSION, catalog
 from blackwell_lab.workload.tools import SimulatedToolbox
 from blackwell_lab.workload.validation import ConfigError
@@ -103,7 +125,16 @@ def _outcome(
     error_category: str | None = None,
     e2e_ms: float = 1_000.0,
     ttft_ms: float = 200.0,
+    tool_trace: list[dict] | None = None,
 ) -> dict:
+    if tool_trace is None:
+        if error_category in STRUCTURAL_TOOL_FAILURES or error_category in {
+            "endpoint_error",
+            "task_timeout",
+        }:
+            tool_trace = []
+        else:
+            tool_trace = [{"tool": "recommend_remediation"}]
     return {
         "template_id": template_id,
         "success": success,
@@ -112,6 +143,7 @@ def _outcome(
         "e2e_ms": e2e_ms,
         "ttft_ms": ttft_ms,
         "turns": [{"ttft_ms": ttft_ms}],
+        "tool_trace": tool_trace,
     }
 
 
@@ -313,7 +345,7 @@ class TestToolContract:
     def test_remediation_ids_are_absent_from_the_task_prompt(self):
         from blackwell_lab.workload.sampling import generate_task_instances
 
-        generic = system_prompt(next(iter(catalog().values())))
+        generic = system_prompt(next(iter(catalog().values())), "2.4.0")
         for scenario in catalog().values():
             instances = generate_task_instances([scenario.scenario_id], 1, 20260906)
             prompt = task_prompt(scenario, instances[0])
@@ -327,13 +359,13 @@ class TestToolContract:
             assert "Candidate diagnosis ids" in combined
 
     def test_retrieve_runbook_documents_and_accepts_a_service_key(self):
-        description = TOOL_DESCRIPTIONS["retrieve_runbook"]
+        description = tool_descriptions("2.4.0")["retrieve_runbook"]
         assert "service or system" in description
         assert "remediation_ids" in description
         assert "found=false" in description
         schema = next(
             entry["function"]
-            for entry in openai_tool_definitions()
+            for entry in openai_tool_definitions("2.4.0")
             if entry["function"]["name"] == "retrieve_runbook"
         )
         assert schema["description"] == description
@@ -349,7 +381,7 @@ class TestToolContract:
         assert miss.payload["found"] is False
 
     def test_recommend_remediation_requires_runbook_sourced_id(self):
-        description = TOOL_DESCRIPTIONS["recommend_remediation"]
+        description = tool_descriptions("2.4.0")["recommend_remediation"]
         assert "retrieve_runbook" in description
         assert "remediation_ids" in description
         scenario = catalog()["elevated-latency-001"]
@@ -369,12 +401,143 @@ class TestToolContract:
         assert result.payload["remediation_id"] == remediation_id
 
     def test_log_dependent_scenarios_use_search_logs(self):
-        assert "log-dependent" in TOOL_DESCRIPTIONS["search_logs"]
-        assert "search_logs" in system_prompt(next(iter(catalog().values())))
+        assert "log-dependent" in tool_descriptions("2.4.0")["search_logs"]
+        assert "search_logs" in system_prompt(next(iter(catalog().values())), "2.4.0")
         for scenario_id in LOG_DEPENDENT_SCENARIOS:
             scenario = catalog()[scenario_id]
             tools = [step["tool"] for step in scenario.reference_tool_sequence]
             assert "search_logs" in tools, scenario_id
+
+
+class _RecordingClient(DeterministicMockClient):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.seen: list[tuple] = []
+
+    def stream_turn(self, messages, settings, **kwargs):
+        self.seen.append((list(messages), settings))
+        yield from super().stream_turn(messages, settings, **kwargs)
+        yield StreamEvent(kind="usage", output_tokens=23)
+
+
+class TestVersionBoundContracts:
+    def test_catalog_default_is_the_legacy_2_3_0_contract(self):
+        scenario = next(iter(catalog().values()))
+        assert require_workload_version(None) == "2.3.0"
+        assert TOOL_DESCRIPTIONS == TOOL_DESCRIPTIONS_V230
+        assert system_prompt(scenario) == SYSTEM_PROMPT_V230
+        assert openai_tool_definitions() == openai_tool_definitions("2.3.0")
+
+    def test_contracts_are_isolated_and_fail_closed(self):
+        scenario = next(iter(catalog().values()))
+        prompt_230 = system_prompt(scenario, "2.3.0")
+        prompt_240 = system_prompt(scenario, "2.4.0")
+        assert prompt_230 == SYSTEM_PROMPT_V230
+        assert prompt_240 == SYSTEM_PROMPT_V240
+        assert prompt_230 != prompt_240
+        assert "search_logs" not in prompt_230
+        assert "Required workflow" not in prompt_230
+        assert "search_logs" in prompt_240
+        assert "Required workflow" in prompt_240
+        assert "log-dependent" not in TOOL_DESCRIPTIONS_V230["search_logs"]
+        assert "service or system" not in TOOL_DESCRIPTIONS_V230["retrieve_runbook"]
+        assert "retrieve_runbook" not in TOOL_DESCRIPTIONS_V230["recommend_remediation"]
+        assert "log-dependent" in TOOL_DESCRIPTIONS_V240["search_logs"]
+        assert "service or system" in TOOL_DESCRIPTIONS_V240["retrieve_runbook"]
+        assert "retrieve_runbook" in TOOL_DESCRIPTIONS_V240["recommend_remediation"]
+        defs_230 = {entry["function"]["name"]: entry for entry in openai_tool_definitions("2.3.0")}
+        defs_240 = {entry["function"]["name"]: entry for entry in openai_tool_definitions("2.4.0")}
+        for name in ("search_logs", "retrieve_runbook", "recommend_remediation"):
+            assert defs_230[name]["function"]["description"] == TOOL_DESCRIPTIONS_V230[name]
+            assert defs_240[name]["function"]["description"] == TOOL_DESCRIPTIONS_V240[name]
+            assert (
+                defs_230[name]["function"]["description"]
+                != defs_240[name]["function"]["description"]
+            )
+        with pytest.raises(ConfigError, match="unknown workload version"):
+            require_workload_version("9.9.9")
+        with pytest.raises(ConfigError, match="unknown workload version"):
+            openai_tool_definitions("9.9.9")
+        with pytest.raises(ConfigError, match="unknown workload version"):
+            GenerationSettings(workload_version="9.9.9")
+
+    def test_run_task_and_openai_request_execute_the_selected_contract(self):
+        from fakes import FakeClock
+
+        from blackwell_lab.workload.openai_client import OpenAICompatibleClient
+
+        scenario = catalog()["pod-failures-001"]
+        openai = OpenAICompatibleClient("http://127.0.0.1:8000/v1", "nemotron")
+        for version, expected_prompt, expected_tools in (
+            ("2.3.0", SYSTEM_PROMPT_V230, openai_tool_definitions("2.3.0")),
+            ("2.4.0", SYSTEM_PROMPT_V240, openai_tool_definitions("2.4.0")),
+        ):
+            client = _RecordingClient()
+            toolbox = SimulatedToolbox(scenario, clock=FakeClock())
+            run_task(
+                scenario,
+                client,
+                toolbox,
+                GenerationSettings(workload_version=version),
+                timeout_s=30.0,
+                clock=FakeClock(),
+            )
+            assert client.seen
+            messages, settings = client.seen[0]
+            assert settings.workload_version == version
+            assert messages[0].role == "system"
+            assert messages[0].content == expected_prompt
+            other_prompt = SYSTEM_PROMPT_V240 if version == "2.3.0" else SYSTEM_PROMPT_V230
+            assert messages[0].content != other_prompt
+            body = openai._request_body(
+                messages,
+                GenerationSettings(max_tokens=64, workload_version=version),
+            )
+            assert body["tools"] == expected_tools
+            leaked = openai_tool_definitions("2.4.0" if version == "2.3.0" else "2.3.0")
+            assert body["tools"] != leaked
+
+    def test_manifest_version_matches_the_executed_contract(self, tmp_path, monkeypatch):
+        from blackwell_lab.cloud.realbench import run_real_cell
+        from tests.test_realbench import HOST, FakeSampler, UsageMockClient, make_spec
+
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path))
+        for version, label in (("2.3.0", "legacy-v230"), ("2.4.0", "qual-v240")):
+            recording = _RecordingClient()
+            records = run_real_cell(
+                make_spec(
+                    workload_version=version,
+                    generation=GenerationSettings(
+                        temperature=1.0,
+                        top_p=0.95,
+                        reasoning_mode=True,
+                        workload_version=version,
+                    ),
+                    run_label=label,
+                    warmup_passes=0,
+                    tasks_per_repetition=10,
+                ),
+                recording,
+                host=HOST,
+                sampler_factory=FakeSampler,
+            )
+            assert records[0].manifest["workload"]["version"] == version
+            assert recording.seen
+            assert recording.seen[0][1].workload_version == version
+            assert (
+                recording.seen[0][0][0].content
+                == {
+                    "2.3.0": SYSTEM_PROMPT_V230,
+                    "2.4.0": SYSTEM_PROMPT_V240,
+                }[version]
+            )
+        with pytest.raises(ConfigError, match="unknown workload version"):
+            run_real_cell(
+                make_spec(workload_version="9.9.9", run_label="unknown-version"),
+                UsageMockClient(),
+                host=HOST,
+                sampler_factory=FakeSampler,
+            )
 
 
 class TestCandidates:
@@ -452,6 +615,84 @@ class TestFrozenSplitAndCounts:
         assert HOLDOUT_MUST_NOT_REVISE_WORDING.startswith("Holdout results must never")
 
 
+class TestStageEvidenceCompleteness:
+    def test_complete_development_schedule_is_accepted(self):
+        outcomes = _stage_outcomes("development")
+        require_complete_stage_evidence("development", outcomes)
+        assert expected_stage_distribution("development") == {
+            outcome["template_id"]: sum(
+                1 for item in outcomes if item["template_id"] == outcome["template_id"]
+            )
+            for outcome in outcomes
+        }
+
+    def test_missing_template_fails_closed_and_does_not_vanish_from_quality(self):
+        spec = stage_spec("development")
+        missing_id = spec["template_ids"][0]
+        outcomes = [
+            outcome
+            for outcome in _stage_outcomes("development")
+            if outcome["template_id"] != missing_id
+        ]
+        with pytest.raises(QualificationError, match="exactly 20"):
+            require_complete_stage_evidence("development", outcomes)
+        metrics = compute_qualification_metrics(
+            outcomes,
+            provenance_ok=True,
+            verification_ok=True,
+            expected_template_ids=spec["template_ids"],
+        )
+        assert missing_id in metrics.scenario_quality
+        assert metrics.scenario_quality[missing_id] == 0.0
+        gate = evaluate_study_entry_gate(metrics)
+        assert gate["checks"]["every_scenario"] is False
+        assert missing_id in gate["scenario_failures"]
+
+    def test_duplicate_replacement_fails_closed(self):
+        outcomes = _stage_outcomes("development")
+        donor, extra = stage_spec("development")["template_ids"][:2]
+        mutated = []
+        for outcome in outcomes:
+            if outcome["template_id"] == donor:
+                mutated.append({**outcome, "template_id": extra})
+            else:
+                mutated.append(outcome)
+        assert len(mutated) == 20
+        assert donor not in {item["template_id"] for item in mutated}
+        with pytest.raises(QualificationError, match="missing expected templates"):
+            require_complete_stage_evidence("development", mutated)
+
+    def test_unexpected_template_fails_closed(self):
+        outcomes = _stage_outcomes("development")
+        unexpected = HOLDOUT_TEMPLATE_IDS[0]
+        mutated = [{**outcomes[0], "template_id": unexpected}, *outcomes[1:]]
+        with pytest.raises(QualificationError, match="unexpected template"):
+            require_complete_stage_evidence("development", mutated)
+
+    def test_blank_template_fails_closed(self):
+        outcomes = _stage_outcomes("development")
+        mutated = [{**outcomes[0], "template_id": ""}, *outcomes[1:]]
+        with pytest.raises(QualificationError, match="blank template"):
+            require_complete_stage_evidence("development", mutated)
+
+    def test_wrong_distribution_fails_closed(self):
+        templates = list(stage_spec("development")["template_ids"])
+        expected = expected_stage_distribution("development")
+        first, second = templates[0], templates[1]
+        mutated = []
+        swapped = False
+        for outcome in _stage_outcomes("development"):
+            if not swapped and outcome["template_id"] == first:
+                mutated.append({**outcome, "template_id": second})
+                swapped = True
+            else:
+                mutated.append(outcome)
+        assert Counter(item["template_id"] for item in mutated) != expected
+        assert set(item["template_id"] for item in mutated) == set(templates)
+        with pytest.raises(QualificationError, match="frozen per-template distribution"):
+            require_complete_stage_evidence("development", mutated)
+
+
 class TestGates:
     def test_study_entry_aggregate_boundary(self):
         passing = [_outcome(success=True)] * 70 + [_outcome(success=False)] * 30
@@ -480,8 +721,44 @@ class TestGates:
         failing = [_outcome()] * 98 + [
             _outcome(success=False, error_category="malformed_tool_call")
         ] * 2
+        assert _metrics(passing).valid_native_tool_call_rate == 0.99
+        assert _metrics(failing).valid_native_tool_call_rate == 0.98
         assert evaluate_study_entry_gate(_metrics(passing))["passed"] is True
         assert evaluate_study_entry_gate(_metrics(failing))["passed"] is False
+
+    def test_tool_call_rate_counts_turns_not_tasks(self):
+        multi_turn = [_outcome(tool_trace=[{"tool": "search_logs"}] * 2)] * 49 + [
+            _outcome(success=False, error_category="malformed_tool_call")
+        ]
+        multi_metrics = _metrics(multi_turn)
+        assert multi_metrics.valid_native_tool_call_rate == 98 / 99
+        assert (
+            evaluate_study_entry_gate(multi_metrics)["checks"]["valid_native_tool_call_rate"]
+            is False
+        )
+        one_task_many_valid = [
+            _outcome(tool_trace=[{"tool": "search_logs"}] * 99),
+            _outcome(success=False, error_category="malformed_tool_call"),
+        ]
+        turn_metrics = _metrics(one_task_many_valid)
+        assert turn_metrics.valid_native_tool_call_rate == 0.99
+        assert (
+            evaluate_study_entry_gate(turn_metrics)["checks"]["valid_native_tool_call_rate"] is True
+        )
+
+    def test_endpoint_failures_are_not_tool_call_attempts(self):
+        outcomes = [_outcome()] * 99 + [_outcome(success=False, error_category="endpoint_error")]
+        metrics = _metrics(outcomes)
+        assert metrics.valid_native_tool_call_rate == 1.0
+        assert metrics.request_inference_error_rate == 0.01
+
+    def test_zero_tool_call_attempts_fail_closed(self):
+        empty = [
+            _outcome(success=False, error_category="endpoint_error"),
+            _outcome(success=False, error_category="task_timeout"),
+        ]
+        with pytest.raises(QualificationError, match="no native tool-call attempts"):
+            _metrics(empty)
 
     def test_invalid_tool_name_rate_must_be_zero(self):
         passing = [_outcome()] * 100
@@ -685,6 +962,7 @@ class TestQualifyCommand:
         assert calls[0].tasks_per_repetition == 20
         assert calls[0].generation.temperature == 1.0
         assert calls[0].generation.top_p == 0.95
+        assert calls[0].generation.workload_version == "2.4.0"
         assert calls[0].workload_version == "2.4.0"
         assert destroy_calls == []
         assert (external / "qualification-runs").is_dir()

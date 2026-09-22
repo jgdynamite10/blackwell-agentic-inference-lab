@@ -27,7 +27,10 @@ and qualification execution still require** their separate digest-bearing
 approval phrases. Phase 4 and later phases remain **unauthorized**
 ([docs/roadmap.md](docs/roadmap.md)).
 
-- **No genuine benchmarks have been run yet.** No results exist.
+- **A genuine private diagnostic MVL-F run exists.** It remains external
+  to Git and is not approved for publication. No valid comparative
+  baseline has been accepted or published. No public benchmark findings
+  have been released.
 - **All current example files are synthetic** and clearly labeled as such.
 - **Pricing figures are preliminary, non-authoritative planning estimates**
   requiring account-level verification.

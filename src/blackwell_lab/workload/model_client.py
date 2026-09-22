@@ -92,6 +92,13 @@ class GenerationSettings:
     max_tokens: int = 1024
     seed: int | None = 20260906
     reasoning_mode: bool | None = None
+    workload_version: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.workload_version is not None:
+            from blackwell_lab.workload.native_tools import require_workload_version
+
+            require_workload_version(self.workload_version)
 
 
 @dataclass(frozen=True)

@@ -220,7 +220,7 @@ class OpenAICompatibleClient(ModelClient):
             "stream": True,
             # Authoritative token counts: the final stream chunk carries usage.
             "stream_options": {"include_usage": True},
-            "tools": openai_tool_definitions(),
+            "tools": openai_tool_definitions(settings.workload_version),
             # Official NIM/vLLM 0.27.1 pairing for Nemotron 3.5 Lightning.
             "tool_choice": TOOL_CHOICE,
             "parallel_tool_calls": False,

@@ -181,6 +181,19 @@ class TestRequestShape:
             spec = TOOL_SPECS[entry["function"]["name"]]
             assert set(parameters["properties"]) == set(spec["required"]) | set(spec["optional"])
 
+    def test_request_tools_follow_the_settings_workload_version(self):
+        for version in ("2.3.0", "2.4.0"):
+            transport = RecordingTransport(sse(valid_health_stream()))
+            client = make_client(transport)
+            list(
+                client.stream_turn(
+                    MESSAGES,
+                    GenerationSettings(max_tokens=64, workload_version=version),
+                )
+            )
+            assert transport.calls[0]["body"]["tools"] == openai_tool_definitions(version)
+        assert openai_tool_definitions("2.3.0") != openai_tool_definitions("2.4.0")
+
     def test_tool_messages_use_role_tool_and_matching_id(self):
         transport = RecordingTransport(sse(valid_health_stream(call_id="call-2")))
         client = make_client(transport)

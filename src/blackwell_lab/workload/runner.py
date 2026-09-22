@@ -80,6 +80,7 @@ from blackwell_lab.workload.model_client import (
     GenerationSettings,
     ModelClient,
 )
+from blackwell_lab.workload.native_tools import require_workload_version
 from blackwell_lab.workload.sampling import (
     TaskInstance,
     generate_task_instances,
@@ -490,7 +491,7 @@ def build_manifest(
         },
         "workload": {
             "name": WORKLOAD_NAME,
-            "version": WORKLOAD_VERSION,
+            "version": require_workload_version(settings.workload_version),
             "catalog_digest": catalog_digest(),
             "profile": profile.name,
             "concurrency": concurrency,
@@ -709,7 +710,11 @@ def run_cell(
         template_ids = list(scenario_ids)
 
     client = client or DeterministicMockClient()
-    settings = GenerationSettings(max_tokens=profile.max_tokens, seed=seed)
+    settings = GenerationSettings(
+        max_tokens=profile.max_tokens,
+        seed=seed,
+        workload_version=WORKLOAD_VERSION,
+    )
     effective_timeout_ms = timeout_ms if timeout_ms is not None else profile.task_timeout_ms
 
     target_dir: Path | None = None

@@ -77,6 +77,7 @@ from blackwell_lab.workload.model_client import (
     NativeToolCall,
     NativeToolCallError,
 )
+from blackwell_lab.workload.native_tools import require_workload_version
 from blackwell_lab.workload.sampling import TaskInstance
 from blackwell_lab.workload.scenarios import Scenario
 from blackwell_lab.workload.tools import (
@@ -231,14 +232,16 @@ def _completed_turn_record(
     )
 
 
-def system_prompt(scenario: Scenario) -> str:
-    """Generic system prompt for workload 2.4.0 (tool-contract correction).
+SYSTEM_PROMPT_V230 = (
+    "You are a Cloud Operations Agent working a synthetic incident. "
+    "Diagnose the incident using only the provided tools, then submit "
+    f"exactly one recommendation via {TERMINAL_TOOL} with a diagnosis_id "
+    "chosen from the published candidate list, a short rationale, and a "
+    "remediation_id. Call exactly one tool per turn."
+)
 
-    The prompt is scenario-independent: it must not name accepted
-    remediations or other scenario-specific answers (decision D-0019).
-    """
-    del scenario
-    steps = [
+SYSTEM_PROMPT_V240 = " ".join(
+    [
         "You are a Cloud Operations Agent working a synthetic incident.",
         "Diagnose the incident using only the provided tools.",
         "Call exactly one tool per turn.",
@@ -253,7 +256,22 @@ def system_prompt(scenario: Scenario) -> str:
         "with search_logs before recommending remediation.",
         f"Submit exactly one recommendation via {TERMINAL_TOOL}.",
     ]
-    return " ".join(steps)
+)
+
+SYSTEM_PROMPTS_BY_VERSION = {
+    "2.3.0": SYSTEM_PROMPT_V230,
+    "2.4.0": SYSTEM_PROMPT_V240,
+}
+
+
+def system_prompt(scenario: Scenario, workload_version: str | None = None) -> str:
+    """Scenario-independent system prompt for the executed workload contract.
+
+    Workload 2.3.0 keeps the pre-D-0019 wording. Workload 2.4.0 uses the
+    D-0019 tool-contract correction. Neither names accepted remediations.
+    """
+    del scenario
+    return SYSTEM_PROMPTS_BY_VERSION[require_workload_version(workload_version)]
 
 
 def task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
@@ -271,8 +289,8 @@ def task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
     )
 
 
-def _system_prompt(scenario: Scenario) -> str:
-    return system_prompt(scenario)
+def _system_prompt(scenario: Scenario, workload_version: str | None = None) -> str:
+    return system_prompt(scenario, workload_version)
 
 
 def _task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
@@ -299,6 +317,7 @@ def run_task(
     queue wait consumes timeout budget. All durations are monotonic-clock
     deltas; wall-clock UTC timestamps are recorded for correlation only.
     """
+    executed_version = require_workload_version(settings.workload_version)
     started_at = clock.monotonic()
     submitted = submitted_at if submitted_at is not None else started_at
     execution = TaskExecution(
@@ -313,7 +332,7 @@ def run_task(
     deadline = submitted + timeout_s
 
     messages: list[Message] = [
-        Message("system", _system_prompt(scenario)),
+        Message("system", _system_prompt(scenario, executed_version)),
         Message("user", _task_prompt(scenario, instance)),
     ]
 

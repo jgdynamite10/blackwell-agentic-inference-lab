@@ -938,7 +938,9 @@ def cmd_mvl_baseline(args: argparse.Namespace) -> int:
                 top_p=mvl.FROZEN_TOP_P,
                 seed=mvl.FROZEN_SEED,
                 reasoning_mode=mvl.FROZEN_REASONING_MODE,
+                workload_version=mvl.FROZEN_WORKLOAD_VERSION,
             ),
+            workload_version=mvl.FROZEN_WORKLOAD_VERSION,
         )
         client = OpenAICompatibleClient(
             endpoint["base_url"],
@@ -1195,6 +1197,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 top_p=qualification.FROZEN_TOP_P,
                 seed=qualification.FROZEN_SEED,
                 reasoning_mode=qualification.FROZEN_REASONING_MODE,
+                workload_version=qualification.QUALIFICATION_WORKLOAD_VERSION,
             ),
             template_ids=spec["template_ids"],
             artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
@@ -1217,10 +1220,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 "qualification must persist exactly one measured repetition"
             )
         outcomes = qualification.outcomes_from_records(records)
-        if len(outcomes) != spec["tasks"]:
-            raise qualification.QualificationError(
-                f"qualification {stage} must produce exactly {spec['tasks']} measured tasks"
-            )
+        qualification.require_complete_stage_evidence(stage, outcomes)
         verification_ok = True
         for record in records:
             result = getattr(record, "result", None)
@@ -1239,7 +1239,10 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 warmup_observations=getattr(record, "warmup_observations", None),
             )
         metrics = qualification.compute_qualification_metrics(
-            outcomes, provenance_ok=True, verification_ok=verification_ok
+            outcomes,
+            provenance_ok=True,
+            verification_ok=verification_ok,
+            expected_template_ids=spec["template_ids"],
         )
         gates = qualification.evaluate_stage_thresholds(stage, metrics)
         files = [name for record in records for name in getattr(record, "written_files", ())]

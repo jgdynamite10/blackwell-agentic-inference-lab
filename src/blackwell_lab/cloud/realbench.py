@@ -53,6 +53,7 @@ from blackwell_lab.workload.native_tools import (
     REASONING_PARSER,
     TOOL_CALL_PARSER,
     TOOL_CALL_TRANSPORT,
+    require_workload_version,
 )
 from blackwell_lab.workload.runner import (
     DEFAULT_REPETITIONS,
@@ -74,7 +75,6 @@ from blackwell_lab.workload.runner import (
 from blackwell_lab.workload.sampling import generate_task_instances, sample_design_summary
 from blackwell_lab.workload.scenarios import (
     WORKLOAD_NAME,
-    WORKLOAD_VERSION,
     catalog,
     catalog_digest,
 )
@@ -207,6 +207,9 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
             raise ConfigError(f"unknown scenario ids: {missing}")
         if not spec.template_ids:
             raise ConfigError("template_ids must not be empty")
+    executed_version = require_workload_version(spec.workload_version)
+    if spec.generation.workload_version not in (None, executed_version):
+        raise ConfigError("generation.workload_version must match the run workload version")
     return PROFILES[spec.profile_name]
 
 
@@ -266,7 +269,7 @@ def build_real_manifest(
         },
         "workload": {
             "name": WORKLOAD_NAME,
-            "version": spec.workload_version or WORKLOAD_VERSION,
+            "version": require_workload_version(spec.workload_version),
             "catalog_digest": catalog_digest(),
             "profile": profile.name,
             "concurrency": spec.concurrency,
@@ -549,6 +552,7 @@ def run_real_cell(
         max_tokens=profile.max_tokens,
         seed=spec.generation.seed,
         reasoning_mode=spec.generation.reasoning_mode,
+        workload_version=require_workload_version(spec.workload_version),
     )
     run_ids = [str(uuid.uuid4()) for _ in range(spec.repetitions)]
 
