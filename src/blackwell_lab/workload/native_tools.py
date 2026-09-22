@@ -30,9 +30,9 @@ REASONING_PARSER = "nemotron_v3"
 #: parser (vLLM PR 33965; NIM tool-calling guide).
 TOOL_CHOICE = "auto"
 
-#: Descriptions projected onto the OpenAI function definitions. Argument
-#: contracts remain :data:`TOOL_SPECS`.
-TOOL_DESCRIPTIONS: dict[str, str] = {
+#: Exact workload 2.3.0 tool descriptions (pre-D-0019). Pilot/MVL paths
+#: must keep sending this contract when they record version 2.3.0.
+TOOL_DESCRIPTIONS_V230: dict[str, str] = {
     "get_service_health": (
         "Return the current synthetic health status for one named service "
         "or, when omitted, every service in the incident."
@@ -59,13 +59,68 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
 }
 
+#: Workload 2.4.0 qualification tool-contract correction (decision D-0019).
+TOOL_DESCRIPTIONS_V240: dict[str, str] = {
+    "get_service_health": TOOL_DESCRIPTIONS_V230["get_service_health"],
+    "query_metrics": TOOL_DESCRIPTIONS_V230["query_metrics"],
+    "search_logs": (
+        "Search synthetic service logs for a query string. Gather log "
+        "evidence for log-dependent incidents — errors, crashes, "
+        "config-release messages, DNS failures, rate-limit events, and "
+        "similar symptoms — instead of recommending a remediation from the "
+        "incident title alone. An optional positive limit caps the number "
+        "of returned lines."
+    ),
+    "retrieve_runbook": (
+        "Retrieve a published runbook. The key identifies the affected "
+        "service or system inferred from the evidence. A successful result "
+        "(found=true) contains runbook.remediation_ids, the valid "
+        "remediation IDs for that service. found=false means the key did "
+        "not identify a published runbook."
+    ),
+    "check_recent_changes": TOOL_DESCRIPTIONS_V230["check_recent_changes"],
+    "recommend_remediation": (
+        "Submit the terminal recommendation: one published diagnosis_id, a "
+        "short evidence-based rationale, and one remediation_id that was "
+        "returned in runbook.remediation_ids by a prior successful "
+        "retrieve_runbook call. Do not invent a remediation ID."
+    ),
+}
+
+TOOL_DESCRIPTIONS_BY_VERSION: dict[str, dict[str, str]] = {
+    "2.3.0": TOOL_DESCRIPTIONS_V230,
+    "2.4.0": TOOL_DESCRIPTIONS_V240,
+}
+
+#: Default catalog contract (workload 2.3.0). Callers that execute a
+#: specific version must use :func:`tool_descriptions`.
+TOOL_DESCRIPTIONS: dict[str, str] = TOOL_DESCRIPTIONS_V230
+
+
+def require_workload_version(version: str | None) -> str:
+    """Resolve and accept only a known executed workload contract."""
+    from blackwell_lab.workload.scenarios import WORKLOAD_VERSION
+    from blackwell_lab.workload.validation import ConfigError
+
+    resolved = version or WORKLOAD_VERSION
+    if resolved not in TOOL_DESCRIPTIONS_BY_VERSION:
+        raise ConfigError(f"unknown workload version: {resolved}")
+    return resolved
+
+
+def tool_descriptions(workload_version: str | None = None) -> dict[str, str]:
+    """Tool descriptions for the executed workload contract."""
+    return TOOL_DESCRIPTIONS_BY_VERSION[require_workload_version(workload_version)]
+
+
 _PYTHON_TO_JSON_TYPE = {str: "string", int: "integer"}
 
 _REASONING_DELTA_KEYS = ("reasoning", "reasoning_content", "reasoning_text")
 
 
-def openai_tool_definitions() -> list[dict]:
-    """Deterministic OpenAI ``tools`` array for every :data:`TOOL_SPECS` entry."""
+def openai_tool_definitions(workload_version: str | None = None) -> list[dict]:
+    """Deterministic OpenAI ``tools`` array for the executed workload contract."""
+    descriptions = tool_descriptions(workload_version)
     definitions: list[dict] = []
     for name in sorted(TOOL_SPECS):
         spec = TOOL_SPECS[name]
@@ -86,7 +141,7 @@ def openai_tool_definitions() -> list[dict]:
                 "type": "function",
                 "function": {
                     "name": name,
-                    "description": TOOL_DESCRIPTIONS[name],
+                    "description": descriptions[name],
                     "parameters": parameters,
                 },
             }

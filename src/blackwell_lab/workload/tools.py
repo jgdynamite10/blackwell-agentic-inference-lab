@@ -166,12 +166,19 @@ class SimulatedToolbox:
         }
 
     def _tool_retrieve_runbook(self, key: str) -> dict[str, Any]:
+        """Look up a published runbook by service/system key.
+
+        ``key`` identifies the affected service or system. A hit returns
+        the runbook object, including ``remediation_ids``. ``found=false``
+        means the key did not identify a published runbook.
+        """
         runbook = self._scenario.runbooks.get(key)
         if runbook is None:
             return {"key": key, "found": False, "available": sorted(self._scenario.runbooks)}
         # Candidate diagnosis ids are part of the synthetic evidence surface:
         # the agent selects among published candidates, never guesses a
-        # hidden string (decision D-0010).
+        # hidden string (decision D-0010). Remediation ids are published
+        # only here — never in the task prompt (decision D-0019).
         return {
             "key": key,
             "found": True,

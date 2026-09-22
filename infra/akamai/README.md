@@ -381,6 +381,26 @@ stops inference and tells the owner to run `teardown-plan` from their
 laptop. This command never generates a Terraform destroy plan on the GPU
 host and never deletes automatically.
 
+### 7c. Agent-quality qualification (D-0019 implementation; live phrase still required)
+
+`blackwell-cloud qualify-agent` reuses the existing runner, provenance,
+and external-results paths. It writes only to `qualification-runs`,
+refuses MVL-F identities and paths, and performs **no** infrastructure
+changes and **no** automatic teardown.
+
+```bash
+blackwell-cloud qualify-agent \
+  --run-tag p3-qual-20260918a \
+  --run-label qual-a \
+  --candidate C1 \
+  --stage development \
+  --config /absolute/private/path/outside/the/repository/qualify.json \
+  --approve "I approve the Akamai agent qualification for run p3-qual-20260918a (qual-a) using candidate C1 config sha256:<digest-of-those-config-bytes>"
+```
+
+C2 (temperature 0.2 only) is used only if C1 fails the qualification
+gate. Live execution is not authorized by D-0019 itself.
+
 ### 8. Verify exported results
 
 ```bash

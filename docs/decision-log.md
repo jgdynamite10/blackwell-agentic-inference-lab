@@ -791,3 +791,128 @@ sampling, evaluation, Terraform, and lifecycle behavior are unchanged.
 packages from `noble-updates` to `580.178.04-0ubuntu0.24.04.1`, so the
 retired `580.173.02` metapackage was not installable. This is a
 blocker-only pin correction, not a serving or methodology expansion.
+
+## 2026-09-18 — D-0019: Bounded agent-quality qualification (not another baseline)
+
+**MVL-F remains immutable and diagnostic-only.** Its infrastructure and
+serving measurements are valid for its exact pins. Its quality outcome
+was **3 / 1,800** successful tasks. That outcome **disqualifies MVL-F as
+the comparative reference**. Diagnosis passed **1,766 / 1,800**;
+remediation passed **29 / 1,800**. The dominant observed failure was
+**remediation selection**, not diagnosis. Raw MVL-F artifacts, staging
+packages, and ZIP files are not modified by this entry.
+
+**No evaluator weakening is authorized.** Evaluator **3.1.0**, its
+accepted answers, evidence gates, and `S_min = 1.0` quality threshold
+are unchanged. Observation schema is not extended with `finish_reason`
+or reasoning-token fields.
+
+**Decision.** The next authorized step is a **bounded agent-quality
+qualification**, not another baseline. Implementation is the
+credential-free `blackwell-cloud qualify-agent` command. Live execution
+still requires the exact digest-bearing approval phrase. This entry
+does not execute inference, provision resources, or publish results.
+
+Interactive latency wording is recorded in the correct order and is
+not reversed: **TTFT is compared with 2,500 ms**; **end-to-end task
+latency is compared with 60,000 ms**.
+
+### Two distinct quality levels
+
+These are **project-defined targets, not industry standards**.
+
+**A. Study-entry qualification gate.** Passing this gate only permits a
+configuration to enter comparative measurement. It is **not** called
+production-grade.
+
+- aggregate quality success ≥ 70%;
+- every scenario ≥ 40%;
+- valid native tool-call rate ≥ 99%;
+- invalid tool-name rate = 0;
+- invalid-argument rate ≤ 1%;
+- request/inference error rate ≤ 1%;
+- timeouts = 0;
+- interactive TTFT p95 ≤ 2,500 ms;
+- interactive end-to-end p95 ≤ 60,000 ms;
+- provenance and result verification pass.
+
+**B. Project-defined production-like target.** A measured configuration
+may fail this target without invalidating its measurement. The study
+must report that failure.
+
+- aggregate quality success ≥ 90%;
+- every scenario ≥ 80%;
+- the same structural, error, timeout, latency, provenance, and
+  integrity requirements as the study-entry gate.
+
+### Frozen qualification design
+
+The ten scenario templates are split **before any prompt wording
+change** by a deterministic SHA-256 / sort rule with fixed seed
+`blackwell-lab-agent-qualification-v1`. Templates are scored as
+`sha256("{seed}:{template_id}")` and sorted by hex digest, then
+template id. The first six are development; the last four are holdout.
+No template was hand-selected.
+
+**Development templates (6):**
+
+- `dns-failures-001`
+- `memory-pressure-001`
+- `failed-deployment-001`
+- `unhealthy-upstream-001`
+- `capacity-exhaustion-001`
+- `gpu-saturation-001`
+
+**Holdout templates (4):**
+
+- `rate-limiting-001`
+- `pod-failures-001`
+- `elevated-latency-001`
+- `storage-latency-001`
+
+Stages:
+
+1. **Development screen** — 20 tasks, interactive, concurrency 1.
+   Continue only at ≥ 40% aggregate quality.
+2. **Holdout screen** — 20 tasks drawn only from the frozen holdout
+   templates. Continue only at ≥ 50% aggregate quality. Holdout
+   results must never be used to revise candidate wording.
+3. **Freeze run** — all ten templates, 200 balanced tasks,
+   interactive, concurrency 1, one excluded warmup and one measured
+   repetition. Apply the full study-entry gate.
+
+### Workload 2.4.0 candidate and two frozen candidates
+
+Workload **2.4.0** is the qualification tool-contract correction. The
+scenario catalog, accepted diagnosis/remediation IDs, required
+evidence IDs, evaluator logic, and quality scoring remain the 2.3.0
+catalog / evaluator 3.1.0 identity. Valid remediation IDs are **not**
+placed in the task prompt. The generic system prompt and tool
+descriptions state the required workflow: inspect evidence; select a
+published diagnosis ID; infer the affected service or system; call
+`retrieve_runbook` with that key; select an exact remediation ID from
+`runbook.remediation_ids`; call `recommend_remediation` with that ID
+and an evidence-based rationale.
+
+Exactly two candidates are predeclared. No third candidate is
+authorized. Publishing remediation answers in the task prompt is not
+an authorized candidate.
+
+| Field | C1 | C2 |
+| --- | --- | --- |
+| Workload | 2.4.0 tool-contract correction | identical |
+| Model / revision / digest | existing MVL pins | identical |
+| vLLM / parsers / seed / reasoning | existing MVL pins | identical |
+| max tokens | interactive 1,024 | identical |
+| top_p | 0.95 | 0.95 |
+| temperature | 1.0 | **0.2** |
+
+C2 is used only if C1 fails the qualification gate. Serialized C1/C2
+identities differ only in candidate id, resulting config digest, and
+temperature.
+
+**Rationale.** Owner qualification-contract instruction of 2026-09-18.
+MVL-F cannot be the comparative reference after a 3 / 1,800 quality
+outcome driven by remediation selection. The correction is a bounded
+tool-contract qualification with frozen holdout templates and no
+evaluator weakening.

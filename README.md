@@ -19,14 +19,18 @@ to this repository.
 readiness) is **complete**. Phase 3B's D-0014 compatibility/headroom pilot
 is complete as a diagnostic. Decision **D-0017 authorizes implementation**
 of the Akamai **minimum valuable lab** (`blackwell-cloud mvl-baseline`):
-provider-native, three cells, existing frozen pins. It is sufficient for
-exploratory reporting and a first project article; it is **not** a complete
-controlled-resource or cross-cloud study. **Live MVL execution still
-requires** separate digest-bearing apply and `mvl-baseline` approval
-phrases. Phase 4 and later phases remain **unauthorized**
+provider-native, three cells, existing frozen pins. MVL-F is **diagnostic
+only** and is **not** the comparative reference (decision D-0019).
+Decision **D-0019 authorizes implementation** of the bounded
+agent-quality qualification (`blackwell-cloud qualify-agent`). **Live MVL
+and qualification execution still require** their separate digest-bearing
+approval phrases. Phase 4 and later phases remain **unauthorized**
 ([docs/roadmap.md](docs/roadmap.md)).
 
-- **No genuine benchmarks have been run yet.** No results exist.
+- **A genuine private diagnostic MVL-F run exists.** It remains external
+  to Git and is not approved for publication. No valid comparative
+  baseline has been accepted or published. No public benchmark findings
+  have been released.
 - **All current example files are synthetic** and clearly labeled as such.
 - **Pricing figures are preliminary, non-authoritative planning estimates**
   requiring account-level verification.
@@ -133,12 +137,13 @@ Offline readiness validation (no cloud access, no credentials):
 blackwell-cloud readiness
 ```
 
-The bounded Phase 3B pilot (`blackwell-cloud apply`, `pilot`, `destroy`)
-and the D-0017 `mvl-baseline` command run only in the owner's
-authenticated local environment and still require each command's separate
-exact approval phrase. Live MVL execution is not authorized by D-0017
-itself. See [infra/akamai/README.md](infra/akamai/README.md) and
-decisions D-0014 and D-0017.
+The bounded Phase 3B pilot (`blackwell-cloud apply`, `pilot`, `destroy`),
+the D-0017 `mvl-baseline` command, and the D-0019 `qualify-agent`
+command run only in the owner's authenticated local environment and still
+require each command's separate exact approval phrase. Live MVL and
+qualification execution are not authorized by the implementation
+decisions themselves. See [infra/akamai/README.md](infra/akamai/README.md)
+and decisions D-0014, D-0017, and D-0019.
 
 ## Project governance
 
@@ -167,7 +172,8 @@ and do not represent Akamai Technologies, AWS, Google Cloud, NVIDIA, or any
 other provider. Product and company names are the property of their respective
 owners. References do not imply sponsorship or endorsement.
 
-No benchmark findings exist or have been released. Nothing in this repository
-should be interpreted as a performance or superiority claim about any cloud
-provider, GPU, model, or serving stack, and no provider-superiority claim may
-ever exceed the evidence.
+No public benchmark findings have been released. The private diagnostic
+MVL-F findings remain external to Git and are not approved for publication.
+Nothing in this repository should be interpreted as a performance or
+superiority claim about any cloud provider, GPU, model, or serving stack,
+and no provider-superiority claim may ever exceed the evidence.

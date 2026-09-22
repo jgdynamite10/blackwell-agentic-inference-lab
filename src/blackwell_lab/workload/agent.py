@@ -231,18 +231,53 @@ def _completed_turn_record(
     )
 
 
-def _system_prompt(scenario: Scenario) -> str:
+SYSTEM_PROMPT_V230 = (
+    "You are a Cloud Operations Agent working a synthetic incident. "
+    "Diagnose the incident using only the provided tools, then submit "
+    f"exactly one recommendation via {TERMINAL_TOOL} with a diagnosis_id "
+    "chosen from the published candidate list, a short rationale, and a "
+    "remediation_id. Call exactly one tool per turn."
+)
+
+SYSTEM_PROMPT_V240 = " ".join(
+    [
+        "You are a Cloud Operations Agent working a synthetic incident.",
+        "Diagnose the incident using only the provided tools.",
+        "Call exactly one tool per turn.",
+        "Required workflow:",
+        "(1) inspect relevant metrics, changes, logs, and other evidence;",
+        "(2) select the exact diagnosis ID from the published diagnosis candidates;",
+        "(3) infer the affected service or system from the evidence;",
+        "(4) call retrieve_runbook using that service/system key;",
+        "(5) select an exact remediation ID returned in runbook.remediation_ids;",
+        "(6) call recommend_remediation with that exact ID and an evidence-based rationale.",
+        "When an incident may depend on log evidence, gather that evidence "
+        "with search_logs before recommending remediation.",
+        f"Submit exactly one recommendation via {TERMINAL_TOOL}.",
+    ]
+)
+
+SYSTEM_PROMPTS_BY_VERSION = {
+    "2.3.0": SYSTEM_PROMPT_V230,
+    "2.4.0": SYSTEM_PROMPT_V240,
+}
+
+
+def system_prompt(scenario: Scenario, workload_version: str | None = None) -> str:
+    """Scenario-independent system prompt for the executed workload contract.
+
+    Workload 2.3.0 keeps the pre-D-0019 wording. Workload 2.4.0 uses the
+    D-0019 tool-contract correction. Neither names accepted remediations.
+    """
+    from blackwell_lab.workload.native_tools import require_workload_version
+
     del scenario
-    return (
-        "You are a Cloud Operations Agent working a synthetic incident. "
-        "Diagnose the incident using only the provided tools, then submit "
-        f"exactly one recommendation via {TERMINAL_TOOL} with a diagnosis_id "
-        "chosen from the published candidate list, a short rationale, and a "
-        "remediation_id. Call exactly one tool per turn."
-    )
+    return SYSTEM_PROMPTS_BY_VERSION[require_workload_version(workload_version)]
 
 
-def _task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
+def task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
+    """User task prompt. Publishes diagnosis candidates only — never
+    remediation IDs (decision D-0019)."""
     candidates = "\n".join(f"- {d}" for d in scenario.candidate_diagnoses)
     surface = f"{instance.surface_variant_text()}\n" if instance is not None else ""
     return (
@@ -253,6 +288,14 @@ def _task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
         f"{scenario.description}\n\n"
         f"Candidate diagnosis ids (submit exactly one):\n{candidates}"
     )
+
+
+def _system_prompt(scenario: Scenario, workload_version: str | None = None) -> str:
+    return system_prompt(scenario, workload_version)
+
+
+def _task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
+    return task_prompt(scenario, instance)
 
 
 def run_task(
@@ -275,6 +318,9 @@ def run_task(
     queue wait consumes timeout budget. All durations are monotonic-clock
     deltas; wall-clock UTC timestamps are recorded for correlation only.
     """
+    from blackwell_lab.workload.native_tools import require_workload_version
+
+    executed_version = require_workload_version(settings.workload_version)
     started_at = clock.monotonic()
     submitted = submitted_at if submitted_at is not None else started_at
     execution = TaskExecution(
@@ -289,7 +335,7 @@ def run_task(
     deadline = submitted + timeout_s
 
     messages: list[Message] = [
-        Message("system", _system_prompt(scenario)),
+        Message("system", _system_prompt(scenario, executed_version)),
         Message("user", _task_prompt(scenario, instance)),
     ]
 

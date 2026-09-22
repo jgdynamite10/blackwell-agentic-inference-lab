@@ -228,18 +228,20 @@ Phase 3A implemented the **readiness** layer: Terraform under
 `infra/akamai/bootstrap/`, and the `blackwell-cloud` CLI
 (`src/blackwell_lab/cloud/`). Decision D-0017 authorizes
 `blackwell-cloud mvl-baseline` (provider-native, three cells) on the
-existing pilot and `run_real_cell` paths. Every billable or destructive
-action still requires its separate exact local owner approval phrase and
-refuses to execute in hosted/CI environments. Live MVL apply is not
-authorized by D-0017 itself. There is **no frontend application** — the
-entire workflow is CLI-first.
+existing pilot and `run_real_cell` paths. Decision D-0019 adds
+`blackwell-cloud qualify-agent` on those same paths for a bounded
+agent-quality qualification; it makes no infrastructure changes.
+Every billable or destructive action still requires its separate exact
+local owner approval phrase and refuses to execute in hosted/CI
+environments. Live MVL apply is not authorized by D-0017 itself. There
+is **no frontend application** — the entire workflow is CLI-first.
 
 ### Deployment view (single Akamai GPU instance)
 
 ```mermaid
 flowchart TB
     subgraph operator["Owner's authenticated local environment (never the hosted Cloud Agent)"]
-        cli["blackwell-cloud CLI<br/>readiness / plan / apply (gated) /<br/>pilot (gated) / mvl-baseline (gated) /<br/>verify-results / teardown-plan /<br/>destroy (gated) / orphan-report"]
+        cli["blackwell-cloud CLI<br/>readiness / plan / apply (gated) /<br/>pilot (gated) / mvl-baseline (gated) /<br/>qualify-agent (gated) / verify-results /<br/>teardown-plan / destroy (gated) / orphan-report"]
         tf["Terraform (pinned CLI + linode provider 4.1.0)<br/>state + tfvars OUTSIDE Git"]
         preflight["Authenticated read-only preflight<br/>plan entitlement, regions, price<br/>(sanitized output; local only)"]
     end

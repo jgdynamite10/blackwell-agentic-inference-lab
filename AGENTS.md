@@ -123,12 +123,14 @@ explicitly revises them in writing.
    **Phase 3B D-0014 pilot is complete as a diagnostic.** Decision **D-0017
    authorizes implementation** of the Akamai **minimum valuable lab**
    (`blackwell-cloud mvl-baseline`): provider-native, three cells, native
-   tool transport, existing pins. This is an initial Akamai baseline for
-   exploratory reporting — not a complete controlled-resource or cross-cloud
-   study. **Live MVL execution still requires** separate digest-bearing apply
-   and `mvl-baseline` approval phrases. The D-0014 six-hour / $25 pilot
-   envelope remains separately named. **Phase 4 and later phases remain
-   unauthorized.** Actual apply, pilot, mvl-baseline, and destroy commands
+   tool transport, existing pins. MVL-F is **immutable and diagnostic-only**
+   and is **not** the comparative reference (decision D-0019). Decision
+   **D-0019 authorizes implementation** of the bounded agent-quality
+   qualification (`blackwell-cloud qualify-agent`). **Live MVL and
+   qualification execution still require** their separate digest-bearing
+   approval phrases. The D-0014 six-hour / $25 pilot envelope remains
+   separately named. **Phase 4 and later phases remain unauthorized.**
+   Actual apply, pilot, mvl-baseline, qualify-agent, and destroy commands
    still require their separate exact local approval phrases.
 
 ## 8. Repository hygiene
