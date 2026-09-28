@@ -57,6 +57,8 @@ class _Registry:
 
 
 _REGISTRY = _Registry()
+_DISCOVERY_DONE = False
+_LOADED_COMPONENT_MODULES: tuple[str, ...] = ()
 
 
 def register_engine_profile(profile: EngineProfile) -> None:
@@ -74,6 +76,7 @@ def list_profiles() -> tuple[EngineProfile, ...]:
 
 def evaluate_engine_contract(declaration: EngineContractDeclaration) -> EngineReadiness:
     """Evaluate a declaration against registered profiles. No match is blocked."""
+    load_registered_components()
     if declaration.profile_id:
         profile = get_profile(declaration.profile_id)
         if not profile.matches(declaration):
@@ -123,24 +126,38 @@ def load_registered_components() -> tuple[str, ...]:
 
     Component agents add a module in that package and call
     :func:`register_engine_profile` at import time. The core never lists
-    those modules.
+    those modules. Idempotent in one process; after :func:`reset_registry`
+    already-imported modules are reloaded so registration runs again.
     """
+    global _DISCOVERY_DONE, _LOADED_COMPONENT_MODULES
+    if _DISCOVERY_DONE:
+        return _LOADED_COMPONENT_MODULES
+
     import importlib
     import pkgutil
+    import sys
 
     from blackwell_lab.engines import components
 
     loaded: list[str] = []
     for module_info in pkgutil.iter_modules(components.__path__, components.__name__ + "."):
-        importlib.import_module(module_info.name)
+        existing = sys.modules.get(module_info.name)
+        if existing is not None:
+            importlib.reload(existing)
+        else:
+            importlib.import_module(module_info.name)
         loaded.append(module_info.name)
-    return tuple(loaded)
+    _LOADED_COMPONENT_MODULES = tuple(loaded)
+    _DISCOVERY_DONE = True
+    return _LOADED_COMPONENT_MODULES
 
 
 def reset_registry(profiles: Iterable[EngineProfile] | None = None) -> None:
     """Replace the registry. Tests restore the builtin profile after extras."""
-    global _REGISTRY
+    global _REGISTRY, _DISCOVERY_DONE, _LOADED_COMPONENT_MODULES
     _REGISTRY = _Registry()
+    _DISCOVERY_DONE = False
+    _LOADED_COMPONENT_MODULES = ()
     if profiles is None:
         from blackwell_lab.engines.builtin import builtin_profiles
 

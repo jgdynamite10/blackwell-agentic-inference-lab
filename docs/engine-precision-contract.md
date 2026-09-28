@@ -44,12 +44,16 @@ Evaluation returns exactly one of:
 | Status | Meaning |
 | --- | --- |
 | `ready` | A registered profile matches and required entitlements are satisfied |
-| `conditional` | A registered profile matches with stated conditions; inference is not blocked by this contract |
+| `conditional` | A registered profile matches, but unresolved conditions remain; genuine inference is refused |
 | `blocked` | Missing support, unknown profile, entitlement failure, or no matching profile |
 
-`require_supported_contract` raises `EngineContractError` only when the
-status is `blocked`. Conditional declarations may proceed so a later
-component can finish its own checks. No profile match is blocked.
+`require_ready_contract` is the genuine execution gate. It raises
+`EngineContractError` unless status is `ready`. Conditional remains a
+classification only: it must not reach client construction, inference,
+measurement, or result creation. `require_supported_contract` is the
+same gate so older callers cannot treat conditional as executable. The
+offline CLI still prints the exact classification and returns nonzero
+for both `conditional` and `blocked`. No profile match is blocked.
 
 ## Builtin authorized profile
 
@@ -69,11 +73,14 @@ blocked until a component module registers a matching profile.
 
 ## Fail-closed provenance
 
-Shared genuine-run paths call the contract before a client is used:
+Shared genuine-run paths call `require_ready_contract` before a client
+is used:
 
 - `RealRunSpec` validation calls `require_real_spec_contract`.
 - Live provenance appends an `EngineContractError` as a mismatch and
   refuses the cell.
+- Component modules under `engines.components` are discovered on this
+  evaluation path; the offline CLI is not required first.
 
 Existing vLLM BF16 manifests that omit `serving.topology` and
 `serving.engine_profile_id` remain schema-valid. New genuine gpu-mode
@@ -91,10 +98,16 @@ module under `src/blackwell_lab/engines/components/` and calling
 2. Place the module in `engines/components/` so
    `load_registered_components()` discovers it with `pkgutil`. The core
    never names those modules.
-3. Return `ready`, `conditional`, or `blocked`. Do not download artifacts,
+3. Return `ready`, `conditional`, or `blocked`. Non-builtin components
+   must remain `conditional` or `blocked` until their exact runtime,
+   entitlement, and live checks are completed. Do not download artifacts,
    call a provider API, or add a launch command in this phase.
 4. Keep existing vLLM BF16, C1/C2, workload 2.4.0, evaluator 3.1.0,
    thresholds, lifecycle, Terraform, and publication policy unchanged.
+
+The public evidence-track register is
+[component-readiness.md](component-readiness.md). Those rows are
+documentation classifications, not benchmark findings.
 
 The offline CLI is:
 

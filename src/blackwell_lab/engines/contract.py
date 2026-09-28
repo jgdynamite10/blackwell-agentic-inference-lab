@@ -127,6 +127,20 @@ class ImmutableIdentity:
         }
 
 
+def _require_bool(name: str, value: object) -> bool:
+    if not isinstance(value, bool):
+        raise EngineContractError(f"{name} must be a boolean")
+    return value
+
+
+def _require_optional_bool(name: str, value: object) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise EngineContractError(f"{name} must be true, false, or null")
+    return value
+
+
 @dataclass(frozen=True)
 class EntitlementPrerequisite:
     """A capability or license gate. Required unknowns fail closed."""
@@ -138,6 +152,12 @@ class EntitlementPrerequisite:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", _require_text("entitlement.name", self.name))
+        object.__setattr__(self, "required", _require_bool("entitlement.required", self.required))
+        object.__setattr__(
+            self, "satisfied", _require_optional_bool("entitlement.satisfied", self.satisfied)
+        )
+        if not isinstance(self.detail, str):
+            raise EngineContractError("entitlement.detail must be a string")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -218,19 +238,13 @@ def declaration_from_mapping(payload: MappingLike) -> EngineContractDeclaration:
     identity_raw = payload.get("identity")
     if not isinstance(identity_raw, dict):
         raise EngineContractError("immutable identity is required")
-    entitlements_raw = payload.get("entitlements") or []
-    if not isinstance(entitlements_raw, list):
-        raise EngineContractError("entitlements must be a list")
-    entitlements = tuple(
-        EntitlementPrerequisite(
-            name=str(item.get("name", "")),
-            required=bool(item.get("required", True)),
-            satisfied=item.get("satisfied"),
-            detail=str(item.get("detail") or ""),
-        )
-        for item in entitlements_raw
-        if isinstance(item, dict)
-    )
+    if "entitlements" not in payload:
+        entitlements_raw: list[Any] = []
+    else:
+        entitlements_raw = payload["entitlements"]
+        if not isinstance(entitlements_raw, list):
+            raise EngineContractError("entitlements must be a list")
+    entitlements = tuple(_entitlement_from_mapping(item) for item in entitlements_raw)
     return EngineContractDeclaration(
         engine=str(payload.get("engine") or ""),
         precision=str(payload.get("precision") or ""),
@@ -251,6 +265,21 @@ def declaration_from_mapping(payload: MappingLike) -> EngineContractDeclaration:
     )
 
 
+def _entitlement_from_mapping(item: object) -> EntitlementPrerequisite:
+    if not isinstance(item, dict):
+        raise EngineContractError("entitlement must be an object")
+    if "required" not in item:
+        raise EngineContractError("entitlement.required is required")
+    if "detail" in item and not isinstance(item["detail"], str):
+        raise EngineContractError("entitlement.detail must be a string")
+    return EntitlementPrerequisite(
+        name=item.get("name"),
+        required=item.get("required"),
+        satisfied=item.get("satisfied"),
+        detail=item["detail"] if "detail" in item else "",
+    )
+
+
 def entitlement_blockers(entitlements: tuple[EntitlementPrerequisite, ...]) -> tuple[str, ...]:
     """Required entitlements that are unsatisfied or unknown fail closed."""
     blockers: list[str] = []
@@ -266,12 +295,22 @@ def entitlement_blockers(entitlements: tuple[EntitlementPrerequisite, ...]) -> t
     return tuple(blockers)
 
 
+def require_ready_contract(readiness: EngineReadiness) -> EngineReadiness:
+    """Genuine execution gate. Only ``ready`` may reach inference."""
+    if readiness.status == READINESS_READY:
+        return readiness
+    if readiness.status == READINESS_CONDITIONAL:
+        reason = readiness.reasons[0] if readiness.reasons else "unresolved conditions remain"
+        raise EngineContractError(
+            "conditional engine contract is not authorized for genuine inference: " + reason
+        )
+    reason = readiness.reasons[0] if readiness.reasons else "unsupported engine contract"
+    raise EngineContractError(reason)
+
+
 def require_supported_contract(readiness: EngineReadiness) -> EngineReadiness:
-    """Fail closed before inference when the combination is blocked."""
-    if readiness.status == READINESS_BLOCKED:
-        reason = readiness.reasons[0] if readiness.reasons else "unsupported engine contract"
-        raise EngineContractError(reason)
-    return readiness
+    """Fail closed unless the contract is ready for genuine execution."""
+    return require_ready_contract(readiness)
 
 
 MappingLike = dict[str, Any]

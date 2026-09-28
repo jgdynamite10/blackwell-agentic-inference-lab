@@ -65,6 +65,19 @@ def test_example_engine_contract_validates():
     validate_engine_contract(load_json(EXAMPLE_ENGINE_CONTRACT))
 
 
+def test_engine_contract_schema_rejects_malformed_entitlements():
+    payload = load_json(EXAMPLE_ENGINE_CONTRACT)
+    payload["entitlements"] = [{"name": "ngc", "required": "yes"}]
+    with pytest.raises(jsonschema.ValidationError):
+        validate_engine_contract(payload)
+    payload["entitlements"] = ["not-an-object"]
+    with pytest.raises(jsonschema.ValidationError):
+        validate_engine_contract(payload)
+    payload["entitlements"] = [{"name": "ngc", "required": True, "satisfied": "yes"}]
+    with pytest.raises(jsonschema.ValidationError):
+        validate_engine_contract(payload)
+
+
 def test_examples_are_labeled_synthetic():
     for path in (EXAMPLE_MANIFEST, EXAMPLE_RESULT):
         document = load_json(path)

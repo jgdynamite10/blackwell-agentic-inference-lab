@@ -12,7 +12,7 @@ from blackwell_lab.engines.contract import (
     EngineContractError,
     ImmutableIdentity,
     TopologyDeclaration,
-    require_supported_contract,
+    require_ready_contract,
 )
 from blackwell_lab.engines.registry import evaluate_engine_contract
 
@@ -92,8 +92,8 @@ def declaration_from_approved(
 
 
 def require_real_spec_contract(spec: Any):
-    """Fail closed before a genuine cell if the spec is unsupported."""
-    return require_supported_contract(evaluate_engine_contract(declaration_from_real_spec(spec)))
+    """Fail closed before a genuine cell unless the contract is ready."""
+    return require_ready_contract(evaluate_engine_contract(declaration_from_real_spec(spec)))
 
 
 def require_approved_contract(
@@ -104,7 +104,7 @@ def require_approved_contract(
     observed_container_digest: str | None = None,
     observed_model_hash: str | None = None,
 ):
-    """Fail closed during provenance if the observed combination is blocked."""
+    """Fail closed during provenance unless the observed combination is ready."""
     declaration = declaration_from_approved(
         approved,
         gpu_count=gpu_count,
@@ -112,4 +112,4 @@ def require_approved_contract(
         observed_container_digest=observed_container_digest,
         observed_model_hash=observed_model_hash,
     )
-    return require_supported_contract(evaluate_engine_contract(declaration))
+    return require_ready_contract(evaluate_engine_contract(declaration))

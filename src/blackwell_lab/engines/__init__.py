@@ -21,6 +21,7 @@ from blackwell_lab.engines.contract import (
     ImmutableIdentity,
     TopologyDeclaration,
     declaration_from_mapping,
+    require_ready_contract,
     require_supported_contract,
 )
 from blackwell_lab.engines.registry import (
@@ -55,6 +56,7 @@ __all__ = [
     "list_profiles",
     "load_registered_components",
     "register_engine_profile",
+    "require_ready_contract",
     "require_supported_contract",
     "reset_registry",
 ]

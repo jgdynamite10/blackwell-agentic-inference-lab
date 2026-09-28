@@ -940,8 +940,11 @@ container identity (artifact, 40-hex revision, algorithm:hex hash,
 `repo@sha256:` digest, exact engine version). Floating labels such as
 `latest` fail closed. Required entitlements that are unknown or false
 fail closed. Evaluation returns `ready`, `conditional`, or `blocked`.
-`require_supported_contract` refuses only `blocked` combinations, and
-does so before a serving client is used.
+`require_ready_contract` is the genuine execution gate and refuses both
+`conditional` and `blocked` before a serving client is used.
+`require_supported_contract` is the same gate. The offline CLI still
+reports the exact classification and returns nonzero for conditional
+and blocked so automation cannot treat conditional as ready.
 
 The core registers one builtin profile: `vllm-bf16-single-gpu`. Other
 known engines and precisions (`tensorrt-llm`, `nim`, `nvfp4`, `fp8`,
@@ -966,3 +969,14 @@ Phase 4 comparisons need a shared fail-closed surface before any
 component implements TensorRT-LLM, NIM, NVFP4, or multi-GPU / multi-node
 launch paths. Recording the contract first prevents later modules from
 editing each other or weakening existing vLLM BF16 provenance.
+
+### 2026-09-28 correction — genuine gates require ready
+
+Review found that `require_supported_contract` originally allowed
+`conditional` to proceed. That wording is withdrawn before any Phase 4
+result exists. Conditional remains a classification for recognized but
+unresolved paths. Genuine `RealRunSpec` validation, live provenance, and
+manifest assembly now require `ready`. Component discovery runs on that
+evaluation path, not only in the offline CLI. Entitlement parsing
+rejects malformed members instead of coercing them. The public register
+is [component-readiness.md](component-readiness.md).

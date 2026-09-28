@@ -151,6 +151,7 @@ qualification, and Phase 4 engine/precision execution are not authorized
 by the implementation decisions themselves. See
 [infra/akamai/README.md](infra/akamai/README.md),
 [docs/engine-precision-contract.md](docs/engine-precision-contract.md),
+[docs/component-readiness.md](docs/component-readiness.md),
 and decisions D-0014, D-0017, D-0019, and D-0020.
 
 ## Project governance

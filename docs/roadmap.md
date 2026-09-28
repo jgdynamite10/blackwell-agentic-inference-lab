@@ -119,10 +119,13 @@ single-GPU / multi-GPU / multi-node topology, exact-version validation,
 entitlement prerequisites, fail-closed provenance, and
 ready / conditional / blocked readiness. Later component modules register
 through `register_engine_profile` and must not edit the core contract or
-each other. No launch command, model download, container pull, or live
-engine/precision cell is authorized by D-0020. Existing vLLM BF16
-single-GPU behavior, C1/C2, workload 2.4.0, evaluator 3.1.0, thresholds,
-lifecycle, Terraform, and publication policy are unchanged.
+each other. Genuine execution requires status `ready`; conditional does
+not authorize inference. The public evidence-track register is
+[component-readiness.md](component-readiness.md). No launch command,
+model download, container pull, or live engine/precision cell is
+authorized by D-0020. Existing vLLM BF16 single-GPU behavior, C1/C2,
+workload 2.4.0, evaluator 3.1.0, thresholds, lifecycle, Terraform, and
+publication policy are unchanged.
 
 ## Phase 5 — Google Cloud portability
 

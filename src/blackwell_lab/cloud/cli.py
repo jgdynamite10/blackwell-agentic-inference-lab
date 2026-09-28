@@ -297,7 +297,7 @@ def cmd_engine_contract(args: argparse.Namespace) -> int:
         evaluate_engine_contract,
         list_profiles,
         load_registered_components,
-        require_supported_contract,
+        require_ready_contract,
     )
 
     load_registered_components()
@@ -323,7 +323,7 @@ def cmd_engine_contract(args: argparse.Namespace) -> int:
     declaration = declaration_from_mapping(payload)
     readiness = evaluate_engine_contract(declaration)
     print(json.dumps({"readiness": readiness.as_dict(), "profiles": profiles}, indent=2))
-    require_supported_contract(readiness)
+    require_ready_contract(readiness)
     return 0
 
 

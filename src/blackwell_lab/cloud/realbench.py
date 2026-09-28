@@ -256,9 +256,10 @@ def build_real_manifest(
     serving["tool_call_parser"] = TOOL_CALL_PARSER
     serving["reasoning_parser"] = REASONING_PARSER
     from blackwell_lab.engines.adapters import declaration_from_real_spec
+    from blackwell_lab.engines.contract import require_ready_contract
     from blackwell_lab.engines.registry import evaluate_engine_contract
 
-    readiness = evaluate_engine_contract(declaration_from_real_spec(spec))
+    readiness = require_ready_contract(evaluate_engine_contract(declaration_from_real_spec(spec)))
     serving["topology"] = {
         "kind": readiness.declaration.topology.kind,
         "gpu_count": readiness.declaration.topology.gpu_count,

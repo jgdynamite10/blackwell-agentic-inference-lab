@@ -17,6 +17,7 @@ from blackwell_lab.engines import (
     READINESS_READY,
     EngineContractError,
     EngineReadiness,
+    EntitlementPrerequisite,
     ImmutableIdentity,
     TopologyDeclaration,
     declaration_from_mapping,
@@ -24,6 +25,7 @@ from blackwell_lab.engines import (
     get_profile,
     list_profiles,
     register_engine_profile,
+    require_ready_contract,
     require_supported_contract,
     reset_registry,
 )
@@ -189,7 +191,10 @@ class TestComponentRegistration:
         readiness = evaluate_engine_contract(declaration)
         assert readiness.status == READINESS_CONDITIONAL
         assert readiness.profile_id == "test-only-nim-bf16-single-gpu"
-        require_supported_contract(readiness)
+        with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
+            require_ready_contract(readiness)
+        with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
+            require_supported_contract(readiness)
         core = Path(__file__).resolve().parents[1] / "src" / "blackwell_lab" / "engines"
         for path in core.glob("*.py"):
             text = path.read_text(encoding="utf-8")
@@ -213,6 +218,102 @@ class TestComponentRegistration:
         assert "ngc-entitlement" in readiness.reasons[0]
 
 
+class TestEntitlementFailClosed:
+    def test_non_object_entitlement_is_rejected(self):
+        with pytest.raises(EngineContractError, match="entitlement must be an object"):
+            declaration_from_mapping(_declaration(entitlements=["ngc"]))
+
+    def test_missing_or_blank_name_is_rejected(self):
+        with pytest.raises(EngineContractError, match=r"entitlement\.name"):
+            declaration_from_mapping(
+                _declaration(entitlements=[{"required": True, "satisfied": True}])
+            )
+        with pytest.raises(EngineContractError, match=r"entitlement\.name"):
+            declaration_from_mapping(
+                _declaration(entitlements=[{"name": "   ", "required": True, "satisfied": True}])
+            )
+
+    def test_required_must_be_a_boolean(self):
+        with pytest.raises(EngineContractError, match=r"entitlement\.required"):
+            declaration_from_mapping(
+                _declaration(entitlements=[{"name": "ngc", "required": 1, "satisfied": True}])
+            )
+        with pytest.raises(EngineContractError, match=r"entitlement\.required"):
+            EntitlementPrerequisite(name="ngc", required=1, satisfied=True)
+
+    def test_satisfied_must_be_true_false_or_null(self):
+        with pytest.raises(EngineContractError, match=r"entitlement\.satisfied"):
+            declaration_from_mapping(
+                _declaration(entitlements=[{"name": "ngc", "required": True, "satisfied": "yes"}])
+            )
+        with pytest.raises(EngineContractError, match=r"entitlement\.satisfied"):
+            EntitlementPrerequisite(name="ngc", required=True, satisfied="yes")
+
+    def test_malformed_detail_is_rejected(self):
+        with pytest.raises(EngineContractError, match=r"entitlement\.detail"):
+            declaration_from_mapping(
+                _declaration(
+                    entitlements=[
+                        {
+                            "name": "ngc",
+                            "required": True,
+                            "satisfied": True,
+                            "detail": {"nested": True},
+                        }
+                    ]
+                )
+            )
+        with pytest.raises(EngineContractError, match=r"entitlement\.detail"):
+            EntitlementPrerequisite(
+                name="ngc", required=False, satisfied=False, detail={"nested": True}
+            )
+
+    def test_required_true_and_satisfied_true_is_permitted(self):
+        readiness = evaluate_engine_contract(
+            declaration_from_mapping(
+                _declaration(entitlements=[{"name": "ngc", "required": True, "satisfied": True}])
+            )
+        )
+        assert readiness.status == READINESS_READY
+        require_ready_contract(readiness)
+
+    def test_optional_false_or_null_does_not_block(self):
+        for satisfied in (False, None):
+            readiness = evaluate_engine_contract(
+                declaration_from_mapping(
+                    _declaration(
+                        entitlements=[
+                            {"name": "optional-cap", "required": False, "satisfied": satisfied}
+                        ]
+                    )
+                )
+            )
+            assert readiness.status == READINESS_READY
+
+    def test_required_false_or_null_is_blocked(self):
+        for satisfied in (False, None):
+            readiness = evaluate_engine_contract(
+                declaration_from_mapping(
+                    _declaration(
+                        entitlements=[{"name": "ngc", "required": True, "satisfied": satisfied}]
+                    )
+                )
+            )
+            assert readiness.status == READINESS_BLOCKED
+
+    def test_schema_rejects_malformed_entitlements(self):
+        payload = json.loads(EXAMPLE_CONTRACT.read_text(encoding="utf-8"))
+        payload["entitlements"] = [{"name": "ngc", "required": "yes"}]
+        with pytest.raises(jsonschema.ValidationError):
+            validate_engine_contract(payload)
+        payload["entitlements"] = ["not-an-object"]
+        with pytest.raises(jsonschema.ValidationError):
+            validate_engine_contract(payload)
+        payload["entitlements"] = [{"name": "ngc", "required": True, "satisfied": "yes"}]
+        with pytest.raises(jsonschema.ValidationError):
+            validate_engine_contract(payload)
+
+
 class TestCliAndSchema:
     def test_cli_lists_profiles_and_validates_the_example(self, capsys):
         assert main(["engine-contract", "--list"]) == 0
@@ -233,6 +334,33 @@ class TestCliAndSchema:
         assert report["readiness"]["status"] == READINESS_BLOCKED
         assert "unsupported" in captured.err
 
+    def test_cli_reports_conditional_and_returns_nonzero(self, tmp_path, capsys):
+        class _ExternalNimProfile:
+            profile_id = "test-only-nim-bf16-single-gpu"
+            engine = "nim"
+            precision = "bf16"
+            topologies = frozenset({"single-gpu"})
+
+            def matches(self, declaration):
+                return declaration.engine == "nim" and declaration.precision == "bf16"
+
+            def evaluate(self, declaration):
+                return EngineReadiness(
+                    status=READINESS_CONDITIONAL,
+                    profile_id=self.profile_id,
+                    reasons=("unresolved NIM entitlement",),
+                    declaration=declaration,
+                )
+
+        register_engine_profile(_ExternalNimProfile())
+        path = tmp_path / "conditional.json"
+        path.write_text(json.dumps(_declaration(engine="nim")), encoding="utf-8")
+        assert main(["engine-contract", "--config", str(path)]) == 2
+        captured = capsys.readouterr()
+        report = json.loads(captured.out)
+        assert report["readiness"]["status"] == READINESS_CONDITIONAL
+        assert "conditional" in captured.err
+
     def test_schema_rejects_a_mutable_identity(self):
         payload = json.loads(EXAMPLE_CONTRACT.read_text(encoding="utf-8"))
         payload["identity"]["container_digest"] = "docker.io/example/vllm:latest"
@@ -252,3 +380,75 @@ class TestCliAndSchema:
                 container_digest="docker.io/vllm/vllm-openai@sha256:" + "cd" * 32,
                 engine_version="0.27.1",
             )
+
+
+class TestFreshProcessComponentDiscovery:
+    def test_evaluate_discovers_a_component_without_invoking_the_cli(self):
+        import sys
+
+        from blackwell_lab.cloud.realbench import RealRunSpec
+        from blackwell_lab.engines.adapters import require_real_spec_contract
+
+        components = ROOT / "src" / "blackwell_lab" / "engines" / "components"
+        module_path = components / "_tmp_discoverable_profile.py"
+        module_name = "blackwell_lab.engines.components._tmp_discoverable_profile"
+        source = """
+from blackwell_lab.engines.contract import EngineReadiness, READINESS_CONDITIONAL
+from blackwell_lab.engines.registry import register_engine_profile
+
+class _DiscoverableNimProfile:
+    profile_id = "tmp-discoverable-nim-bf16-single-gpu"
+    engine = "nim"
+    precision = "bf16"
+    topologies = frozenset({"single-gpu"})
+
+    def matches(self, declaration):
+        return declaration.engine == self.engine and declaration.precision == self.precision
+
+    def evaluate(self, declaration):
+        return EngineReadiness(
+            status=READINESS_CONDITIONAL,
+            profile_id=self.profile_id,
+            reasons=("discovered without the offline CLI",),
+            declaration=declaration,
+        )
+
+register_engine_profile(_DiscoverableNimProfile())
+"""
+        try:
+            module_path.write_text(source, encoding="utf-8")
+            reset_registry()
+            assert all(
+                profile.profile_id != "tmp-discoverable-nim-bf16-single-gpu"
+                for profile in list_profiles()
+            )
+            spec = RealRunSpec(
+                profile_name="interactive",
+                concurrency=1,
+                comparison_mode="provider-native",
+                instance_type="g9-fake-gpu-plan",
+                region="us-fake-1",
+                list_price_usd_per_hour=2.5,
+                price_source_date="2026-09-06",
+                model={
+                    "artifact": VALID_IDENTITY["model_artifact"],
+                    "revision": VALID_IDENTITY["model_revision"],
+                    "artifact_hash": VALID_IDENTITY["model_artifact_hash"],
+                    "precision": "bf16",
+                },
+                engine="nim",
+                engine_version="1.0.0",
+                container_digest=VALID_IDENTITY["container_digest"],
+            )
+            with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
+                require_real_spec_contract(spec)
+            assert get_profile("tmp-discoverable-nim-bf16-single-gpu").engine == "nim"
+            core = ROOT / "src" / "blackwell_lab" / "engines"
+            for path in core.glob("*.py"):
+                assert "tmp-discoverable-nim-bf16-single-gpu" not in path.read_text(
+                    encoding="utf-8"
+                )
+        finally:
+            module_path.unlink(missing_ok=True)
+            sys.modules.pop(module_name, None)
+            reset_registry()
