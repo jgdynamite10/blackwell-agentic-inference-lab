@@ -169,6 +169,30 @@
         "reasoning_parser": {
           "type": "string",
           "description": "vLLM --reasoning-parser identity (nemotron_v3 for Nemotron 3.5 Lightning / vLLM 0.27.1)."
+        },
+        "engine_profile_id": {
+          "type": "string",
+          "description": "Optional registered engine-profile identifier. Existing vLLM BF16 manifests omit this field and remain valid."
+        },
+        "topology": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "gpu_count", "node_count"],
+          "description": "Optional declared accelerator topology. Existing vLLM BF16 manifests omit this field and remain valid.",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["single-gpu", "multi-gpu", "multi-node"]
+            },
+            "gpu_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "node_count": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       }
     },

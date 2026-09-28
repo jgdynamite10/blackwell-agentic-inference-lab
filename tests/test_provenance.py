@@ -79,11 +79,17 @@ def make_approved(artifact_hash: str) -> dict:
             "engine_version": ENGINE_VERSION,
             "container_cuda_runtime_version": CONTAINER_CUDA,
         },
-        "model": {"artifact_hash": artifact_hash},
+        "model": {
+            "artifact": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifact_hash": artifact_hash,
+            "precision": "bf16",
+        },
         "cloud": {"instance_type": INSTANCE_TYPE, "region": REGION},
         "host": {
             "storage_description": "local NVMe",
             "network_description": "private VLAN",
+            "gpu_count": 1,
         },
         "expected_gpu_model": "RTX 6000 Blackwell",
     }
@@ -238,6 +244,42 @@ class TestObservedFactsAreReturned:
         )
         assert observed.container_digest == observed_inspect
         assert observed.container_digest != FROZEN_CONTAINER_DIGEST
+
+    def test_conditional_contract_refuses_the_cell(self, model_dir):
+        from blackwell_lab.engines import (
+            READINESS_CONDITIONAL,
+            EngineReadiness,
+            register_engine_profile,
+            reset_registry,
+        )
+
+        class _ConditionalNimProfile:
+            profile_id = "test-only-nim-bf16-single-gpu"
+            engine = "nim"
+            precision = "bf16"
+            topologies = frozenset({"single-gpu"})
+
+            def matches(self, declaration):
+                return declaration.engine == "nim" and declaration.precision == "bf16"
+
+            def evaluate(self, declaration):
+                return EngineReadiness(
+                    status=READINESS_CONDITIONAL,
+                    profile_id=self.profile_id,
+                    reasons=("unresolved NIM entitlement",),
+                    declaration=declaration,
+                )
+
+        _, _, artifact_hash = model_dir
+        approved = make_approved(artifact_hash)
+        approved["serving"]["engine"] = "nim"
+        reset_registry()
+        register_engine_profile(_ConditionalNimProfile())
+        try:
+            with pytest.raises(ProvenanceError, match="not authorized for genuine inference"):
+                run_verify(model_dir, approved=approved)
+        finally:
+            reset_registry()
 
 
 class TestFabricatedFactsFailVisibly:

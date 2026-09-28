@@ -1,0 +1,18 @@
+{
+  "contract_version": "1.0.0",
+  "engine": "vllm",
+  "precision": "bf16",
+  "topology": {
+    "kind": "single-gpu",
+    "gpu_count": 1,
+    "node_count": 1
+  },
+  "identity": {
+    "model_artifact": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    "model_revision": "0000000000000000000000000000000000000000",
+    "model_artifact_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "container_digest": "docker.io/example/vllm@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "engine_version": "0.27.1"
+  },
+  "entitlements": []
+}

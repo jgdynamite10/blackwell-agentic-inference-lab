@@ -170,6 +170,78 @@ class TestSpecValidation:
                 sampler_factory=FakeSampler,
             )
 
+    def test_unsupported_engine_is_rejected_before_a_client_is_used(self):
+        with pytest.raises(ConfigError, match="unsupported"):
+            run_real_cell(
+                make_spec(engine="nim"),
+                UsageMockClient(),
+                host=HOST,
+                sampler_factory=FakeSampler,
+            )
+
+    def test_existing_vllm_bf16_spec_satisfies_the_engine_contract(self):
+        from blackwell_lab.engines import READINESS_READY
+        from blackwell_lab.engines.adapters import (
+            declaration_from_real_spec,
+            require_real_spec_contract,
+        )
+
+        spec = make_spec()
+        readiness = require_real_spec_contract(spec)
+        assert readiness.status == READINESS_READY
+        assert declaration_from_real_spec(spec).engine == "vllm"
+        assert declaration_from_real_spec(spec).precision == "bf16"
+
+    def test_conditional_nim_never_reaches_the_model_client(self):
+        from blackwell_lab.engines import (
+            READINESS_CONDITIONAL,
+            EngineContractError,
+            EngineReadiness,
+            register_engine_profile,
+            reset_registry,
+        )
+
+        class _ConditionalNimProfile:
+            profile_id = "test-only-nim-bf16-single-gpu"
+            engine = "nim"
+            precision = "bf16"
+            topologies = frozenset({"single-gpu"})
+
+            def matches(self, declaration):
+                return declaration.engine == "nim" and declaration.precision == "bf16"
+
+            def evaluate(self, declaration):
+                return EngineReadiness(
+                    status=READINESS_CONDITIONAL,
+                    profile_id=self.profile_id,
+                    reasons=("unresolved NIM entitlement",),
+                    declaration=declaration,
+                )
+
+        class _SpyClient(UsageMockClient):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            def stream_turn(self, messages, settings, *, deadline=None, clock=SYSTEM_CLOCK):
+                self.calls += 1
+                yield from super().stream_turn(messages, settings, deadline=deadline, clock=clock)
+
+        reset_registry()
+        register_engine_profile(_ConditionalNimProfile())
+        client = _SpyClient()
+        try:
+            with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
+                run_real_cell(
+                    make_spec(engine="nim"),
+                    client,
+                    host=HOST,
+                    sampler_factory=FakeSampler,
+                )
+            assert client.calls == 0
+        finally:
+            reset_registry()
+
 
 class TestPrivacyGuard:
     def test_unset_results_dir_fails_closed_before_any_work(self, monkeypatch):
@@ -242,6 +314,12 @@ class TestGenuineCell:
         assert manifest["serving"]["tool_call_transport"] == "openai-native-tools"
         assert manifest["serving"]["tool_call_parser"] == "qwen3_coder"
         assert manifest["serving"]["reasoning_parser"] == "nemotron_v3"
+        assert manifest["serving"]["topology"] == {
+            "kind": "single-gpu",
+            "gpu_count": 1,
+            "node_count": 1,
+        }
+        assert manifest["serving"]["engine_profile_id"] == "vllm-bf16-single-gpu"
         assert manifest["generation"]["reasoning_mode"] is True
         assert manifest["host"]["gpu_model"].startswith("NVIDIA RTX PRO 6000")
         assert manifest["cloud"]["comparison_mode"] == "provider-native"

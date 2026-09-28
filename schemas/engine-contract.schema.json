@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/schemas/engine-contract.schema.json",
+  "title": "Engine Precision Contract",
+  "description": "Provider-neutral engine/precision/topology declaration. This is not a launch command and must contain no secrets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["engine", "precision", "topology", "identity"],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "engine": {
+      "type": "string",
+      "enum": ["vllm", "tensorrt-llm", "nim"]
+    },
+    "precision": {
+      "type": "string",
+      "enum": ["bf16", "nvfp4", "fp8", "w4a16"]
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "gpu_count", "node_count"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["single-gpu", "multi-gpu", "multi-node"]
+        },
+        "gpu_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "node_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_artifact",
+        "model_revision",
+        "model_artifact_hash",
+        "container_digest",
+        "engine_version"
+      ],
+      "properties": {
+        "model_artifact": { "type": "string", "minLength": 1 },
+        "model_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "model_artifact_hash": {
+          "type": "string",
+          "pattern": "^(sha256:[0-9a-f]{64}|sha512:[0-9a-f]{128}|blake3:[0-9a-f]{64})$"
+        },
+        "container_digest": {
+          "type": "string",
+          "pattern": "^.+@sha256:[0-9a-f]{64}$"
+        },
+        "engine_version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "entitlements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "required"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" },
+          "satisfied": { "type": ["boolean", "null"] },
+          "detail": { "type": "string" }
+        }
+      }
+    }
+  }
+}

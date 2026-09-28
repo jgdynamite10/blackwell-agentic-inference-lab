@@ -147,6 +147,9 @@ class RealRunSpec:
     template_ids: tuple[str, ...] | None = None
     artifact_family: str = "real-runs"
     workload_version: str | None = None
+    topology_kind: str | None = None
+    gpu_count: int = 1
+    node_count: int = 1
 
 
 def _validate_spec(spec: RealRunSpec) -> Profile:
@@ -210,6 +213,9 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
     executed_version = require_workload_version(spec.workload_version)
     if spec.generation.workload_version not in (None, executed_version):
         raise ConfigError("generation.workload_version must match the run workload version")
+    from blackwell_lab.engines.adapters import require_real_spec_contract
+
+    require_real_spec_contract(spec)
     return PROFILES[spec.profile_name]
 
 
@@ -249,6 +255,18 @@ def build_real_manifest(
     serving["tool_call_transport"] = TOOL_CALL_TRANSPORT
     serving["tool_call_parser"] = TOOL_CALL_PARSER
     serving["reasoning_parser"] = REASONING_PARSER
+    from blackwell_lab.engines.adapters import declaration_from_real_spec
+    from blackwell_lab.engines.contract import require_ready_contract
+    from blackwell_lab.engines.registry import evaluate_engine_contract
+
+    readiness = require_ready_contract(evaluate_engine_contract(declaration_from_real_spec(spec)))
+    serving["topology"] = {
+        "kind": readiness.declaration.topology.kind,
+        "gpu_count": readiness.declaration.topology.gpu_count,
+        "node_count": readiness.declaration.topology.node_count,
+    }
+    if readiness.profile_id:
+        serving["engine_profile_id"] = readiness.profile_id
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "run_id": run_id,

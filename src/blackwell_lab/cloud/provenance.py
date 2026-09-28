@@ -362,6 +362,21 @@ def verify_live_provenance(
     if expected_gpu_model and expected_gpu_model not in observed_gpu.get("gpu_model", ""):
         mismatches.append("observed GPU model differs from the approved pilot configuration")
 
+    from blackwell_lab.engines.adapters import require_approved_contract
+    from blackwell_lab.engines.contract import EngineContractError
+
+    gpu_count = observed_gpu.get("gpu_count") if isinstance(observed_gpu, dict) else None
+    try:
+        require_approved_contract(
+            approved,
+            gpu_count=gpu_count if isinstance(gpu_count, int) else 1,
+            observed_engine_version=observed_engine_version,
+            observed_container_digest=observed_digest,
+            observed_model_hash=observed_model_hash,
+        )
+    except EngineContractError as exc:
+        mismatches.append(str(exc))
+
     if mismatches:
         raise ProvenanceError(
             "live provenance verification FAILED; the cell will not run. "

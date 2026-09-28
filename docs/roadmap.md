@@ -11,8 +11,10 @@ authorizes implementation** of the Akamai minimum valuable lab
 comparative reference (D-0019). Decision **D-0019 authorizes
 implementation** of the bounded agent-quality qualification
 (`blackwell-cloud qualify-agent`); **live execution still requires
-separate digest-bearing approval phrases**. **Phase 4 and later phases
-remain unauthorized.**
+separate digest-bearing approval phrases**. Decision **D-0020 authorizes
+implementation** of the provider-neutral engine/precision contract
+(`blackwell-cloud engine-contract`) only. **Phase 4 live execution and
+later phases remain unauthorized.**
 
 ## Phase 1 — Repository foundation and feasibility *(complete)*
 
@@ -97,8 +99,8 @@ authorizes a bounded agent-quality qualification after MVL-F's quality
 outcome disqualified it as the comparative reference; live
 `qualify-agent` still requires its own digest-bearing phrase.
 Controlled-resource mode, additional engines, and a 12-cell matrix remain
-optional future work. Phase 4 remains unauthorized. Every provisioning
-action follows [AGENTS.md](../AGENTS.md) §1 and
+optional future work. Phase 4 live execution remains unauthorized. Every
+provisioning action follows [AGENTS.md](../AGENTS.md) §1 and
 [cost-guardrails.md](cost-guardrails.md).
 
 ## Phase 4 — NVIDIA optimization
@@ -107,6 +109,23 @@ On the same Akamai baseline hardware, add approved precision comparisons
 (BF16 vs NVFP4, subject to artifact and runtime compatibility) and serving-path
 comparisons (vLLM vs TensorRT-LLM vs NVIDIA NIM), operational telemetry
 (DCGM, Prometheus, Grafana), and selected Nsight Systems profiling.
+
+### Phase 4A — engine/precision contract *(implementation authorized; live execution unauthorized)*
+
+Decision **D-0020** authorizes only the provider-neutral contract in
+[engine-precision-contract.md](engine-precision-contract.md): engine
+identity, numerical precision, immutable model/container identity,
+single-GPU / multi-GPU / multi-node topology, exact-version validation,
+entitlement prerequisites, fail-closed provenance, and
+ready / conditional / blocked readiness. Later component modules register
+through `register_engine_profile` and must not edit the core contract or
+each other. Genuine execution requires status `ready`; conditional does
+not authorize inference. The public evidence-track register is
+[component-readiness.md](component-readiness.md). No launch command,
+model download, container pull, or live engine/precision cell is
+authorized by D-0020. Existing vLLM BF16 single-GPU behavior, C1/C2,
+workload 2.4.0, evaluator 3.1.0, thresholds, lifecycle, Terraform, and
+publication policy are unchanged.
 
 ## Phase 5 — Google Cloud portability
 

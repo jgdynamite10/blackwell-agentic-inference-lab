@@ -4,8 +4,9 @@ This document describes both the **implemented architecture** (Phases 1–2
 and the completed Phase 3A readiness layer) and the intended architecture of
 later phases. Decision D-0017 authorizes implementation of the Akamai
 minimum valuable lab (provider-native, three cells). Live execution still
-requires separate digest-bearing approval phrases. Phase 4 and later
-phases remain unauthorized.
+requires separate digest-bearing approval phrases. Decision D-0020
+authorizes the provider-neutral engine/precision contract only. Phase 4
+live execution and later phases remain unauthorized.
 
 ## Overview
 
@@ -73,8 +74,10 @@ The runner validates every document — the manifest against
 [../schemas/run-manifest.schema.json](../schemas/run-manifest.schema.json),
 the result against
 [../schemas/benchmark-result.schema.json](../schemas/benchmark-result.schema.json),
-and the raw observations against
-[../schemas/task-observation.schema.json](../schemas/task-observation.schema.json) —
+the raw observations against
+[../schemas/task-observation.schema.json](../schemas/task-observation.schema.json),
+and engine/precision declarations against
+[../schemas/engine-contract.schema.json](../schemas/engine-contract.schema.json) —
 plus the **semantic invariants** JSON Schema cannot express (exact task
 accounting, rate/count agreement, matching run ids, truthful concurrency
 bounds, safe relative references) **before** reporting or persisting it, and
@@ -175,7 +178,13 @@ One serving container per configuration, pinned by digest. Proposed paths:
 vLLM (the openly developed baseline engine), then TensorRT-LLM and NVIDIA
 NIM. Precision:
 BF16 and NVFP4, subject to the compatibility findings in
-[feasibility-report.md](feasibility-report.md).
+[feasibility-report.md](feasibility-report.md). Decision D-0020 records
+the provider-neutral engine/precision contract in
+[engine-precision-contract.md](engine-precision-contract.md). The builtin
+authorized profile remains existing vLLM BF16 single-GPU. Other engines,
+precisions, and topologies stay blocked until a later component module
+registers them. D-0020 does not authorize launch commands or live
+Phase 4 execution.
 
 ### Telemetry (Phase 4)
 
@@ -196,7 +205,9 @@ privately with the run results.
   and raw per-task observations conforming to
   [../schemas/task-observation.schema.json](../schemas/task-observation.schema.json)
   (warm-up observations labeled and retained separately; summaries are
-  derived from the raw observations).
+  derived from the raw observations). Engine/precision declarations
+  additionally conform to
+  [../schemas/engine-contract.schema.json](../schemas/engine-contract.schema.json).
 - The repository carries only schemas, synthetic examples, test fixtures,
   methodology, documentation, and code; sanitized results may be added only
   with explicit owner approval (Phase 7).
@@ -231,6 +242,8 @@ Phase 3A implemented the **readiness** layer: Terraform under
 existing pilot and `run_real_cell` paths. Decision D-0019 adds
 `blackwell-cloud qualify-agent` on those same paths for a bounded
 agent-quality qualification; it makes no infrastructure changes.
+Decision D-0020 adds `blackwell-cloud engine-contract` as an offline
+readiness check and a profile registry; it adds no launch command.
 Every billable or destructive action still requires its separate exact
 local owner approval phrase and refuses to execute in hosted/CI
 environments. Live MVL apply is not authorized by D-0017 itself. There
@@ -241,7 +254,7 @@ is **no frontend application** — the entire workflow is CLI-first.
 ```mermaid
 flowchart TB
     subgraph operator["Owner's authenticated local environment (never the hosted Cloud Agent)"]
-        cli["blackwell-cloud CLI<br/>readiness / plan / apply (gated) /<br/>pilot (gated) / mvl-baseline (gated) /<br/>qualify-agent (gated) / verify-results /<br/>teardown-plan / destroy (gated) / orphan-report"]
+        cli["blackwell-cloud CLI<br/>readiness / engine-contract / plan / apply (gated) /<br/>pilot (gated) / mvl-baseline (gated) /<br/>qualify-agent (gated) / verify-results /<br/>teardown-plan / destroy (gated) / orphan-report"]
         tf["Terraform (pinned CLI + linode provider 4.1.0)<br/>state + tfvars OUTSIDE Git"]
         preflight["Authenticated read-only preflight<br/>plan entitlement, regions, price<br/>(sanitized output; local only)"]
     end
