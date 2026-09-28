@@ -90,7 +90,7 @@ def pilot_config(tmp_path, comparison_mode="provider-native", **overrides):
         },
         "model": {
             "artifact": "a",
-            "revision": "r",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "artifact_hash": "sha256:" + "ab" * 32,
             "precision": "bf16",
         },

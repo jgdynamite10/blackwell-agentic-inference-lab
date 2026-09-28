@@ -34,6 +34,8 @@ Subcommands map one-to-one to the separated workflows required by Phase 3A:
                       confirmation.
 - ``orphan-report``   read-only sweep of project-tagged resources vs ledger.
 - ``session-summary`` observed billable duration and estimated session cost.
+- ``engine-contract``  offline engine/precision/topology contract check
+                      (no launch, no credentials, no provider access).
 
 Privacy rules: absolute private paths (``LAB_RESULTS_DIR``, ledger locations)
 are never printed — output references safe relative filenames only. Tokens
@@ -60,6 +62,7 @@ from blackwell_lab.cloud.mvl import MVL_APPROVAL_TEMPLATE
 from blackwell_lab.paths import ResultsLocationError, RunMode, resolve_results_dir
 from blackwell_lab.schemas import (
     validate_benchmark_result,
+    validate_engine_contract,
     validate_run_manifest,
     validate_task_observations,
 )
@@ -237,6 +240,7 @@ def _check_python_modules() -> dict:
         import blackwell_lab.cloud.provenance
         import blackwell_lab.cloud.realbench
         import blackwell_lab.cloud.telemetry
+        import blackwell_lab.engines
         import blackwell_lab.workload.openai_client  # noqa: F401
     except Exception as exc:  # pragma: no cover - import failure is the finding
         return {"status": "failed", "detail": f"module import failed: {type(exc).__name__}"}
@@ -254,6 +258,9 @@ def _check_examples_validate() -> dict:
         )
         validate_task_observations(
             json.loads((examples / "example-task-observations.json").read_text(encoding="utf-8"))
+        )
+        validate_engine_contract(
+            json.loads((examples / "example-engine-contract.json").read_text(encoding="utf-8"))
         )
     except Exception as exc:
         return {"status": "failed", "detail": f"example validation failed: {type(exc).__name__}"}
@@ -281,6 +288,43 @@ def cmd_readiness(_args: argparse.Namespace) -> int:
     }
     print(json.dumps(report, indent=2))
     return 0 if not failed else 1
+
+
+def cmd_engine_contract(args: argparse.Namespace) -> int:
+    """Offline engine/precision contract inspection. No launch, no credentials."""
+    from blackwell_lab.engines import (
+        declaration_from_mapping,
+        evaluate_engine_contract,
+        list_profiles,
+        load_registered_components,
+        require_supported_contract,
+    )
+
+    load_registered_components()
+    profiles = [
+        {
+            "profile_id": profile.profile_id,
+            "engine": profile.engine,
+            "precision": profile.precision,
+            "topologies": sorted(profile.topologies),
+        }
+        for profile in list_profiles()
+    ]
+    if getattr(args, "list_profiles", False) and not getattr(args, "config", None):
+        print(json.dumps({"profiles": profiles, "credentials_required": False}, indent=2))
+        return 0
+    if not getattr(args, "config", None):
+        raise ConfigError("engine-contract --config is required unless --list is set")
+    path = Path(args.config)
+    if not path.is_file():
+        raise ConfigError("engine-contract config must be an existing file")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    validate_engine_contract(payload)
+    declaration = declaration_from_mapping(payload)
+    readiness = evaluate_engine_contract(declaration)
+    print(json.dumps({"readiness": readiness.as_dict(), "profiles": profiles}, indent=2))
+    require_supported_contract(readiness)
+    return 0
 
 
 # -- lifecycle wrappers -------------------------------------------------------
@@ -1389,14 +1433,29 @@ def build_parser() -> argparse.ArgumentParser:
             "owner's local environment. Every lifecycle artifact lives in "
             "the external private LAB_RESULTS_DIR. Decision D-0017 authorizes "
             "the Akamai minimum valuable lab (mvl-baseline) and the D-0019 "
-            "agent-quality qualification (qualify-agent); live apply, MVL, "
-            "and qualification execution still require their separate "
-            "digest-bearing phrases."
+            "agent-quality qualification (qualify-agent). Decision D-0020 "
+            "adds the offline engine-contract check. Live apply, MVL, "
+            "qualification, and Phase 4 engine execution still require "
+            "their separate digest-bearing phrases."
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("readiness", help="Offline readiness validation (no cloud access).")
+    engine_parser = sub.add_parser(
+        "engine-contract",
+        help="Offline engine/precision/topology contract check (no launch).",
+    )
+    engine_parser.add_argument(
+        "--list",
+        dest="list_profiles",
+        action="store_true",
+        help="List registered engine profiles.",
+    )
+    engine_parser.add_argument(
+        "--config",
+        help="Existing JSON file declaring an engine/precision/topology contract.",
+    )
 
     init_parser = sub.add_parser(
         "init", help="Configure the run's EXTERNAL terraform backend/state and TF_DATA_DIR."
@@ -1563,6 +1622,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 _HANDLERS = {
     "readiness": cmd_readiness,
+    "engine-contract": cmd_engine_contract,
     "init": cmd_init,
     "plan": cmd_plan,
     "apply": cmd_apply,

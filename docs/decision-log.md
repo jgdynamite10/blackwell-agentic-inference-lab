@@ -916,3 +916,53 @@ MVL-F cannot be the comparative reference after a 3 / 1,800 quality
 outcome driven by remediation selection. The correction is a bounded
 tool-contract qualification with frozen holdout templates and no
 evaluator weakening.
+
+## 2026-09-28 — D-0020: Provider-neutral engine/precision contract (no launch)
+
+**MVL-F, C1/C2, workload 2.4.0, evaluator 3.1.0, thresholds, lifecycle,
+Terraform, and publication policy are unchanged.** Existing authorized
+vLLM BF16 single-GPU behavior is unchanged. This entry does not execute
+inference, provision resources, download models or containers, or
+publish results.
+
+**Decision.** The next authorized Phase 4 step is a **provider-neutral
+engine/precision contract**, not a live optimization cell. Implementation
+is the credential-free `blackwell_lab.engines` package and the offline
+`blackwell-cloud engine-contract` command. Live Phase 4 engine/precision
+execution remains unauthorized and still requires a later digest-bearing
+approval phrase.
+
+### Contract 1.0.0
+
+A declaration must name engine identity, numerical precision, topology
+(`single-gpu` / `multi-gpu` / `multi-node`), and immutable model and
+container identity (artifact, 40-hex revision, algorithm:hex hash,
+`repo@sha256:` digest, exact engine version). Floating labels such as
+`latest` fail closed. Required entitlements that are unknown or false
+fail closed. Evaluation returns `ready`, `conditional`, or `blocked`.
+`require_supported_contract` refuses only `blocked` combinations, and
+does so before a serving client is used.
+
+The core registers one builtin profile: `vllm-bf16-single-gpu`. Other
+known engines and precisions (`tensorrt-llm`, `nim`, `nvfp4`, `fp8`,
+`w4a16`) and multi-GPU / multi-node topologies are valid to declare and
+are blocked until a later component module registers them.
+
+### Isolated component registry
+
+Later component agents add a module under
+`src/blackwell_lab/engines/components/` and call
+`register_engine_profile`. The core discovers those modules with
+`pkgutil` and never names them. Component modules must not edit the
+core contract or each other. No component-specific launch command is
+authorized by this decision.
+
+Optional additive manifest fields `serving.topology` and
+`serving.engine_profile_id` keep existing 3.1.0 vLLM BF16 manifests
+valid when omitted.
+
+**Rationale.** Owner engine/precision-contract instruction of 2026-09-28.
+Phase 4 comparisons need a shared fail-closed surface before any
+component implements TensorRT-LLM, NIM, NVFP4, or multi-GPU / multi-node
+launch paths. Recording the contract first prevents later modules from
+editing each other or weakening existing vLLM BF16 provenance.

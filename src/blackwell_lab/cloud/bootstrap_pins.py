@@ -50,6 +50,8 @@ INSTALLATION_PINS = (
 )
 
 #: Runtime pins that identify the candidate serving and probe artifacts.
+#: Phase 4A treats these as the immutable engine-contract inputs; this
+#: module does not change their values or add launch commands.
 IDENTITY_PINS = (
     "VLLM_IMAGE",
     "VLLM_IMAGE_DIGEST",

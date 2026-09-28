@@ -126,12 +126,15 @@ explicitly revises them in writing.
    tool transport, existing pins. MVL-F is **immutable and diagnostic-only**
    and is **not** the comparative reference (decision D-0019). Decision
    **D-0019 authorizes implementation** of the bounded agent-quality
-   qualification (`blackwell-cloud qualify-agent`). **Live MVL and
-   qualification execution still require** their separate digest-bearing
-   approval phrases. The D-0014 six-hour / $25 pilot envelope remains
-   separately named. **Phase 4 and later phases remain unauthorized.**
-   Actual apply, pilot, mvl-baseline, qualify-agent, and destroy commands
-   still require their separate exact local approval phrases.
+   qualification (`blackwell-cloud qualify-agent`). Decision **D-0020
+   authorizes implementation** of the provider-neutral engine/precision
+   contract (`blackwell-cloud engine-contract`) only. **Live MVL,
+   qualification, and Phase 4 engine/precision execution still require**
+   their separate digest-bearing approval phrases. The D-0014 six-hour /
+   $25 pilot envelope remains separately named. **Phase 4 live execution
+   and later phases remain unauthorized.** Actual apply, pilot,
+   mvl-baseline, qualify-agent, and destroy commands still require their
+   separate exact local approval phrases.
 
 ## 8. Repository hygiene
 

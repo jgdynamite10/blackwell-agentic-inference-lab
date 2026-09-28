@@ -170,6 +170,28 @@ class TestSpecValidation:
                 sampler_factory=FakeSampler,
             )
 
+    def test_unsupported_engine_is_rejected_before_a_client_is_used(self):
+        with pytest.raises(ConfigError, match="unsupported"):
+            run_real_cell(
+                make_spec(engine="nim"),
+                UsageMockClient(),
+                host=HOST,
+                sampler_factory=FakeSampler,
+            )
+
+    def test_existing_vllm_bf16_spec_satisfies_the_engine_contract(self):
+        from blackwell_lab.engines import READINESS_READY
+        from blackwell_lab.engines.adapters import (
+            declaration_from_real_spec,
+            require_real_spec_contract,
+        )
+
+        spec = make_spec()
+        readiness = require_real_spec_contract(spec)
+        assert readiness.status == READINESS_READY
+        assert declaration_from_real_spec(spec).engine == "vllm"
+        assert declaration_from_real_spec(spec).precision == "bf16"
+
 
 class TestPrivacyGuard:
     def test_unset_results_dir_fails_closed_before_any_work(self, monkeypatch):
@@ -242,6 +264,12 @@ class TestGenuineCell:
         assert manifest["serving"]["tool_call_transport"] == "openai-native-tools"
         assert manifest["serving"]["tool_call_parser"] == "qwen3_coder"
         assert manifest["serving"]["reasoning_parser"] == "nemotron_v3"
+        assert manifest["serving"]["topology"] == {
+            "kind": "single-gpu",
+            "gpu_count": 1,
+            "node_count": 1,
+        }
+        assert manifest["serving"]["engine_profile_id"] == "vllm-bf16-single-gpu"
         assert manifest["generation"]["reasoning_mode"] is True
         assert manifest["host"]["gpu_model"].startswith("NVIDIA RTX PRO 6000")
         assert manifest["cloud"]["comparison_mode"] == "provider-native"

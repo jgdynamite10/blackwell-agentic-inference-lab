@@ -22,9 +22,12 @@ of the Akamai **minimum valuable lab** (`blackwell-cloud mvl-baseline`):
 provider-native, three cells, existing frozen pins. MVL-F is **diagnostic
 only** and is **not** the comparative reference (decision D-0019).
 Decision **D-0019 authorizes implementation** of the bounded
-agent-quality qualification (`blackwell-cloud qualify-agent`). **Live MVL
-and qualification execution still require** their separate digest-bearing
-approval phrases. Phase 4 and later phases remain **unauthorized**
+agent-quality qualification (`blackwell-cloud qualify-agent`). Decision
+**D-0020 authorizes implementation** of the provider-neutral
+engine/precision contract (`blackwell-cloud engine-contract`) only.
+**Live MVL, qualification, and Phase 4 engine/precision execution still
+require** their separate digest-bearing approval phrases. Phase 4 live
+execution and later phases remain **unauthorized**
 ([docs/roadmap.md](docs/roadmap.md)).
 
 - **A genuine private diagnostic MVL-F run exists.** It remains external
@@ -84,11 +87,12 @@ than treated as settled.
 AGENTS.md                    Canonical project rules (safety, integrity, scope)
 docs/                        Charter, roadmap, architecture, feasibility, governance
 methodology/                 Measurement contract, experiment matrix, workload, reproducibility
-schemas/                     JSON Schemas for run manifests and benchmark results
-examples/                    Synthetic example manifest and result files (NOT real data)
+schemas/                     JSON Schemas for run manifests, results, and the engine contract
+examples/                    Synthetic example manifest, result, and contract files (NOT real data)
 src/blackwell_lab/           Python package (schema validation, results-path guard)
 src/blackwell_lab/workload/  Synthetic Cloud Ops Agent, simulated tools, evaluator, offline runner
 src/blackwell_lab/cloud/     Phase 3 readiness: lifecycle, telemetry, preflight, real-bench assembly, CLI
+src/blackwell_lab/engines/   Phase 4A provider-neutral engine/precision contract and profile registry
 infra/akamai/                Akamai Terraform (single GPU instance) and idempotent bootstrap design
 tests/                       Automated tests
 scripts/preflight/           Read-only cloud feasibility checks (run locally by the operator)
@@ -135,15 +139,19 @@ Offline readiness validation (no cloud access, no credentials):
 
 ```bash
 blackwell-cloud readiness
+blackwell-cloud engine-contract --list
+blackwell-cloud engine-contract --config examples/example-engine-contract.json
 ```
 
 The bounded Phase 3B pilot (`blackwell-cloud apply`, `pilot`, `destroy`),
 the D-0017 `mvl-baseline` command, and the D-0019 `qualify-agent`
 command run only in the owner's authenticated local environment and still
-require each command's separate exact approval phrase. Live MVL and
-qualification execution are not authorized by the implementation
-decisions themselves. See [infra/akamai/README.md](infra/akamai/README.md)
-and decisions D-0014, D-0017, and D-0019.
+require each command's separate exact approval phrase. Live MVL,
+qualification, and Phase 4 engine/precision execution are not authorized
+by the implementation decisions themselves. See
+[infra/akamai/README.md](infra/akamai/README.md),
+[docs/engine-precision-contract.md](docs/engine-precision-contract.md),
+and decisions D-0014, D-0017, D-0019, and D-0020.
 
 ## Project governance
 

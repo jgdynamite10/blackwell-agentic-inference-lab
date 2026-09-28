@@ -79,11 +79,17 @@ def make_approved(artifact_hash: str) -> dict:
             "engine_version": ENGINE_VERSION,
             "container_cuda_runtime_version": CONTAINER_CUDA,
         },
-        "model": {"artifact_hash": artifact_hash},
+        "model": {
+            "artifact": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "artifact_hash": artifact_hash,
+            "precision": "bf16",
+        },
         "cloud": {"instance_type": INSTANCE_TYPE, "region": REGION},
         "host": {
             "storage_description": "local NVMe",
             "network_description": "private VLAN",
+            "gpu_count": 1,
         },
         "expected_gpu_model": "RTX 6000 Blackwell",
     }
