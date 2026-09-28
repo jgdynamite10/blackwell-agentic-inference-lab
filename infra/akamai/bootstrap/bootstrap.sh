@@ -147,12 +147,41 @@ install_verified_nvidia_key_and_list() {
   log "NVIDIA repository key content and list verified"
 }
 
+install_reviewed_ctk_packages() {
+  local pkg have need_install=0
+  local -a requested=()
+  for pkg in ${CTK_PACKAGES}; do
+    have="$(installed_package_version "${pkg}")"
+    if [ "${have}" = "${NVIDIA_CTK_PACKAGE_VERSION}" ]; then
+      log "package ${pkg} already at reviewed version ${NVIDIA_CTK_PACKAGE_VERSION}"
+    else
+      need_install=1
+      if [ -n "${have}" ]; then
+        log "installed ${pkg}=${have} differs from reviewed ${NVIDIA_CTK_PACKAGE_VERSION}; converging explicitly"
+      else
+        log "installing reviewed package ${pkg}=${NVIDIA_CTK_PACKAGE_VERSION}"
+      fi
+    fi
+    requested+=("${pkg}=${NVIDIA_CTK_PACKAGE_VERSION}")
+  done
+  if [ "${need_install}" -eq 0 ]; then
+    return 0
+  fi
+  # Apt's candidate is the newest index version. Naming only
+  # nvidia-container-toolkit selects that newer dependency and fails its
+  # exact Depends. The reviewed set has to be one transaction.
+  DEBIAN_FRONTEND=noninteractive apt-get install -q -y "${requested[@]}" \
+    || fail "apt-get could not install the reviewed NVIDIA Container Toolkit set at ${NVIDIA_CTK_PACKAGE_VERSION}"
+  for pkg in ${CTK_PACKAGES}; do
+    have="$(installed_package_version "${pkg}")"
+    [ "${have}" = "${NVIDIA_CTK_PACKAGE_VERSION}" ] \
+      || fail "package ${pkg} is '${have}' after install; reviewed version is ${NVIDIA_CTK_PACKAGE_VERSION} (wrong versions are never accepted)"
+  done
+}
+
 verify_installed_gpu_packages() {
   assert_or_converge_package "${NVIDIA_DRIVER_PACKAGE}" "${NVIDIA_DRIVER_PACKAGE_VERSION}"
-  local pkg
-  for pkg in ${CTK_PACKAGES}; do
-    assert_or_converge_package "${pkg}" "${NVIDIA_CTK_PACKAGE_VERSION}"
-  done
+  install_reviewed_ctk_packages
 }
 
 install_gpu_stack() {

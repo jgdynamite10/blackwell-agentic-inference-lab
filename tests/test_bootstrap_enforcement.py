@@ -804,3 +804,93 @@ check_host_prerequisites
         completed = _run(bash, helper, env)
         assert completed.returncode == 1
         assert "required host command modinfo is absent" in completed.stdout + completed.stderr
+
+
+class TestContainerToolkitInstall:
+    def test_installs_the_exact_toolkit_set_in_one_apt_transaction(self, bash, tmp_path):
+        dest = _stage_bootstrap(tmp_path)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        apt_log = tmp_path / "apt.log"
+        installed = tmp_path / "ctk-installed"
+        version = "1.20.0-1"
+        packages = (
+            "nvidia-container-toolkit",
+            "nvidia-container-toolkit-base",
+            "libnvidia-container-tools",
+            "libnvidia-container1",
+        )
+        _write_exec(
+            bin_dir / "dpkg-query",
+            f"""#!/usr/bin/env bash
+pkg=""
+for arg in "$@"; do
+  case "$arg" in
+    -W|-f=*|--show) ;;
+    *) pkg="$arg" ;;
+  esac
+done
+if [ "$pkg" = "nvidia-driver-580-server-open" ]; then
+  printf '580.178.04-0ubuntu0.24.04.1\\n'
+  exit 0
+fi
+if [ -f "{installed}" ]; then
+  case "$pkg" in
+    nvidia-container-toolkit|nvidia-container-toolkit-base|libnvidia-container-tools|libnvidia-container1)
+      printf '{version}\\n'
+      exit 0
+      ;;
+  esac
+fi
+exit 1
+""",
+        )
+        _write_exec(
+            bin_dir / "apt-get",
+            f"""#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "{apt_log}"
+case " $* " in
+  *" install "*) ;;
+  *) exit 0 ;;
+esac
+joined=" $* "
+ok=1
+for pkg in {" ".join(packages)}; do
+  case "$joined" in
+    *" ${{pkg}}={version} "*) ;;
+    *) ok=0 ;;
+  esac
+done
+if [ "$ok" -ne 1 ]; then
+  printf '%s\\n' "Depends: base (= {version}) but 1.20.1-1 is to be installed" >&2
+  exit 1
+fi
+: > "{installed}"
+exit 0
+""",
+        )
+        helper = tmp_path / "install-ctk.sh"
+        helper.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+. "{dest / "bootstrap.sh"}"
+load_and_validate_bootstrap_env "${{ENV_FILE}}" "${{EXAMPLE_FILE}}"
+verify_installed_gpu_packages
+verify_installed_gpu_packages
+""",
+            encoding="utf-8",
+        )
+        helper.chmod(0o755)
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+        completed = _run(bash, helper, env)
+        output = completed.stdout + completed.stderr
+        assert completed.returncode == 0, output
+        installs = [
+            line
+            for line in apt_log.read_text(encoding="utf-8").splitlines()
+            if " install " in f" {line} "
+        ]
+        assert len(installs) == 1
+        for package in packages:
+            assert f"{package}={version}" in installs[0]
+        assert "1.20.1-1 is to be installed" not in output
