@@ -91,7 +91,7 @@ def evaluate_engine_contract(declaration: EngineContractDeclaration) -> EngineRe
             profile_id=None,
             reasons=(
                 "unsupported engine/precision/topology combination "
-                f"({declaration.engine}/{declaration.precision}/{declaration.topology.kind})"
+                f"({declaration.engine}/{declaration.precision}/{declaration.topology.kind})",
             ),
             declaration=declaration,
         )
