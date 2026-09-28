@@ -35,7 +35,6 @@ from blackwell_lab.engines.components.vllm_nvfp4 import (
     MODEL_ARTIFACT_HASH,
     MODEL_REVISION,
     PROFILE_ID,
-    VllmNvfp4SingleGpuProfile,
 )
 from blackwell_lab.workload.model_client import DeterministicMockClient
 
@@ -76,6 +75,11 @@ def _declare(**overrides):
     return declaration_from_mapping(_payload(**overrides))
 
 
+def _discovered_profile():
+    load_registered_components()
+    return get_profile(PROFILE_ID)
+
+
 @pytest.fixture(autouse=True)
 def _restore_registry():
     reset_registry()
@@ -103,7 +107,7 @@ class TestDiscovery:
         assert readiness.profile_id == PROFILE_ID
         found = [profile for profile in list_profiles() if profile.profile_id == PROFILE_ID]
         assert len(found) == 1
-        assert isinstance(found[0], VllmNvfp4SingleGpuProfile)
+        assert type(found[0]).__name__ == "VllmNvfp4SingleGpuProfile"
         assert found[0].engine == "vllm"
         assert found[0].precision == "nvfp4"
         assert found[0].topologies == frozenset({"single-gpu"})
@@ -203,7 +207,7 @@ class TestIdentityAndTopologyRejections:
     @pytest.mark.parametrize("precision", ["bf16", "fp8", "w4a16"])
     def test_other_precisions_do_not_match(self, precision):
         declaration = _declare(precision=precision)
-        profile = get_profile(PROFILE_ID)
+        profile = _discovered_profile()
         assert profile.matches(declaration) is False
         readiness = evaluate_engine_contract(declaration)
         assert readiness.profile_id != PROFILE_ID
@@ -217,7 +221,7 @@ class TestIdentityAndTopologyRejections:
     )
     def test_multi_gpu_and_multi_node_do_not_match(self, topology):
         declaration = _declare(topology=topology)
-        assert get_profile(PROFILE_ID).matches(declaration) is False
+        assert _discovered_profile().matches(declaration) is False
         pinned = _declare(topology=topology, profile_id=PROFILE_ID)
         readiness = evaluate_engine_contract(pinned)
         assert readiness.status == READINESS_BLOCKED

@@ -18,7 +18,7 @@ from blackwell_lab.engines.contract import (
     EngineReadiness,
     entitlement_blockers,
 )
-from blackwell_lab.engines.registry import register_engine_profile
+from blackwell_lab.engines.registry import list_profiles, register_engine_profile
 
 PROFILE_ID = "vllm-nvfp4-single-gpu"
 ENGINE = "vllm"
@@ -139,4 +139,16 @@ class VllmNvfp4SingleGpuProfile:
         )
 
 
-register_engine_profile(VllmNvfp4SingleGpuProfile())
+def _register_profile() -> None:
+    """Register once per process.
+
+    Discovery reloads this module when the registry is reset. Reloading an
+    already-registered instance must keep that instance; the registry rejects
+    a second object with the same id.
+    """
+    if any(profile.profile_id == PROFILE_ID for profile in list_profiles()):
+        return
+    register_engine_profile(VllmNvfp4SingleGpuProfile())
+
+
+_register_profile()
