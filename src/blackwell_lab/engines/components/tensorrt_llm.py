@@ -14,9 +14,10 @@ from blackwell_lab.engines.contract import (
     READINESS_CONDITIONAL,
     TOPOLOGY_SINGLE_GPU,
     EngineContractDeclaration,
+    EngineContractError,
     EngineReadiness,
 )
-from blackwell_lab.engines.registry import register_engine_profile
+from blackwell_lab.engines.registry import get_profile, register_engine_profile
 
 ENGINE = "tensorrt-llm"
 PROFILE_BF16 = "tensorrt-llm-bf16-single-gpu"
@@ -114,8 +115,20 @@ class TensorRtLlmSingleGpuProfile:
         )
 
 
+def _register_profile(profile: TensorRtLlmSingleGpuProfile) -> None:
+    """Register once. Core discovery reloads this module after import."""
+    try:
+        register_engine_profile(profile)
+    except EngineContractError as exc:
+        if "already registered" not in str(exc):
+            raise
+        existing = get_profile(profile.profile_id)
+        if existing.precision != profile.precision or existing.engine != profile.engine:
+            raise
+
+
 def _register() -> None:
-    register_engine_profile(
+    _register_profile(
         TensorRtLlmSingleGpuProfile(
             profile_id=PROFILE_BF16,
             precision="bf16",
@@ -123,7 +136,7 @@ def _register() -> None:
             viability=BF16_VIABILITY,
         )
     )
-    register_engine_profile(
+    _register_profile(
         TensorRtLlmSingleGpuProfile(
             profile_id=PROFILE_NVFP4,
             precision="nvfp4",

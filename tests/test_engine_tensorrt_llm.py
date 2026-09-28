@@ -241,6 +241,13 @@ class TestDiscovery:
         assert not nvfp4.matches(bf16_decl)
         assert not bf16.matches(nvfp4_decl)
 
+    def test_discovery_reload_keeps_a_single_registration(self):
+        reset_registry()
+        importlib.reload(tensorrt_llm)
+        load_registered_components()
+        assert _profile_ids().count(PROFILE_BF16) == 1
+        assert _profile_ids().count(PROFILE_NVFP4) == 1
+
     def test_repeated_discovery_creates_no_duplicate_registration(self):
         reset_registry()
         load_registered_components()
