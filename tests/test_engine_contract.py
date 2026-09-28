@@ -43,6 +43,13 @@ VALID_IDENTITY = {
     "engine_version": "0.27.1",
 }
 
+# Reserved test-only combination. Not a supported production profile.
+RESERVED_TEST_ENGINE = "nim"
+RESERVED_TEST_PRECISION = "fp8"
+RESERVED_TEST_TOPOLOGY = {"kind": "multi-node", "gpu_count": 2, "node_count": 2}
+TEST_ONLY_PROFILE_ID = "test-only-nim-fp8-multi-node"
+TMP_DISCOVERABLE_PROFILE_ID = "tmp-discoverable-nim-fp8-multi-node"
+
 
 def _declaration(**overrides) -> dict:
     payload = {
@@ -53,6 +60,51 @@ def _declaration(**overrides) -> dict:
     }
     payload.update(overrides)
     return payload
+
+
+def _reserved_declaration(**overrides) -> dict:
+    payload = _declaration(
+        engine=RESERVED_TEST_ENGINE,
+        precision=RESERVED_TEST_PRECISION,
+        topology=dict(RESERVED_TEST_TOPOLOGY),
+    )
+    payload.update(overrides)
+    return payload
+
+
+def _assert_profile_id_not_in_production(
+    profile_id: str, *, exclude: frozenset[Path] = frozenset()
+) -> None:
+    root = ROOT / "src" / "blackwell_lab"
+    excluded = {path.resolve() for path in exclude}
+    for path in root.rglob("*.py"):
+        if path.resolve() in excluded:
+            continue
+        assert profile_id not in path.read_text(encoding="utf-8")
+
+
+class _ReservedConditionalProfile:
+    """In-process test profile for the reserved NIM/FP8/multi-node combination."""
+
+    profile_id = TEST_ONLY_PROFILE_ID
+    engine = RESERVED_TEST_ENGINE
+    precision = RESERVED_TEST_PRECISION
+    topologies = frozenset({RESERVED_TEST_TOPOLOGY["kind"]})
+
+    def matches(self, declaration):
+        return (
+            declaration.engine == self.engine
+            and declaration.precision == self.precision
+            and declaration.topology.kind in self.topologies
+        )
+
+    def evaluate(self, declaration):
+        return EngineReadiness(
+            status=READINESS_CONDITIONAL,
+            profile_id=self.profile_id,
+            reasons=("test-only reserved combination; launch is not implemented",),
+            declaration=declaration,
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -105,30 +157,46 @@ class TestFailClosedMissingFields:
             declaration_from_mapping(payload)
 
 
-class TestUnsupportedCombinations:
-    def test_nvfp4_is_blocked_before_inference(self):
-        declaration = declaration_from_mapping(_declaration(precision="nvfp4"))
+class TestBuiltinProfileBoundaries:
+    def test_builtin_rejects_mismatched_precision(self):
+        declaration = declaration_from_mapping(
+            _declaration(precision="nvfp4", profile_id=BUILTIN_VLLM_BF16_SINGLE_GPU)
+        )
         readiness = evaluate_engine_contract(declaration)
         assert readiness.status == READINESS_BLOCKED
-        with pytest.raises(EngineContractError, match="unsupported"):
+        assert readiness.profile_id == BUILTIN_VLLM_BF16_SINGLE_GPU
+        with pytest.raises(EngineContractError, match="does not match"):
             require_supported_contract(readiness)
 
-    def test_tensorrt_llm_is_blocked_before_inference(self):
-        declaration = declaration_from_mapping(_declaration(engine="tensorrt-llm"))
+    def test_builtin_rejects_mismatched_engine(self):
+        declaration = declaration_from_mapping(
+            _declaration(engine="tensorrt-llm", profile_id=BUILTIN_VLLM_BF16_SINGLE_GPU)
+        )
         readiness = evaluate_engine_contract(declaration)
         assert readiness.status == READINESS_BLOCKED
-        with pytest.raises(EngineContractError, match="unsupported"):
+        assert readiness.profile_id == BUILTIN_VLLM_BF16_SINGLE_GPU
+        with pytest.raises(EngineContractError, match="does not match"):
             require_supported_contract(readiness)
 
-    def test_multi_gpu_and_multi_node_are_blocked_without_a_component(self):
+    def test_builtin_rejects_mismatched_topology(self):
         multi_gpu = declaration_from_mapping(
-            _declaration(topology={"kind": "multi-gpu", "gpu_count": 2, "node_count": 1})
+            _declaration(
+                topology={"kind": "multi-gpu", "gpu_count": 2, "node_count": 1},
+                profile_id=BUILTIN_VLLM_BF16_SINGLE_GPU,
+            )
         )
         multi_node = declaration_from_mapping(
-            _declaration(topology={"kind": "multi-node", "gpu_count": 1, "node_count": 2})
+            _declaration(
+                topology={"kind": "multi-node", "gpu_count": 2, "node_count": 2},
+                profile_id=BUILTIN_VLLM_BF16_SINGLE_GPU,
+            )
         )
-        assert evaluate_engine_contract(multi_gpu).status == READINESS_BLOCKED
-        assert evaluate_engine_contract(multi_node).status == READINESS_BLOCKED
+        for declaration in (multi_gpu, multi_node):
+            readiness = evaluate_engine_contract(declaration)
+            assert readiness.status == READINESS_BLOCKED
+            assert readiness.profile_id == BUILTIN_VLLM_BF16_SINGLE_GPU
+            with pytest.raises(EngineContractError, match="does not match"):
+                require_supported_contract(readiness)
 
 
 class TestExistingVllmBf16RemainsValid:
@@ -147,9 +215,9 @@ class TestExistingVllmBf16RemainsValid:
         assert ENGINE_CONTRACT_VERSION == "1.0.0"
         require_supported_contract(readiness)
 
-    def test_builtin_profile_is_the_only_core_registration(self):
-        profiles = list_profiles()
-        assert [profile.profile_id for profile in profiles] == [BUILTIN_VLLM_BF16_SINGLE_GPU]
+    def test_builtin_profile_is_registered_exactly_once_in_the_core(self):
+        ids = [profile.profile_id for profile in list_profiles()]
+        assert ids.count(BUILTIN_VLLM_BF16_SINGLE_GPU) == 1
         assert get_profile(BUILTIN_VLLM_BF16_SINGLE_GPU).engine == "vllm"
 
     def test_example_manifest_remains_valid_when_optional_topology_is_added(self):
@@ -165,44 +233,18 @@ class TestExistingVllmBf16RemainsValid:
 
 class TestComponentRegistration:
     def test_component_registers_without_modifying_the_core_contract(self):
-        class _ExternalNimProfile:
-            profile_id = "test-only-nim-bf16-single-gpu"
-            engine = "nim"
-            precision = "bf16"
-            topologies = frozenset({"single-gpu"})
-
-            def matches(self, declaration):
-                return (
-                    declaration.engine == self.engine
-                    and declaration.precision == self.precision
-                    and declaration.topology.kind in self.topologies
-                )
-
-            def evaluate(self, declaration):
-                return EngineReadiness(
-                    status=READINESS_CONDITIONAL,
-                    profile_id=self.profile_id,
-                    reasons=("component-registered NIM profile; launch is not implemented",),
-                    declaration=declaration,
-                )
-
-        register_engine_profile(_ExternalNimProfile())
-        declaration = declaration_from_mapping(_declaration(engine="nim"))
+        reset_registry()
+        register_engine_profile(_ReservedConditionalProfile())
+        declaration = declaration_from_mapping(_reserved_declaration())
         readiness = evaluate_engine_contract(declaration)
         assert readiness.status == READINESS_CONDITIONAL
-        assert readiness.profile_id == "test-only-nim-bf16-single-gpu"
+        assert readiness.profile_id == TEST_ONLY_PROFILE_ID
         with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
             require_ready_contract(readiness)
         with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
             require_supported_contract(readiness)
-        core = Path(__file__).resolve().parents[1] / "src" / "blackwell_lab" / "engines"
-        for path in core.glob("*.py"):
-            text = path.read_text(encoding="utf-8")
-            assert "test-only-nim-bf16-single-gpu" not in text
-        component_modules = [
-            path.name for path in (core / "components").glob("*.py") if path.name != "__init__.py"
-        ]
-        assert component_modules == []
+        _assert_profile_id_not_in_production(TEST_ONLY_PROFILE_ID)
+        reset_registry()
 
     def test_unknown_named_profile_fails_closed(self):
         declaration = declaration_from_mapping(_declaration(profile_id="does-not-exist"))
@@ -319,47 +361,35 @@ class TestCliAndSchema:
         assert main(["engine-contract", "--list"]) == 0
         listed = json.loads(capsys.readouterr().out)
         assert listed["credentials_required"] is False
-        assert listed["profiles"][0]["profile_id"] == BUILTIN_VLLM_BF16_SINGLE_GPU
+        ids = [profile["profile_id"] for profile in listed["profiles"]]
+        assert ids.count(BUILTIN_VLLM_BF16_SINGLE_GPU) == 1
         assert main(["engine-contract", "--config", str(EXAMPLE_CONTRACT)]) == 0
         report = json.loads(capsys.readouterr().out)
         assert report["readiness"]["status"] == READINESS_READY
 
     def test_cli_blocks_an_unsupported_combination_before_inference(self, tmp_path, capsys):
-        payload = _declaration(precision="nvfp4")
+        payload = _declaration(precision="nvfp4", profile_id=BUILTIN_VLLM_BF16_SINGLE_GPU)
         path = tmp_path / "blocked.json"
         path.write_text(json.dumps(payload), encoding="utf-8")
         assert main(["engine-contract", "--config", str(path)]) == 2
         captured = capsys.readouterr()
         report = json.loads(captured.out)
         assert report["readiness"]["status"] == READINESS_BLOCKED
-        assert "unsupported" in captured.err
+        assert report["readiness"]["profile_id"] == BUILTIN_VLLM_BF16_SINGLE_GPU
+        assert "does not match" in captured.err
 
     def test_cli_reports_conditional_and_returns_nonzero(self, tmp_path, capsys):
-        class _ExternalNimProfile:
-            profile_id = "test-only-nim-bf16-single-gpu"
-            engine = "nim"
-            precision = "bf16"
-            topologies = frozenset({"single-gpu"})
-
-            def matches(self, declaration):
-                return declaration.engine == "nim" and declaration.precision == "bf16"
-
-            def evaluate(self, declaration):
-                return EngineReadiness(
-                    status=READINESS_CONDITIONAL,
-                    profile_id=self.profile_id,
-                    reasons=("unresolved NIM entitlement",),
-                    declaration=declaration,
-                )
-
-        register_engine_profile(_ExternalNimProfile())
+        reset_registry()
+        register_engine_profile(_ReservedConditionalProfile())
         path = tmp_path / "conditional.json"
-        path.write_text(json.dumps(_declaration(engine="nim")), encoding="utf-8")
+        path.write_text(json.dumps(_reserved_declaration()), encoding="utf-8")
         assert main(["engine-contract", "--config", str(path)]) == 2
         captured = capsys.readouterr()
         report = json.loads(captured.out)
         assert report["readiness"]["status"] == READINESS_CONDITIONAL
+        assert report["readiness"]["profile_id"] == TEST_ONLY_PROFILE_ID
         assert "conditional" in captured.err
+        reset_registry()
 
     def test_schema_rejects_a_mutable_identity(self):
         payload = json.loads(EXAMPLE_CONTRACT.read_text(encoding="utf-8"))
@@ -392,18 +422,22 @@ class TestFreshProcessComponentDiscovery:
         components = ROOT / "src" / "blackwell_lab" / "engines" / "components"
         module_path = components / "_tmp_discoverable_profile.py"
         module_name = "blackwell_lab.engines.components._tmp_discoverable_profile"
-        source = """
+        source = f"""
 from blackwell_lab.engines.contract import EngineReadiness, READINESS_CONDITIONAL
 from blackwell_lab.engines.registry import register_engine_profile
 
-class _DiscoverableNimProfile:
-    profile_id = "tmp-discoverable-nim-bf16-single-gpu"
-    engine = "nim"
-    precision = "bf16"
-    topologies = frozenset({"single-gpu"})
+class _DiscoverableReservedProfile:
+    profile_id = "{TMP_DISCOVERABLE_PROFILE_ID}"
+    engine = "{RESERVED_TEST_ENGINE}"
+    precision = "{RESERVED_TEST_PRECISION}"
+    topologies = frozenset({{"{RESERVED_TEST_TOPOLOGY["kind"]}"}})
 
     def matches(self, declaration):
-        return declaration.engine == self.engine and declaration.precision == self.precision
+        return (
+            declaration.engine == self.engine
+            and declaration.precision == self.precision
+            and declaration.topology.kind in self.topologies
+        )
 
     def evaluate(self, declaration):
         return EngineReadiness(
@@ -413,14 +447,13 @@ class _DiscoverableNimProfile:
             declaration=declaration,
         )
 
-register_engine_profile(_DiscoverableNimProfile())
+register_engine_profile(_DiscoverableReservedProfile())
 """
         try:
             module_path.write_text(source, encoding="utf-8")
             reset_registry()
             assert all(
-                profile.profile_id != "tmp-discoverable-nim-bf16-single-gpu"
-                for profile in list_profiles()
+                profile.profile_id != TMP_DISCOVERABLE_PROFILE_ID for profile in list_profiles()
             )
             spec = RealRunSpec(
                 profile_name="interactive",
@@ -434,20 +467,21 @@ register_engine_profile(_DiscoverableNimProfile())
                     "artifact": VALID_IDENTITY["model_artifact"],
                     "revision": VALID_IDENTITY["model_revision"],
                     "artifact_hash": VALID_IDENTITY["model_artifact_hash"],
-                    "precision": "bf16",
+                    "precision": RESERVED_TEST_PRECISION,
                 },
-                engine="nim",
+                engine=RESERVED_TEST_ENGINE,
                 engine_version="1.0.0",
                 container_digest=VALID_IDENTITY["container_digest"],
+                topology_kind=RESERVED_TEST_TOPOLOGY["kind"],
+                gpu_count=RESERVED_TEST_TOPOLOGY["gpu_count"],
+                node_count=RESERVED_TEST_TOPOLOGY["node_count"],
             )
             with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
                 require_real_spec_contract(spec)
-            assert get_profile("tmp-discoverable-nim-bf16-single-gpu").engine == "nim"
-            core = ROOT / "src" / "blackwell_lab" / "engines"
-            for path in core.glob("*.py"):
-                assert "tmp-discoverable-nim-bf16-single-gpu" not in path.read_text(
-                    encoding="utf-8"
-                )
+            assert get_profile(TMP_DISCOVERABLE_PROFILE_ID).engine == RESERVED_TEST_ENGINE
+            _assert_profile_id_not_in_production(
+                TMP_DISCOVERABLE_PROFILE_ID, exclude=frozenset({module_path})
+            )
         finally:
             module_path.unlink(missing_ok=True)
             sys.modules.pop(module_name, None)
