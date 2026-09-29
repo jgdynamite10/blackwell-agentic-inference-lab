@@ -295,6 +295,46 @@ def candidate_identity_digest(candidate_id: str) -> str:
     return hashlib.sha256(serialize_candidate(candidate_id)).hexdigest()
 
 
+PROMPT_VARIANT_P1 = "P1"
+P1_WORKLOAD_VERSION = "2.4.1"
+COMPARISON_IDENTITIES = (CANDIDATE_C1, CANDIDATE_C2, PROMPT_VARIANT_P1)
+
+
+def experimental_behavior_fields(identity: str) -> dict[str, Any]:
+    """Comparable behavior for C1, C2, or the offline prompt variant P1.
+
+    C1 and C2 stay on workload 2.4.0. P1 is workload 2.4.1 at C2's
+    temperature. The version-bound system prompt is included so a
+    prompt-only difference is visible. ``workload_version`` is provenance
+    for that binding, not a separate treatment. This view does not replace
+    :func:`serialize_candidate`. P1 is not an authorized live candidate.
+    """
+    if identity not in COMPARISON_IDENTITIES:
+        raise ConfigError("qualification comparison identity must be C1, C2, or P1")
+    base_id = CANDIDATE_C2 if identity == PROMPT_VARIANT_P1 else identity
+    fields = frozen_candidate_fields(base_id)
+    if identity == PROMPT_VARIANT_P1:
+        fields["candidate_id"] = PROMPT_VARIANT_P1
+        fields["workload_version"] = P1_WORKLOAD_VERSION
+    from blackwell_lab.workload.agent import system_prompt
+
+    scenario = next(iter(catalog().values()))
+    fields["system_prompt"] = system_prompt(scenario, str(fields["workload_version"]))
+    return fields
+
+
+def serialize_experimental_behavior(identity: str) -> bytes:
+    return json.dumps(
+        experimental_behavior_fields(identity),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def experimental_configuration_digest(identity: str) -> str:
+    return hashlib.sha256(serialize_experimental_behavior(identity)).hexdigest()
+
+
 def require_safe_run_label(run_label: str) -> str:
     if not _RUN_LABEL_RE.match(run_label):
         raise ConfigError("run_label must be short lowercase letters/digits/hyphens")

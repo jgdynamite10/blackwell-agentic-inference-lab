@@ -13,7 +13,7 @@ remediation using only its simulated tools:
 | --- | --- |
 | `get_service_health()` | Returns synthetic service/component health states for the scenario |
 | `query_metrics()` | Returns synthetic time-series slices (latency, error rate, saturation) |
-| `search_logs()` | Returns synthetic log lines matching a query, seeded per scenario. Workload 2.4.0 requires gathering log evidence for log-dependent incidents. |
+| `search_logs()` | Returns synthetic log lines whose message contains the query as a literal substring, seeded per scenario. Workload 2.4.0 requires gathering log evidence for log-dependent incidents. Workload 2.4.1 does not change this tool. |
 | `retrieve_runbook()` | Looks up a published runbook by **service/system key**. A hit (`found=true`) returns `runbook.remediation_ids` for that service; `found=false` means the key did not identify a published runbook. |
 | `check_recent_changes()` | Returns synthetic deploy/config-change events |
 | `recommend_remediation()` | Terminal action: the agent submits `diagnosis_id`, `rationale`, and a `remediation_id` returned by a prior successful `retrieve_runbook` |
@@ -27,7 +27,22 @@ a `remediation_id` sourced from `runbook.remediation_ids`. Valid
 remediation IDs are **not** placed in the task prompt (decision D-0019).
 Workload **2.4.0** is the qualification tool-contract correction; the
 scenario catalog, accepted answers, evidence IDs, and evaluator 3.1.0
-remain unchanged.
+remain unchanged. Workload **2.4.1** is derived from 2.4.0 and changes
+only the system-prompt evidence-collection instructions. It states that
+`search_logs` uses literal substring matching rather than semantic
+search; that queries should use exact identifiers, service names,
+configuration IDs, job IDs, or diagnostic terms supported by information
+already available to the agent; that a zero-match search must be retried
+with a different specific token before a terminal recommendation; that
+the agent must gather direct supporting evidence for its diagnosis before
+that recommendation; and that a plausible change record or runbook
+remediation is not a substitute for the required incident evidence.
+Tool schemas stay the 2.4.0 text. This records a clarification of the
+evidence-acquisition procedure. It is not a claim that qualification
+quality improved. The prompt names no scenario, accepted answer, or log
+line. Prompt variant **P1** is an offline serialized control for that
+prompt at temperature 0.2. It is not an authorized live `qualify-agent`
+candidate. C1 and C2 remain the workload 2.4.0 candidates.
 
 Each turn must produce exactly one native OpenAI-compatible function call.
 The six `TOOL_SPECS` contracts are projected onto deterministic OpenAI
@@ -93,7 +108,8 @@ reference and an alternative tool sequence both satisfy every predicate by
 construction, and tests prove it). Scenarios are versioned; the workload
 version appears in every run manifest. The Phase 2 catalog
 (`src/blackwell_lab/workload/scenarios.py`, catalog version 2.3.0;
-qualification tool-contract revision 2.4.0)
+qualification tool-contract revision 2.4.0; evidence-acquisition
+prompt clarification 2.4.1, which does not change catalog content)
 implements one scenario per class and is additionally **content-addressed**:
 the SHA-256 digest of the canonical catalog JSON is recorded in every run
 manifest under `workload.catalog_digest` (never as a model artifact hash).

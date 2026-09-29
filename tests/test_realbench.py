@@ -21,7 +21,11 @@ from blackwell_lab.cloud.realbench import (
 )
 from blackwell_lab.cloud.telemetry import GpuSample, TelemetryUnavailable, summarize_gpu_samples
 from blackwell_lab.paths import ResultsLocationError
-from blackwell_lab.workload.agent import SYSTEM_PROMPT_V230, SYSTEM_PROMPT_V240
+from blackwell_lab.workload.agent import (
+    SYSTEM_PROMPT_V230,
+    SYSTEM_PROMPT_V240,
+    SYSTEM_PROMPT_V241,
+)
 from blackwell_lab.workload.clock import SYSTEM_CLOCK
 from blackwell_lab.workload.model_client import (
     DeterministicMockClient,
@@ -457,9 +461,28 @@ class _RecordingUsageClient(UsageMockClient):
         yield from super().stream_turn(messages, settings, deadline=deadline, clock=clock)
 
 
+class _CountingUsageClient(UsageMockClient):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.calls = 0
+
+    def stream_turn(self, messages, settings, *, deadline=None, clock=SYSTEM_CLOCK):
+        self.calls += 1
+        yield from super().stream_turn(messages, settings, deadline=deadline, clock=clock)
+
+
 class TestWorkloadVersionBinding:
     def test_manifest_version_matches_the_executed_contract(self, real_results_dir):
-        for version, label in (("2.3.0", "legacy-v230"), ("2.4.0", "qual-v240")):
+        prompts = {
+            "2.3.0": SYSTEM_PROMPT_V230,
+            "2.4.0": SYSTEM_PROMPT_V240,
+            "2.4.1": SYSTEM_PROMPT_V241,
+        }
+        for version, label in (
+            ("2.3.0", "legacy-v230"),
+            ("2.4.0", "qual-v240"),
+            ("2.4.1", "prompt-v241"),
+        ):
             recording = _RecordingUsageClient()
             records = run_real_cell(
                 make_spec(
@@ -482,21 +505,17 @@ class TestWorkloadVersionBinding:
             assert records[0].manifest["workload"]["version"] == version
             assert recording.seen
             assert recording.seen[0][1].workload_version == version
-            assert (
-                recording.seen[0][0][0].content
-                == {
-                    "2.3.0": SYSTEM_PROMPT_V230,
-                    "2.4.0": SYSTEM_PROMPT_V240,
-                }[version]
-            )
+            assert recording.seen[0][0][0].content == prompts[version]
+        spy = _CountingUsageClient()
         with pytest.raises(ConfigError, match="unknown workload version"):
             run_real_cell(
                 make_spec(workload_version="9.9.9", run_label="unknown-version"),
-                UsageMockClient(),
+                spy,
                 host=HOST,
                 sampler_factory=FakeSampler,
                 clock=FakeClock(),
             )
+        assert spy.calls == 0
 
 
 class TestVerifiability:
