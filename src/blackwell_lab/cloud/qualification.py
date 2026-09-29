@@ -62,9 +62,11 @@ SPLIT_RULE = "sha256-hex-sort"
 
 CANDIDATE_C1 = "C1"
 CANDIDATE_C2 = "C2"
-AUTHORIZED_CANDIDATES = (CANDIDATE_C1, CANDIDATE_C2)
+CANDIDATE_P1 = "P1"
+AUTHORIZED_CANDIDATES = (CANDIDATE_C1, CANDIDATE_C2, CANDIDATE_P1)
 C1_TEMPERATURE = 1.0
 C2_TEMPERATURE = 0.2
+P1_TEMPERATURE = C2_TEMPERATURE
 FROZEN_MAX_TOKENS = 1024
 
 STAGE_DEVELOPMENT = "development"
@@ -238,21 +240,43 @@ def require_complete_stage_evidence(stage: str, outcomes: Sequence[object]) -> N
         )
 
 
+#: C1 and C2 stay on the 2.4.0 tool-contract correction. P1 is the
+#: workload 2.4.1 prompt-only candidate. Development remains the first
+#: required gate for every candidate; this mapping does not skip it.
+P1_WORKLOAD_VERSION = "2.4.1"
+CANDIDATE_WORKLOAD_VERSIONS = {
+    CANDIDATE_C1: QUALIFICATION_WORKLOAD_VERSION,
+    CANDIDATE_C2: QUALIFICATION_WORKLOAD_VERSION,
+    CANDIDATE_P1: P1_WORKLOAD_VERSION,
+}
+_UNKNOWN_CANDIDATE = "qualification candidate must be C1, C2, or P1"
+
+
+def candidate_workload_version(candidate_id: str) -> str:
+    """Workload contract bound to one authorized qualification candidate."""
+    try:
+        return CANDIDATE_WORKLOAD_VERSIONS[candidate_id]
+    except KeyError as exc:
+        raise ConfigError(_UNKNOWN_CANDIDATE) from exc
+
+
 def candidate_temperature(candidate_id: str) -> float:
     if candidate_id == CANDIDATE_C1:
         return C1_TEMPERATURE
     if candidate_id == CANDIDATE_C2:
         return C2_TEMPERATURE
-    raise ConfigError("qualification candidate must be C1 or C2")
+    if candidate_id == CANDIDATE_P1:
+        return P1_TEMPERATURE
+    raise ConfigError(_UNKNOWN_CANDIDATE)
 
 
 def frozen_candidate_fields(candidate_id: str) -> dict[str, Any]:
     if candidate_id not in AUTHORIZED_CANDIDATES:
-        raise ConfigError("qualification candidate must be C1 or C2")
+        raise ConfigError(_UNKNOWN_CANDIDATE)
     return {
         "candidate_id": candidate_id,
         "workflow": QUALIFICATION_WORKFLOW,
-        "workload_version": QUALIFICATION_WORKLOAD_VERSION,
+        "workload_version": candidate_workload_version(candidate_id),
         "catalog_workload_version": CATALOG_WORKLOAD_VERSION,
         "provider": FROZEN_PROVIDER,
         "region": FROZEN_REGION,
@@ -295,27 +319,17 @@ def candidate_identity_digest(candidate_id: str) -> str:
     return hashlib.sha256(serialize_candidate(candidate_id)).hexdigest()
 
 
-PROMPT_VARIANT_P1 = "P1"
-P1_WORKLOAD_VERSION = "2.4.1"
-COMPARISON_IDENTITIES = (CANDIDATE_C1, CANDIDATE_C2, PROMPT_VARIANT_P1)
+PROMPT_VARIANT_P1 = CANDIDATE_P1
 
 
 def experimental_behavior_fields(identity: str) -> dict[str, Any]:
-    """Comparable behavior for C1, C2, or the offline prompt variant P1.
+    """Candidate identity plus the version-bound system prompt.
 
-    C1 and C2 stay on workload 2.4.0. P1 is workload 2.4.1 at C2's
-    temperature. The version-bound system prompt is included so a
-    prompt-only difference is visible. ``workload_version`` is provenance
-    for that binding, not a separate treatment. This view does not replace
-    :func:`serialize_candidate`. P1 is not an authorized live candidate.
+    The prompt is comparison evidence. It is not part of
+    :func:`serialize_candidate`, so C1 and C2 identity digests stay
+    byte-stable. Workload version is provenance for the prompt binding.
     """
-    if identity not in COMPARISON_IDENTITIES:
-        raise ConfigError("qualification comparison identity must be C1, C2, or P1")
-    base_id = CANDIDATE_C2 if identity == PROMPT_VARIANT_P1 else identity
-    fields = frozen_candidate_fields(base_id)
-    if identity == PROMPT_VARIANT_P1:
-        fields["candidate_id"] = PROMPT_VARIANT_P1
-        fields["workload_version"] = P1_WORKLOAD_VERSION
+    fields = frozen_candidate_fields(identity)
     from blackwell_lab.workload.agent import system_prompt
 
     scenario = next(iter(catalog().values()))
@@ -429,9 +443,12 @@ def validate_authorized_qualification_config(
     if config.get("candidate_id") != candidate_id:
         raise ConfigError("qualify-agent config candidate_id must match --candidate")
     if candidate_id not in AUTHORIZED_CANDIDATES:
-        raise ConfigError("qualification candidate must be C1 or C2")
-    if config.get("workload_version") not in (None, QUALIFICATION_WORKLOAD_VERSION):
-        raise ConfigError("qualify-agent workload_version must equal 2.4.0")
+        raise ConfigError(_UNKNOWN_CANDIDATE)
+    expected_version = candidate_workload_version(candidate_id)
+    if config.get("workload_version") not in (None, expected_version):
+        raise ConfigError(
+            f"qualify-agent {candidate_id} workload_version must equal {expected_version}"
+        )
     if WORKLOAD_VERSION != CATALOG_WORKLOAD_VERSION:
         raise ConfigError("the scenario catalog identity must remain 2.3.0")
 
@@ -893,7 +910,7 @@ def sanitized_receipt(
         "run_label": run_label,
         "config_sha256": config_sha256,
         "candidate_identity_sha256": identity_digest,
-        "workload_version": QUALIFICATION_WORKLOAD_VERSION,
+        "workload_version": candidate_workload_version(candidate_id),
         "catalog_workload_version": CATALOG_WORKLOAD_VERSION,
         "gates": gates,
         "stopped": stopped,

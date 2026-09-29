@@ -40,9 +40,12 @@ remediation is not a substitute for the required incident evidence.
 Tool schemas stay the 2.4.0 text. This records a clarification of the
 evidence-acquisition procedure. It is not a claim that qualification
 quality improved. The prompt names no scenario, accepted answer, or log
-line. Prompt variant **P1** is an offline serialized control for that
-prompt at temperature 0.2. It is not an authorized live `qualify-agent`
-candidate. C1 and C2 remain the workload 2.4.0 candidates.
+line. Candidate **P1** is the authorized `qualify-agent` binding for
+that prompt: workload 2.4.1 at temperature 0.2, with every other
+generation, model, and serving pin identical to C2. C1 and C2 remain
+workload 2.4.0. Development, holdout, and freeze each keep a separate
+digest-bearing approval, and development remains the first required
+gate. This does not claim that qualification quality improved.
 
 Each turn must produce exactly one native OpenAI-compatible function call.
 The six `TOOL_SPECS` contracts are projected onto deterministic OpenAI

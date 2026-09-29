@@ -1010,16 +1010,20 @@ remediation, log line, or evaluator predicate. Tool descriptions and
 tool schemas remain the 2.4.0 text. Unknown workload versions still fail
 closed.
 
-Prompt variant **P1** is an offline serialized control: workload 2.4.1,
-temperature 0.2, and the existing top_p, seed, max tokens, Nemotron
-model and revision, vLLM image and engine, native OpenAI tool transport,
-development and holdout schedules, evaluator 3.1.0, thresholds, accepted
-answers, and task counts. Compared with C2, serialized experimental
-behavior differs only in variant identity, workload version, the
-version-bound system prompt, and the resulting configuration digest.
-Workload-version metadata is provenance for that prompt binding, not an
-additional treatment. P1 is not an authorized live `qualify-agent`
-candidate. C1 and C2 identity serialization is unchanged.
+Candidate **P1** is an authorized `qualify-agent` candidate:
+workload 2.4.1, temperature 0.2, and the existing top_p, seed, max
+tokens, Nemotron model and revision, vLLM image and engine, native
+OpenAI tool transport, development and holdout schedules, evaluator
+3.1.0, thresholds, accepted answers, and task counts. The candidate
+workload mapping is C1 to 2.4.0, C2 to 2.4.0, and P1 to 2.4.1. Compared with
+C2, serialized experimental behavior differs only in candidate
+identity, workload version, the version-bound system prompt, and the
+resulting digests. Workload-version metadata is provenance for that
+prompt binding, not an additional treatment. P1 uses the same
+development, holdout, and freeze stages. Development remains the first
+required gate. Each stage keeps its own digest-bearing approval.
+Authorizing the candidate does not execute it. C1 and C2 identity
+serialization is unchanged.
 
 **Rationale.** Owner instruction to clarify evidence acquisition in the
 system prompt only. Private diagnostic notes motivated the wording and

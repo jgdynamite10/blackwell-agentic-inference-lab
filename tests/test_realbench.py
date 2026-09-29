@@ -517,6 +517,41 @@ class TestWorkloadVersionBinding:
             )
         assert spy.calls == 0
 
+    def test_p1_candidate_mapping_selects_v241_prompt_and_manifest(self, real_results_dir):
+        from blackwell_lab.cloud.qualification import (
+            candidate_temperature,
+            candidate_workload_version,
+        )
+        from blackwell_lab.workload.evaluator import EVALUATOR_VERSION
+
+        version = candidate_workload_version("P1")
+        recording = _RecordingUsageClient()
+        records = run_real_cell(
+            make_spec(
+                workload_version=version,
+                generation=GenerationSettings(
+                    temperature=candidate_temperature("P1"),
+                    top_p=0.95,
+                    reasoning_mode=True,
+                    seed=20260906,
+                    workload_version=version,
+                ),
+                run_label="p1-manifest",
+                warmup_passes=0,
+                tasks_per_repetition=10,
+            ),
+            recording,
+            host=HOST,
+            sampler_factory=FakeSampler,
+            clock=FakeClock(),
+        )
+        manifest = records[0].manifest
+        assert manifest["workload"]["version"] == "2.4.1"
+        assert manifest["workload"]["evaluator_version"] == EVALUATOR_VERSION == "3.1.0"
+        assert recording.seen[0][0][0].content == SYSTEM_PROMPT_V241
+        assert recording.seen[0][1].temperature == 0.2
+        assert recording.seen[0][1].workload_version == "2.4.1"
+
 
 class TestVerifiability:
     def test_persisted_documents_round_trip_through_json(self, real_results_dir):

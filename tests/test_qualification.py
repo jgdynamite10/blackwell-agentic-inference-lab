@@ -21,6 +21,7 @@ from blackwell_lab.cloud.qualification import (
     AUTHORIZED_CANDIDATES,
     C1_TEMPERATURE,
     C2_TEMPERATURE,
+    CANDIDATE_P1,
     CATALOG_WORKLOAD_VERSION,
     DEVELOPMENT_QUALITY_FLOOR,
     DEVELOPMENT_TASKS,
@@ -55,6 +56,7 @@ from blackwell_lab.cloud.qualification import (
     approval_phrase,
     candidate_identity_digest,
     candidate_temperature,
+    candidate_workload_version,
     compute_qualification_metrics,
     evaluate_production_like_target,
     evaluate_stage_thresholds,
@@ -195,7 +197,7 @@ def qualification_config_dict(candidate_id="C1", stage="development"):
     return {
         "workflow": "qualify-agent",
         "candidate_id": candidate_id,
-        "workload_version": QUALIFICATION_WORKLOAD_VERSION,
+        "workload_version": candidate_workload_version(candidate_id),
         "endpoint": {"base_url": "http://127.0.0.1:8000/v1", "model": "m"},
         "cloud": {
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
@@ -563,9 +565,13 @@ class TestCandidates:
         assert g1 == g2
         assert candidate_identity_digest("C1") != candidate_identity_digest("C2")
 
-    def test_no_third_candidate(self):
-        with pytest.raises(ConfigError, match="C1 or C2"):
+    def test_unknown_candidate_is_rejected(self):
+        with pytest.raises(ConfigError, match="C1, C2, or P1"):
             frozen_candidate_fields("C3")
+        with pytest.raises(ConfigError, match="C1, C2, or P1"):
+            candidate_temperature("C3")
+        with pytest.raises(ConfigError, match="C1, C2, or P1"):
+            candidate_workload_version("C3")
 
 
 class TestFrozenSplitAndCounts:
@@ -1279,28 +1285,124 @@ class TestPromptVariantP1:
         )
 
     def test_c1_and_c2_identity_records_are_unchanged(self):
+        assert CANDIDATE_P1 in AUTHORIZED_CANDIDATES
+        assert PROMPT_VARIANT_P1 in AUTHORIZED_CANDIDATES
         assert candidate_identity_digest("C1") == FROZEN_C1_IDENTITY_SHA256
         assert candidate_identity_digest("C2") == FROZEN_C2_IDENTITY_SHA256
         c1 = json.loads(serialize_candidate("C1"))
         c2 = json.loads(serialize_candidate("C2"))
+        p1 = json.loads(serialize_candidate("P1"))
         assert "system_prompt" not in c1
         assert "system_prompt" not in c2
+        assert "system_prompt" not in p1
         assert c1["workload_version"] == c2["workload_version"] == "2.4.0"
+        assert p1["workload_version"] == "2.4.1"
         assert c1["generation"]["temperature"] == 1.0
-        assert c2["generation"]["temperature"] == 0.2
-        assert PROMPT_VARIANT_P1 not in AUTHORIZED_CANDIDATES
+        assert c2["generation"]["temperature"] == p1["generation"]["temperature"] == 0.2
+        assert _differing_paths(c2, p1) == ["candidate_id", "workload_version"]
+        assert candidate_identity_digest("P1") != candidate_identity_digest("C2")
+        assert candidate_identity_digest("P1") != experimental_configuration_digest("P1")
         assert QUALIFICATION_WORKLOAD_VERSION == "2.4.0"
-        with pytest.raises(ConfigError, match="C1 or C2"):
-            frozen_candidate_fields("P1")
-        with pytest.raises(ConfigError, match="C1 or C2"):
-            candidate_temperature("P1")
         held = qualification_config_dict("C2")
         held["workload_version"] = "2.4.1"
         with pytest.raises(ConfigError, match=r"2\.4\.0"):
             validate_authorized_qualification_config(held, candidate_id="C2", stage="development")
-        rejected = qualification_config_dict("C2")
-        rejected["candidate_id"] = "P1"
-        with pytest.raises(ConfigError, match="C1 or C2"):
+        c1_wrong = qualification_config_dict("C1")
+        c1_wrong["workload_version"] = "2.4.1"
+        with pytest.raises(ConfigError, match=r"2\.4\.0"):
             validate_authorized_qualification_config(
-                rejected, candidate_id="P1", stage="development"
+                c1_wrong, candidate_id="C1", stage="development"
             )
+        p1_wrong = qualification_config_dict("P1")
+        p1_wrong["workload_version"] = "2.4.0"
+        with pytest.raises(ConfigError, match=r"2\.4\.1"):
+            validate_authorized_qualification_config(
+                p1_wrong, candidate_id="P1", stage="development"
+            )
+
+    def test_p1_validates_for_every_stage_on_workload_241(self):
+        for stage in ("development", "holdout", "freeze"):
+            config = qualification_config_dict("P1", stage)
+            validate_authorized_qualification_config(config, candidate_id="P1", stage=stage)
+            assert config["candidate_id"] == "P1"
+            assert config["workload_version"] == "2.4.1"
+            assert config["generation"]["temperature"] == 0.2
+            assert config["tasks_per_repetition"] == stage_spec(stage)["tasks"]
+            assert config["warmup_passes"] == stage_spec(stage)["warmup_passes"]
+        assert stage_spec("development")["tasks"] == 20
+        assert stage_spec("development")["warmup_passes"] == 0
+        assert stage_spec("holdout")["tasks"] == 20
+        assert stage_spec("freeze")["tasks"] == 200
+        assert stage_spec("freeze")["warmup_passes"] == 1
+
+    def test_qualify_agent_binds_p1_before_inference(self, tmp_path, monkeypatch, capsys):
+        from fakes import FakeClock
+
+        from blackwell_lab.cloud import provenance, realbench
+
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        monkeypatch.setattr(cli, "_git_head", lambda: COMMIT)
+        monkeypatch.setattr(cli, "_tree_clean", lambda: True)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        lifecycle.write_private_json(paths.ledger_path, ready_ledger())
+        calls: list[object] = []
+
+        def fake_run(spec, *_args, **_kwargs):
+            calls.append(spec)
+            return [_FakeRecord(run_id="qual", outcomes=_stage_outcomes("development"))]
+
+        monkeypatch.setattr(provenance, "verify_live_provenance", lambda **kwargs: _observed())
+        monkeypatch.setattr(realbench, "run_real_cell", fake_run)
+        config = qualification_config_dict("P1", "development")
+        path = tmp_path / "p1.json"
+        path.write_text(json.dumps(config), encoding="utf-8")
+        phrase = approval_phrase(RUN_TAG, "qual-a", "P1", config_sha256(path))
+        assert "candidate P1" in phrase
+        assert main(qual_argv(path, candidate="P1", approve=phrase)) == 0
+        spec = calls[0]
+        assert spec.generation.temperature == 0.2
+        assert spec.generation.top_p == 0.95
+        assert spec.generation.seed == 20260906
+        assert spec.generation.workload_version == "2.4.1"
+        assert spec.workload_version == "2.4.1"
+        assert spec.run_label == "qual-a-p1-development"
+        assert spec.tasks_per_repetition == 20
+        assert spec.warmup_passes == 0
+        assert spec.template_ids == DEVELOPMENT_TEMPLATE_IDS
+        report = json.loads(capsys.readouterr().out)
+        assert report["candidate_id"] == "P1"
+        assert report["workload_version"] == "2.4.1"
+        assert report["stage"] == "development"
+        assert report["candidate_identity_sha256"] == candidate_identity_digest("P1")
+        assert report["config_sha256"] == config_sha256(path)
+        assert report["config_sha256"] != experimental_configuration_digest("P1")
+        on_disk = json.loads(
+            (external / "qualification-runs" / "qual-a-p1-development-receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert on_disk["candidate_id"] == "P1"
+        assert on_disk["workload_version"] == "2.4.1"
+        scenario = catalog()["pod-failures-001"]
+        recording = _RecordingClient()
+        run_task(
+            scenario,
+            recording,
+            SimulatedToolbox(scenario, clock=FakeClock()),
+            spec.generation,
+            timeout_s=30.0,
+            clock=FakeClock(),
+        )
+        messages, settings = recording.seen[0]
+        assert messages[0].content == SYSTEM_PROMPT_V241
+        assert settings.workload_version == "2.4.1"
+        assert settings.temperature == 0.2
+        calls.clear()
+        mismatched = qualification_config_dict("P1", "development")
+        mismatched["workload_version"] = "9.9.9"
+        bad_path = tmp_path / "bad.json"
+        bad_path.write_text(json.dumps(mismatched), encoding="utf-8")
+        assert main(qual_argv(bad_path, candidate="P1")) == 1
+        assert calls == []
