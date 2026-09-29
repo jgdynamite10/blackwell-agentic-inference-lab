@@ -359,7 +359,7 @@ class TestExecutionRefused:
     def test_live_provenance_refuses_conditional_nim(self, tmp_path):
         import hashlib
 
-        from test_provenance import fake_http_get, make_approved, run_verify
+        from test_provenance import fake_http_get, fake_runner, make_approved, run_verify
 
         from blackwell_lab.cloud.provenance import ProvenanceError
 
@@ -375,13 +375,175 @@ class TestExecutionRefused:
         approved = make_approved(model_dir[2])
         approved["serving"]["engine"] = "nim"
         approved["serving"]["engine_version"] = DOCUMENTED_ENGINE_VERSION
+        approved["serving"]["container_digest"] = _IDENTITY["container_digest"]
+        approved["model"]["artifact"] = _IDENTITY["model_artifact"]
         approved["model"]["precision"] = "bf16"
         with pytest.raises(ProvenanceError, match="not authorized for genuine inference"):
             run_verify(
                 model_dir,
                 approved=approved,
+                runner=fake_runner(digest=_IDENTITY["container_digest"]),
                 http_get=fake_http_get(engine_version=DOCUMENTED_ENGINE_VERSION),
             )
+
+
+class TestModelContainerBoundary:
+    def test_unrelated_model_is_not_conditional(self):
+        identity = dict(_IDENTITY)
+        identity["model_artifact"] = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
+        readiness = evaluate_engine_contract(
+            declaration_from_mapping(_declaration(identity=identity))
+        )
+        assert readiness.status == READINESS_BLOCKED
+        assert readiness.status != READINESS_CONDITIONAL
+        assert readiness.profile_id not in _nim_profile_ids()
+
+    def test_unrelated_container_repository_is_not_conditional(self):
+        identity = dict(_IDENTITY)
+        identity["container_digest"] = "docker.io/vllm/vllm-openai@sha256:" + "cd" * 32
+        readiness = evaluate_engine_contract(
+            declaration_from_mapping(_declaration(identity=identity))
+        )
+        assert readiness.status == READINESS_BLOCKED
+        assert readiness.status != READINESS_CONDITIONAL
+        assert readiness.profile_id not in _nim_profile_ids()
+
+    @pytest.mark.parametrize(
+        "identity_override",
+        [
+            {"model_artifact": "meta/llama-unrelated"},
+            {"container_digest": "nvcr.io/nim/nvidia/other-model@sha256:" + "ab" * 32},
+        ],
+    )
+    def test_pinned_wrong_model_or_container_is_blocked(self, identity_override):
+        identity = dict(_IDENTITY)
+        identity.update(identity_override)
+        readiness = evaluate_engine_contract(
+            declaration_from_mapping(
+                _declaration(profile_id=_profile_id("bf16"), identity=identity)
+            )
+        )
+        assert readiness.status == READINESS_BLOCKED
+        assert readiness.profile_id == _profile_id("bf16")
+        with pytest.raises(EngineContractError, match="does not match"):
+            require_supported_contract(readiness)
+
+    def test_correct_model_and_repository_shape_stays_conditional(self):
+        other_digest = "nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:" + "ef" * 32
+        for digest in (_IDENTITY["container_digest"], other_digest, _CATALOG_AMD64_DIGEST):
+            identity = dict(_IDENTITY)
+            identity["container_digest"] = digest
+            readiness = evaluate_engine_contract(
+                declaration_from_mapping(_declaration(identity=identity))
+            )
+            assert readiness.status == READINESS_CONDITIONAL
+            assert readiness.profile_id == _profile_id("bf16")
+            assert readiness.status != READINESS_READY
+            with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
+                require_ready_contract(readiness)
+
+    def test_wrong_boundary_never_reaches_the_spy_client(self):
+        class _Spy(DeterministicMockClient):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            def stream_turn(self, messages, settings, *, deadline=None, clock=SYSTEM_CLOCK):
+                self.calls += 1
+                raise AssertionError("inference client was called")
+
+        client = _Spy()
+        spec = RealRunSpec(
+            profile_name="interactive",
+            concurrency=1,
+            comparison_mode="provider-native",
+            instance_type="g9-fake-gpu-plan",
+            region="us-fake-1",
+            list_price_usd_per_hour=2.5,
+            price_source_date="2026-09-06",
+            model={
+                "artifact": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+                "revision": _IDENTITY["model_revision"],
+                "artifact_hash": _IDENTITY["model_artifact_hash"],
+                "precision": "bf16",
+            },
+            engine="nim",
+            engine_version=DOCUMENTED_ENGINE_VERSION,
+            container_digest="docker.io/vllm/vllm-openai@sha256:" + "cd" * 32,
+        )
+        with pytest.raises(EngineContractError):
+            run_real_cell(spec, client, host={"gpu_count": 1}, sampler_factory=lambda: None)
+        assert client.calls == 0
+
+
+class TestImportBeforeDiscovery:
+    def test_import_before_load_registers_each_profile_once(self):
+        script = r"""
+from blackwell_lab.engines import list_profiles, load_registered_components, reset_registry
+
+reset_registry()
+import blackwell_lab.engines.components.nim  # noqa: F401
+
+load_registered_components()
+ids = [profile.profile_id for profile in list_profiles()]
+expected = (
+    "nim-nemotron35-bf16-single-gpu",
+    "nim-nemotron35-w4a16-single-gpu",
+    "nim-nemotron35-nvfp4-single-gpu",
+)
+for profile_id in expected:
+    if ids.count(profile_id) != 1:
+        raise SystemExit(f"{profile_id} count={ids.count(profile_id)} ids={ids}")
+print("import-before-discovery-ok")
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert "import-before-discovery-ok" in completed.stdout
+
+    def test_conflicting_profile_id_fails_closed(self):
+        script = r"""
+from blackwell_lab.engines import EngineContractError, register_engine_profile, reset_registry
+
+reset_registry()
+
+class _Foreign:
+    profile_id = "nim-nemotron35-bf16-single-gpu"
+    engine = "vllm"
+    precision = "bf16"
+    topologies = frozenset({"single-gpu"})
+    implementation_id = "test-foreign"
+
+    def matches(self, declaration):
+        return False
+
+    def evaluate(self, declaration):
+        raise AssertionError("foreign profile evaluate was called")
+
+register_engine_profile(_Foreign())
+try:
+    import blackwell_lab.engines.components.nim  # noqa: F401
+except EngineContractError as exc:
+    if "conflicting engine profile already registered" not in str(exc):
+        raise SystemExit(f"unexpected error: {exc}")
+else:
+    raise SystemExit("conflicting registration was accepted")
+print("conflict-fail-closed-ok")
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert "conflict-fail-closed-ok" in completed.stdout
 
 
 class TestExistingVllmUnchanged:
@@ -475,6 +637,9 @@ class TestDocumentation:
             "Offline classification only.",
             "Live execution blocked.",
             "Conditional does not authorize inference.",
+            "Conditional never authorizes genuine inference.",
+            "nvidia/nemotron-3.5-lightning",
+            "nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:",
             "No launch path exists.",
             "No benchmark finding is recorded.",
             "Future live execution requires separately reviewed immutable identities",

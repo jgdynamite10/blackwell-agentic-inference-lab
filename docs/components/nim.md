@@ -7,10 +7,7 @@ result, and not permission to run a model.
 **Live execution blocked.** No NIM profile registered here is `ready`.
 The genuine execution gate accepts only `ready`.
 
-**Conditional does not authorize inference.** A conditional result means
-the declaration matches the documented surface and unresolved conditions
-remain. It must not reach client construction, inference, measurement, or
-result creation.
+**Conditional does not authorize inference. Conditional never authorizes genuine inference.** A conditional result means the declaration matches the documented surface and unresolved conditions remain. It must not reach client construction, inference, measurement, or result creation.
 
 **No launch path exists.** This component does not contain a container
 pull, a server start, a bootstrap step, a Kubernetes manifest, or a
@@ -29,10 +26,19 @@ owner gives the separate digest-bearing approval for that execution.
 
 Automatic discovery registers exactly these three profiles. Each one owns
 `engine=nim`, topology `single-gpu`, and engine version `2.0.13` for one
-precision. The classification is `conditional` when that surface matches
-and required entitlements are not failed. It is `blocked` when the version,
+precision, and only for this model family and container repository:
+
+- model artifact: `nvidia/nemotron-3.5-lightning`
+- container identity:
+  `nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:<64 lowercase hex>`
+
+Any 64-character lowercase hex digest in that repository satisfies the
+shape. No specific digest is an adopted execution pin. The classification
+is `conditional` when that surface matches and required entitlements are
+not failed. It is `blocked` when the model, container repository, version,
 precision, or topology is outside the surface, or when a required
-entitlement is false or unknown. No declaration evaluates to `ready`.
+entitlement is false or unknown. Conditional never authorizes genuine
+inference. No declaration evaluates to `ready`.
 
 | Profile ID | Precision | Topology | Engine version | Classification |
 | --- | --- | --- | --- | --- |
@@ -70,10 +76,16 @@ claims.
 - A matching, well-formed declaration is conditional. Required entitlement
   false or unknown is blocked by the shared contract finalizer. Unsupported
   version, precision, and topology are blocked.
-- The profile owns engine version `2.0.13` only. A declaration that names
-  another engine version does not match these profiles.
+- The profile owns engine version `2.0.13`, model family
+  `nvidia/nemotron-3.5-lightning`, and container repository
+  `nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b` with a
+  `sha256:<64 lowercase hex>` digest. A different model artifact, container
+  repository, or engine version does not match these profiles.
 - The catalog linux/amd64 digest is recorded as a retrieved fact and is
-  not compared, accepted, or frozen by the profile.
+  not compared, accepted, or frozen by the profile. Exact digest adoption,
+  the embedded model revision, the embedded artifact digest, account
+  entitlement, the runtime profile ID, workload 2.4.0 native-tool
+  compatibility, and live RTX PRO 6000 behavior remain unresolved.
 - B200, GB200, GB300, and generic "Blackwell or newer" wording do not
   identify this SKU. The verified-GPU row that names
   `NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition` is the hardware fact used
