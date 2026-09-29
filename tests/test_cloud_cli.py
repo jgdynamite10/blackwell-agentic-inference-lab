@@ -78,6 +78,46 @@ class TestQualifyAgentRegistration:
         assert args.candidate == "C1"
         assert args.stage == "development"
 
+    def test_parser_accepts_p1_and_rejects_an_unknown_candidate(self, capsys):
+        parser = cli.build_parser()
+        args = parser.parse_args(
+            [
+                "qualify-agent",
+                "--run-tag",
+                "p3-qual-20260918a",
+                "--run-label",
+                "qual-a",
+                "--candidate",
+                "P1",
+                "--stage",
+                "development",
+                "--config",
+                "/absolute/outside/qualify.json",
+            ]
+        )
+        assert args.candidate == "P1"
+        with pytest.raises(SystemExit) as caught:
+            parser.parse_args(["qualify-agent", "--help"])
+        assert caught.value.code == 0
+        help_text = " ".join(capsys.readouterr().out.split())
+        assert "workload 2.4.1 prompt-only variant at temperature 0.2" in help_text
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                [
+                    "qualify-agent",
+                    "--run-tag",
+                    "p3-qual-20260918a",
+                    "--run-label",
+                    "qual-a",
+                    "--candidate",
+                    "C9",
+                    "--stage",
+                    "development",
+                    "--config",
+                    "/absolute/outside/qualify.json",
+                ]
+            )
+
 
 def pilot_config(tmp_path, comparison_mode="provider-native", **overrides):
     config = {

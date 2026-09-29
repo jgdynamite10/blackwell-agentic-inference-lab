@@ -20,9 +20,10 @@ Subcommands map one-to-one to the separated workflows required by Phase 3A:
                       provider-native only, live provenance verified first.
 - ``mvl-baseline``    owner-approved D-0017 Akamai minimum valuable lab
                       (provider-native, three cells; fail-closed).
-- ``qualify-agent``   owner-approved D-0019 bounded agent-quality
-                      qualification (C1/C2, frozen dev/holdout/freeze;
-                      fail-closed; no infrastructure changes).
+- ``qualify-agent``   owner-approved agent-quality qualification
+                      (C1/C2 on workload 2.4.0, P1 on workload 2.4.1;
+                      frozen dev/holdout/freeze; fail-closed; no
+                      infrastructure changes).
 - ``full-baseline``   DISABLED: the research-grade 12-cell baseline is not
                       part of the MVL.
 - ``verify-results``  external verification of persisted genuine results;
@@ -1121,7 +1122,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         candidate_id = args.candidate
         stage = args.stage
         if candidate_id not in qualification.AUTHORIZED_CANDIDATES:
-            raise ConfigError("qualification candidate must be C1 or C2")
+            raise ConfigError("qualification candidate must be C1, C2, or P1")
         if stage not in qualification.AUTHORIZED_STAGES:
             raise ConfigError("qualification stage must be development, holdout, or freeze")
         qualification.require_frozen_split()
@@ -1241,11 +1242,11 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 top_p=qualification.FROZEN_TOP_P,
                 seed=qualification.FROZEN_SEED,
                 reasoning_mode=qualification.FROZEN_REASONING_MODE,
-                workload_version=qualification.QUALIFICATION_WORKLOAD_VERSION,
+                workload_version=qualification.candidate_workload_version(candidate_id),
             ),
             template_ids=spec["template_ids"],
             artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
-            workload_version=qualification.QUALIFICATION_WORKLOAD_VERSION,
+            workload_version=qualification.candidate_workload_version(candidate_id),
         )
         client = OpenAICompatibleClient(
             endpoint["base_url"],
@@ -1528,8 +1529,9 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser = sub.add_parser(
         "qualify-agent",
         help=(
-            "Owner-approved D-0019 bounded agent-quality qualification "
-            "(C1/C2, frozen development/holdout/freeze stages)."
+            "Owner-approved agent-quality qualification "
+            "(C1/C2 on workload 2.4.0, P1 on workload 2.4.1; "
+            "frozen development/holdout/freeze stages)."
         ),
     )
     qualify_parser.add_argument("--run-tag", required=True)
@@ -1537,8 +1539,12 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2"),
-        help="Frozen candidate C1 (temperature 1.0) or fallback C2 (temperature 0.2).",
+        choices=("C1", "C2", "P1"),
+        help=(
+            "C1 (temperature 1.0, workload 2.4.0), "
+            "C2 (temperature 0.2, workload 2.4.0), or "
+            "P1, the workload 2.4.1 prompt-only variant at temperature 0.2."
+        ),
     )
     qualify_parser.add_argument(
         "--stage",

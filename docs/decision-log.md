@@ -980,3 +980,51 @@ manifest assembly now require `ready`. Component discovery runs on that
 evaluation path, not only in the offline CLI. Entitlement parsing
 rejects malformed members instead of coercing them. The public register
 is [component-readiness.md](component-readiness.md).
+
+## 2026-09-29 — D-0021: Workload 2.4.1 evidence-acquisition prompt clarification
+
+**Workloads 2.3.0 and 2.4.0, candidates C1 and C2, evaluator 3.1.0,
+scenario content, accepted answers, thresholds, tool behavior, lifecycle,
+and publication policy are unchanged.** No qualification outcome is
+published with this entry. Those earlier definitions predate this
+clarification. This entry does not execute qualification, provision
+resources, download models, or claim that the new prompt improves quality.
+
+**Decision.** Add immutable workload version **2.4.1**, derived from
+2.4.0. The only contract change is the generic system-prompt
+evidence-collection instruction:
+
+1. `search_logs` uses literal substring matching, not semantic search.
+2. Search queries should use exact identifiers, service names,
+   configuration IDs, job IDs, or diagnostic terms supported by
+   information already available to the agent.
+3. A zero-match search must be retried with a different specific token
+   before a terminal recommendation.
+4. The agent must gather direct supporting evidence for its diagnosis
+   before submitting the terminal recommendation.
+5. A plausible change record or runbook remediation is not a substitute
+   for the required incident evidence.
+
+The instruction names no scenario, accepted diagnosis, accepted
+remediation, log line, or evaluator predicate. Tool descriptions and
+tool schemas remain the 2.4.0 text. Unknown workload versions still fail
+closed.
+
+Candidate **P1** is an authorized `qualify-agent` candidate:
+workload 2.4.1, temperature 0.2, and the existing top_p, seed, max
+tokens, Nemotron model and revision, vLLM image and engine, native
+OpenAI tool transport, development and holdout schedules, evaluator
+3.1.0, thresholds, accepted answers, and task counts. The candidate
+workload mapping is C1 to 2.4.0, C2 to 2.4.0, and P1 to 2.4.1. Compared with
+C2, serialized experimental behavior differs only in candidate
+identity, workload version, the version-bound system prompt, and the
+resulting digests. Workload-version metadata is provenance for that
+prompt binding, not an additional treatment. P1 uses the same
+development, holdout, and freeze stages. Development remains the first
+required gate. Each stage keeps its own digest-bearing approval.
+Authorizing the candidate does not execute it. C1 and C2 identity
+serialization is unchanged.
+
+**Rationale.** Owner instruction to clarify evidence acquisition in the
+system prompt only. Private diagnostic notes motivated the wording and
+are not recorded here.

@@ -257,9 +257,40 @@ SYSTEM_PROMPT_V240 = " ".join(
     ]
 )
 
+#: Evidence-collection sentence in workload 2.4.0. Workload 2.4.1 replaces
+#: only this sentence. The surrounding 2.4.0 workflow text stays intact.
+_V240_EVIDENCE_INSTRUCTION = (
+    "When an incident may depend on log evidence, gather that evidence "
+    "with search_logs before recommending remediation."
+)
+
+#: Generic evidence-acquisition clarification for workload 2.4.1. It names
+#: no scenario, accepted answer, log line, or evaluator predicate.
+_V241_EVIDENCE_INSTRUCTION = " ".join(
+    [
+        "search_logs uses literal substring matching, not semantic search.",
+        "Search queries should use exact identifiers, service names, "
+        "configuration IDs, job IDs, or diagnostic terms supported by "
+        "information already available to the agent.",
+        "A zero-match search must be retried with a different specific "
+        "token before making a terminal recommendation.",
+        "Gather direct supporting evidence for the diagnosis before "
+        "submitting the terminal recommendation.",
+        "Seeing a plausible change record or runbook remediation is not "
+        "a substitute for collecting the required incident evidence.",
+    ]
+)
+
+SYSTEM_PROMPT_V241 = SYSTEM_PROMPT_V240.replace(
+    _V240_EVIDENCE_INSTRUCTION,
+    _V241_EVIDENCE_INSTRUCTION,
+    1,
+)
+
 SYSTEM_PROMPTS_BY_VERSION = {
     "2.3.0": SYSTEM_PROMPT_V230,
     "2.4.0": SYSTEM_PROMPT_V240,
+    "2.4.1": SYSTEM_PROMPT_V241,
 }
 
 
@@ -267,7 +298,9 @@ def system_prompt(scenario: Scenario, workload_version: str | None = None) -> st
     """Scenario-independent system prompt for the executed workload contract.
 
     Workload 2.3.0 keeps the pre-D-0019 wording. Workload 2.4.0 uses the
-    D-0019 tool-contract correction. Neither names accepted remediations.
+    D-0019 tool-contract correction. Workload 2.4.1 keeps that correction
+    and clarifies evidence acquisition. None of them names accepted
+    remediations.
     """
     from blackwell_lab.workload.native_tools import require_workload_version
 

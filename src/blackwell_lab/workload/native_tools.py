@@ -90,6 +90,9 @@ TOOL_DESCRIPTIONS_V240: dict[str, str] = {
 TOOL_DESCRIPTIONS_BY_VERSION: dict[str, dict[str, str]] = {
     "2.3.0": TOOL_DESCRIPTIONS_V230,
     "2.4.0": TOOL_DESCRIPTIONS_V240,
+    # 2.4.1 reuses the 2.4.0 tool text. The version difference is the
+    # system prompt, not a tool-schema treatment.
+    "2.4.1": TOOL_DESCRIPTIONS_V240,
 }
 
 #: Default catalog contract (workload 2.3.0). Callers that execute a
