@@ -54,9 +54,15 @@ provenance-checking controller **`evidence-grounding-v1`**
 (`src/blackwell_lab/workload/evidence.py`; decision D-0022). The
 scenario catalog, accepted answers, evidence predicates, evaluator 3.1.0,
 thresholds, tool behavior, tool latencies, and the turn budget are
-unchanged. The 2.4.1 system prompt is reused byte-for-byte and extended by
-one generic grounding instruction; the five evidence-tool descriptions are
-the 2.4.0 text, and only the terminal tool description is extended.
+unchanged. Workload 2.5.0 **executes the 2.4.1 system prompt
+byte-for-byte** (SHA-256
+`37b3a4fb615dc21c8d39a5301dc4318870fea3498fbed196c50bfcbe67de1bd3`) and
+the **2.4.0 tool-description prose unchanged** (the same text 2.4.1 uses).
+No model-visible instruction is added: `evidence_refs` exists only in the
+version-bound native-tool JSON argument schema of `recommend_remediation`,
+and the controller `evidence-grounding-v1` is the **only** experimental
+behavioral treatment. P2 therefore differs from P1 in `candidate_id`,
+`workload_version`, and `controller` only.
 
 Contract changes visible to the agent:
 
@@ -68,9 +74,10 @@ Contract changes visible to the agent:
   never resolves.
 - `recommend_remediation` takes **`evidence_refs`**, a list of
   `observation_id` strings. It is advertised as required in the OpenAI
-  function schema; its absence is adjudicated by the controller, not by
-  argument validation. On workloads 2.3.0–2.4.1 the argument is unknown and
-  remains `invalid_tool_arguments`.
+  function JSON schema (the only schema difference from 2.4.1; the
+  description prose is identical); its absence is adjudicated by the
+  controller, not by argument validation. On workloads 2.3.0–2.4.1 the
+  argument is unknown and remains `invalid_tool_arguments`.
 - Eligible (citable) observations are **successful, nonempty diagnostic
   results**: `search_logs` with integer `total_matches > 0` and at least
   one line carrying a string `message`; `get_service_health` with at least

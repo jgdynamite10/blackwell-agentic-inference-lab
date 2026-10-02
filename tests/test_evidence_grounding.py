@@ -61,7 +61,6 @@ from blackwell_lab.workload.agent import (
     SYSTEM_PROMPT_V230,
     SYSTEM_PROMPT_V240,
     SYSTEM_PROMPT_V241,
-    SYSTEM_PROMPT_V250,
     TaskExecution,
     run_task,
     system_prompt,
@@ -99,7 +98,6 @@ from blackwell_lab.workload.model_client import (
 )
 from blackwell_lab.workload.native_tools import (
     TOOL_DESCRIPTIONS_V240,
-    TOOL_DESCRIPTIONS_V250,
     ToolCallAssembler,
     openai_tool_definitions,
     tool_descriptions,
@@ -920,32 +918,24 @@ class TestOpaqueIds:
 
 
 class TestLeakageAndPersistence:
-    def test_prompt_and_tool_text_leak_no_answers_or_predicates(self):
-        # Only the text 2.5.0 adds is under test; the inherited 2.4.1 prompt
-        # and 2.4.0 tool descriptions are frozen by D-0019/D-0021.
-        added_prompt = SYSTEM_PROMPT_V250[len(SYSTEM_PROMPT_V241) :]
-        added_terminal = TOOL_DESCRIPTIONS_V250[TERMINAL_TOOL][
-            len(TOOL_DESCRIPTIONS_V240[TERMINAL_TOOL]) :
-        ]
-        assert added_prompt.strip() and added_terminal.strip()
-        tokens = _catalog_answer_tokens()
-        for text in (added_prompt, added_terminal):
-            folded = text.casefold()
-            leaked = sorted(token for token in tokens if token.casefold() in folded)
-            assert leaked == [], leaked
-            for forbidden in (
-                "predicate",
-                "total_matches",
-                "argument_contains",
-                "accepted_diagnoses",
-                "accepted_remediations",
-                "2.4.0",
-                "2.4.1",
-                "2.5.0",
-                "healthy",
-                "degraded",
-            ):
-                assert forbidden not in folded
+    def test_model_visible_text_for_250_adds_nothing(self):
+        """2.5.0 adds NO prose: the model sees the 2.4.1 prompt and the 2.4.0
+        tool descriptions byte-for-byte. The only new model-visible element
+        is the evidence_refs entry in the terminal JSON argument schema."""
+        scenario = next(iter(catalog().values()))
+        assert system_prompt(scenario, "2.5.0") == system_prompt(scenario, "2.4.1")
+        assert tool_descriptions("2.5.0") == tool_descriptions("2.4.1") == TOOL_DESCRIPTIONS_V240
+        new = {d["function"]["name"]: d for d in openai_tool_definitions("2.5.0")}
+        old = {d["function"]["name"]: d for d in openai_tool_definitions("2.4.1")}
+        for name in new:
+            assert new[name]["function"]["description"] == old[name]["function"]["description"]
+        # The schema-level addition carries no scenario or evaluator token.
+        schema_blob = json.dumps(new[TERMINAL_TOOL]["function"]["parameters"], sort_keys=True)
+        folded = schema_blob.casefold()
+        leaked = sorted(t for t in _catalog_answer_tokens() if t.casefold() in folded)
+        assert leaked == [], leaked
+        for forbidden in ("predicate", "total_matches", "accepted_", "healthy", "degraded"):
+            assert forbidden not in folded
 
     def test_rejection_reveals_nothing(self):
         controller = EvidenceGroundingController(context="ctx")
@@ -963,7 +953,7 @@ class TestLeakageAndPersistence:
 
         execution, client = run([health(), search("audit"), runbook(), cite_all])
         system_text = client.seen[0][0][0].content
-        assert system_text == SYSTEM_PROMPT_V250
+        assert system_text == SYSTEM_PROMPT_V241
 
         @dataclass(frozen=True)
         class _Outcome:
@@ -1118,13 +1108,26 @@ class TestContractBinding:
         assert (
             EVIDENCE_REFS_ARGUMENT not in old[TERMINAL_TOOL]["function"]["parameters"]["properties"]
         )
-        assert new[TERMINAL_TOOL]["function"]["description"].startswith(
-            TOOL_DESCRIPTIONS_V240[TERMINAL_TOOL]
+        # Description prose is identical; the ONLY difference in the whole
+        # native-tool definition set is the evidence_refs schema entry.
+        assert (
+            new[TERMINAL_TOOL]["function"]["description"]
+            == (old[TERMINAL_TOOL]["function"]["description"])
         )
-        for name, text in TOOL_DESCRIPTIONS_V250.items():
-            if name != TERMINAL_TOOL:
-                assert text == TOOL_DESCRIPTIONS_V240[name]
-        assert tool_descriptions("2.5.0") is TOOL_DESCRIPTIONS_V250
+        assert (
+            new[TERMINAL_TOOL]["function"]["description"] == (TOOL_DESCRIPTIONS_V240[TERMINAL_TOOL])
+        )
+        old_parameters = old[TERMINAL_TOOL]["function"]["parameters"]
+        stripped = {
+            **parameters,
+            "properties": {
+                k: v for k, v in parameters["properties"].items() if k != EVIDENCE_REFS_ARGUMENT
+            },
+            "required": [r for r in parameters["required"] if r != EVIDENCE_REFS_ARGUMENT],
+        }
+        assert stripped == old_parameters
+        assert tool_descriptions("2.5.0") is TOOL_DESCRIPTIONS_V240
+        assert tool_descriptions("2.4.1") is TOOL_DESCRIPTIONS_V240
 
     def test_validation_is_version_bound(self):
         arguments = {
@@ -1195,16 +1198,75 @@ class TestContractBinding:
         assert body["tool_choice"] == "auto"
         assert body["parallel_tool_calls"] is False
 
-    def test_system_prompt_v250_extends_v241_verbatim(self):
-        scenario = next(iter(catalog().values()))
-        assert system_prompt(scenario, "2.5.0") == SYSTEM_PROMPT_V250
-        assert SYSTEM_PROMPT_V250.startswith(SYSTEM_PROMPT_V241 + " ")
-        assert SYSTEM_PROMPT_V250 != SYSTEM_PROMPT_V241
-        assert "evidence_refs" in SYSTEM_PROMPT_V250
-        assert "direct_evidence_required" in SYSTEM_PROMPT_V250
-        assert "evidence_refs" not in SYSTEM_PROMPT_V241
+    def test_workload_250_executes_the_241_prompt_byte_for_byte(self):
+        for scenario in catalog().values():
+            executed = system_prompt(scenario, "2.5.0")
+            assert executed == SYSTEM_PROMPT_V241 == FROZEN_SYSTEM_PROMPT_V241
+            assert executed is SYSTEM_PROMPT_V241
+            assert hashlib.sha256(executed.encode()).hexdigest() == (
+                FROZEN_SYSTEM_PROMPT_V241_SHA256
+            )
+        assert agent_module.SYSTEM_PROMPTS_BY_VERSION["2.5.0"] is SYSTEM_PROMPT_V241
+        assert not hasattr(agent_module, "SYSTEM_PROMPT_V250")
+        assert not hasattr(agent_module, "_V250_GROUNDING_INSTRUCTION")
+        for token in ("evidence_refs", "observation_id", "direct_evidence_required"):
+            assert token not in SYSTEM_PROMPT_V241
         with pytest.raises(ConfigError, match="unknown workload version"):
-            system_prompt(scenario, "2.5.1")
+            system_prompt(next(iter(catalog().values())), "2.5.1")
+
+    def test_real_p2_request_sends_system_prompt_v241(self):
+        """The exact wire body of a workload-2.5.0 request: the system message
+        is SYSTEM_PROMPT_V241 and the tools differ from 2.4.1 only by the
+        evidence_refs schema entry."""
+        scenario = catalog()[SCENARIO_ID]
+        client = OpenAICompatibleClient("http://127.0.0.1:8000/v1", "nemotron")
+        messages = [
+            Message("system", system_prompt(scenario, "2.5.0")),
+            Message("user", "incident"),
+        ]
+        body = client._request_body(messages, GenerationSettings(workload_version="2.5.0"))
+        assert body["messages"][0]["role"] == "system"
+        assert body["messages"][0]["content"] == SYSTEM_PROMPT_V241
+        assert hashlib.sha256(body["messages"][0]["content"].encode()).hexdigest() == (
+            FROZEN_SYSTEM_PROMPT_V241_SHA256
+        )
+        legacy = client._request_body(
+            [Message("system", system_prompt(scenario, "2.4.1")), Message("user", "incident")],
+            GenerationSettings(workload_version="2.4.1"),
+        )
+        assert legacy["messages"] == body["messages"]
+        assert legacy["tools"] != body["tools"]
+        by_name = {d["function"]["name"]: d for d in body["tools"]}
+        legacy_by_name = {d["function"]["name"]: d for d in legacy["tools"]}
+        for name in by_name:
+            assert (
+                by_name[name]["function"]["description"]
+                == (legacy_by_name[name]["function"]["description"])
+            )
+            if name != TERMINAL_TOOL:
+                assert by_name[name] == legacy_by_name[name]
+        assert (
+            EVIDENCE_REFS_ARGUMENT
+            in (by_name[TERMINAL_TOOL]["function"]["parameters"]["properties"])
+        )
+        assert (
+            EVIDENCE_REFS_ARGUMENT
+            not in (legacy_by_name[TERMINAL_TOOL]["function"]["parameters"]["properties"])
+        )
+        # A real P2 run builds its system message through run_task.
+        recording = ScriptedClient([health(), search("audit"), cite_eligible])
+        execution = run_task(
+            scenario,
+            recording,
+            SimulatedToolbox(scenario, clock=FakeClock()),
+            V250,
+            timeout_s=30.0,
+            clock=FakeClock(),
+        )
+        assert execution.status == "completed"
+        for messages_seen, _settings in recording.seen:
+            assert messages_seen[0].role == "system"
+            assert messages_seen[0].content == SYSTEM_PROMPT_V241
 
 
 # --- backward compatibility: C1, C2, P1, prompts, evaluator ------------------------
@@ -1508,23 +1570,24 @@ class TestCandidateP2:
         assert fields["workload_version"] == "2.5.0"
         assert fields["controller"] == "evidence-grounding-v1"
         p2 = experimental_behavior_fields("P2")
-        assert p2["system_prompt"] == SYSTEM_PROMPT_V250
+        assert p2["system_prompt"] == SYSTEM_PROMPT_V241
+        assert p2["system_prompt"] == experimental_behavior_fields("P1")["system_prompt"]
         digests = {candidate_identity_digest(c) for c in AUTHORIZED_CANDIDATES}
         assert len(digests) == 4
         assert candidate_identity_digest("P2") != experimental_configuration_digest("P2")
         assert experimental_configuration_digest("P2") != experimental_configuration_digest("P1")
 
-    def test_p2_differs_from_p1_only_in_identity_version_controller_prompt(self):
+    def test_p2_differs_from_p1_only_in_identity_version_and_controller(self):
+        """evidence-grounding-v1 is the single treatment: the system prompt,
+        tool text, generation, model, and serving fields are byte-identical."""
         from test_qualification import _differing_paths
 
         p1 = experimental_behavior_fields("P1")
         p2 = experimental_behavior_fields("P2")
-        assert _differing_paths(p1, p2) == [
-            "candidate_id",
-            "controller",
-            "system_prompt",
-            "workload_version",
-        ]
+        assert _differing_paths(p1, p2) == ["candidate_id", "controller", "workload_version"]
+        assert p1["system_prompt"] == p2["system_prompt"] == SYSTEM_PROMPT_V241
+        assert "controller" not in p1
+        assert p2["controller"] == "evidence-grounding-v1"
 
     def test_p2_validates_for_every_stage_and_rejects_mismatches(self):
         for stage in ("development", "holdout", "freeze"):
@@ -1653,7 +1716,7 @@ class TestCandidateP2:
             timeout_s=30.0,
             clock=FakeClock(),
         )
-        assert recording.seen[0][0][0].content == SYSTEM_PROMPT_V250
+        assert recording.seen[0][0][0].content == SYSTEM_PROMPT_V241
         assert execution.status == "completed"
         assert execution.evidence_grounding["controller"] == "evidence-grounding-v1"
 
@@ -1852,7 +1915,7 @@ class TestRealRunBinding:
         assert manifest["workload"]["controller"] == "evidence-grounding-v1"
         assert manifest["workload"]["evaluator_version"] == "3.1.0"
         assert manifest["generation"]["temperature"] == 0.2
-        assert client.seen[0][0][0].content == SYSTEM_PROMPT_V250
+        assert client.seen[0][0][0].content == SYSTEM_PROMPT_V241
         measured = records[0].measured_observations
         validate_task_observations(measured)
         for observation in measured["observations"]:

@@ -92,33 +92,17 @@ TOOL_DESCRIPTIONS_V240: dict[str, str] = {
     ),
 }
 
-#: Workload 2.5.0 evidence-grounding contract (controller
-#: ``evidence-grounding-v1``). The five evidence tools keep the 2.4.0 text;
-#: only the terminal tool describes ``evidence_refs``. The text names no
-#: scenario, accepted answer, expected query, or evaluator predicate.
-TOOL_DESCRIPTIONS_V250: dict[str, str] = {
-    **TOOL_DESCRIPTIONS_V240,
-    "recommend_remediation": (
-        TOOL_DESCRIPTIONS_V240["recommend_remediation"]
-        + " evidence_refs must list the observation_id values, returned "
-        "earlier in this task, of successful nonempty diagnostic results "
-        "that directly support the diagnosis: a log search that returned "
-        "at least one line, a usable service health response, or a found "
-        "metric with data points. Zero-match searches, not-found lookups, "
-        "unknown services, runbooks, and change records are not accepted "
-        "as direct evidence. A recommendation without acceptable "
-        "evidence_refs is rejected with direct_evidence_required and does "
-        "not end the task; the turn budget is not extended."
-    ),
-}
-
 TOOL_DESCRIPTIONS_BY_VERSION: dict[str, dict[str, str]] = {
     "2.3.0": TOOL_DESCRIPTIONS_V230,
     "2.4.0": TOOL_DESCRIPTIONS_V240,
     # 2.4.1 reuses the 2.4.0 tool text. The version difference is the
     # system prompt, not a tool-schema treatment.
     "2.4.1": TOOL_DESCRIPTIONS_V240,
-    "2.5.0": TOOL_DESCRIPTIONS_V250,
+    # 2.5.0 also reuses the 2.4.0 tool text verbatim (decision D-0022). Its
+    # only model-visible difference is the version-bound ``evidence_refs``
+    # argument in the recommend_remediation JSON schema (TOOL_SPECS_V250);
+    # the evidence-grounding controller adds no description prose.
+    "2.5.0": TOOL_DESCRIPTIONS_V240,
 }
 
 #: Default catalog contract (workload 2.3.0). Callers that execute a

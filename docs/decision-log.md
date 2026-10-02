@@ -1036,7 +1036,8 @@ are not recorded here.
 tool behavior, tool latencies, the turn budget, the Nemotron BF16 model and
 revision, vLLM 0.27.1, the native OpenAI tool transport, infrastructure, the
 six-hour lifecycle, and publication policy are unchanged.** The 2.4.1 system
-prompt is byte-identical to D-0021. No qualification outcome is published
+prompt is byte-identical to D-0021 and is the prompt workload 2.5.0
+executes. No qualification outcome is published
 with this entry. This entry does not execute qualification, provision
 resources, run inference, download models, or claim that the controller
 improves quality.
@@ -1074,9 +1075,19 @@ bound to the provenance-checking controller **`evidence-grounding-v1`**
    `evidence_grounding` count summary and run manifests record
    `workload.controller`. No prompt, completion, reasoning text, raw
    observation payload, or credential is persisted by the controller.
-7. The 2.5.0 system prompt is the unchanged 2.4.1 prompt plus one generic
-   grounding instruction; only the terminal tool description is extended.
-   Neither names a scenario, accepted answer, log line, or predicate.
+7. Workload 2.5.0 executes the **byte-identical 2.4.1 system prompt**
+   (SHA-256
+   `37b3a4fb615dc21c8d39a5301dc4318870fea3498fbed196c50bfcbe67de1bd3`)
+   and the **unchanged 2.4.0 tool-description prose** that 2.4.1 also
+   uses. No model-visible instruction text is added. `evidence_refs`
+   exists only in the version-bound native-tool JSON argument schema of
+   `recommend_remediation`; `evidence-grounding-v1` is the **only**
+   experimental behavioral treatment, so P2 is a single-treatment
+   candidate. (Correction recorded in the same pull request before any
+   execution: an earlier draft of this entry appended a grounding
+   instruction to the prompt and to the terminal tool description; the
+   independent review rejected that as a second and third treatment, and
+   both were removed. No results predate the correction.)
 8. Workload/controller bindings are closed: 2.3.0, 2.4.0, and 2.4.1 bind
    no controller; 2.5.0 binds `evidence-grounding-v1`. Any other
    combination, in `qualify-agent` configuration or in a real-run spec,
@@ -1088,9 +1099,10 @@ existing top_p, seed, max tokens, model and revision, container and
 engine, tool transport, development, holdout, and freeze schedules,
 evaluator 3.1.0, thresholds, accepted answers, and task counts. The
 candidate mapping is C1 to 2.4.0, C2 to 2.4.0, P1 to 2.4.1, and P2 to
-2.5.0. Compared with P1, serialized experimental behavior differs only in
-candidate identity, workload version, controller, the version-bound system
-prompt, and the resulting digests. The `controller` field is serialized
+2.5.0. Compared with P1, serialized experimental behavior differs **only**
+in `candidate_id`, `workload_version`, and `controller` (and therefore the
+resulting digests); the `system_prompt` field is byte-identical to P1's.
+The `controller` field is serialized
 only for P2, so C1, C2, and P1 identity digests are unchanged. Development
 remains the first required gate; each stage keeps its own digest-bearing
 approval. Authorizing the candidate does not execute it.

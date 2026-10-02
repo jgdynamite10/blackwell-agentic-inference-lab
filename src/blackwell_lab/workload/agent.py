@@ -300,39 +300,15 @@ SYSTEM_PROMPT_V241 = SYSTEM_PROMPT_V240.replace(
     1,
 )
 
-#: Generic evidence-grounding instruction appended for workload 2.5.0. It
-#: describes the controller contract only: opaque observation IDs, the
-#: evidence_refs argument, which result shapes count as direct evidence, and
-#: the single generic rejection category. It names no scenario, service,
-#: query, accepted answer, log line, status token, or evaluator predicate.
-_V250_GROUNDING_INSTRUCTION = " ".join(
-    [
-        "Every non-terminal tool result includes an opaque observation_id "
-        "that is valid only within this task.",
-        "recommend_remediation must include evidence_refs: a list of "
-        "observation_id values from earlier results in this task that "
-        "directly support the diagnosis.",
-        "Only successful, nonempty diagnostic results qualify, such as a "
-        "log search that returned at least one line, a usable service "
-        "health response, or a found metric with data points.",
-        "Zero-match searches, not-found lookups, unknown services, "
-        "runbooks, and change records do not qualify as direct evidence, "
-        "although runbooks and change records may guide the investigation.",
-        "A recommendation without acceptable evidence_refs is rejected "
-        "with direct_evidence_required and does not end the task; the "
-        "turn budget is not extended.",
-    ]
-)
-
-#: Workload 2.5.0 = the unchanged 2.4.1 prompt plus the grounding
-#: instruction. SYSTEM_PROMPT_V241 itself is byte-identical to D-0021.
-SYSTEM_PROMPT_V250 = SYSTEM_PROMPT_V241 + " " + _V250_GROUNDING_INSTRUCTION
-
+#: Workload 2.5.0 executes the 2.4.1 prompt byte-for-byte (decision
+#: D-0022): the evidence-grounding controller is the only treatment, and it
+#: adds no model-visible instruction text. ``evidence_refs`` is exposed to
+#: the model solely through the version-bound native-tool argument schema.
 SYSTEM_PROMPTS_BY_VERSION = {
     "2.3.0": SYSTEM_PROMPT_V230,
     "2.4.0": SYSTEM_PROMPT_V240,
     "2.4.1": SYSTEM_PROMPT_V241,
-    "2.5.0": SYSTEM_PROMPT_V250,
+    "2.5.0": SYSTEM_PROMPT_V241,
 }
 
 
@@ -341,9 +317,8 @@ def system_prompt(scenario: Scenario, workload_version: str | None = None) -> st
 
     Workload 2.3.0 keeps the pre-D-0019 wording. Workload 2.4.0 uses the
     D-0019 tool-contract correction. Workload 2.4.1 keeps that correction
-    and clarifies evidence acquisition. Workload 2.5.0 appends the
-    evidence-grounding controller instruction. None of them names accepted
-    remediations.
+    and clarifies evidence acquisition. Workload 2.5.0 executes the 2.4.1
+    prompt unchanged. None of them names accepted remediations.
     """
     from blackwell_lab.workload.native_tools import require_workload_version
 
