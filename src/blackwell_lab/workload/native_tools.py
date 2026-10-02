@@ -15,7 +15,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from blackwell_lab.workload.model_client import NativeToolCall, NativeToolCallError, StreamEvent
-from blackwell_lab.workload.tools import TOOL_SPECS, validate_tool_call
+from blackwell_lab.workload.tools import (
+    TOOL_SPECS,
+    advertised_required_arguments,
+    tool_specs,
+    validate_tool_call,
+)
 
 #: Identity recorded in private gpu-mode manifests so native-tool results
 #: cannot be confused with run-e's custom-text TOOL_CALL protocol.
@@ -87,12 +92,33 @@ TOOL_DESCRIPTIONS_V240: dict[str, str] = {
     ),
 }
 
+#: Workload 2.5.0 evidence-grounding contract (controller
+#: ``evidence-grounding-v1``). The five evidence tools keep the 2.4.0 text;
+#: only the terminal tool describes ``evidence_refs``. The text names no
+#: scenario, accepted answer, expected query, or evaluator predicate.
+TOOL_DESCRIPTIONS_V250: dict[str, str] = {
+    **TOOL_DESCRIPTIONS_V240,
+    "recommend_remediation": (
+        TOOL_DESCRIPTIONS_V240["recommend_remediation"]
+        + " evidence_refs must list the observation_id values, returned "
+        "earlier in this task, of successful nonempty diagnostic results "
+        "that directly support the diagnosis: a log search that returned "
+        "at least one line, a usable service health response, or a found "
+        "metric with data points. Zero-match searches, not-found lookups, "
+        "unknown services, runbooks, and change records are not accepted "
+        "as direct evidence. A recommendation without acceptable "
+        "evidence_refs is rejected with direct_evidence_required and does "
+        "not end the task; the turn budget is not extended."
+    ),
+}
+
 TOOL_DESCRIPTIONS_BY_VERSION: dict[str, dict[str, str]] = {
     "2.3.0": TOOL_DESCRIPTIONS_V230,
     "2.4.0": TOOL_DESCRIPTIONS_V240,
     # 2.4.1 reuses the 2.4.0 tool text. The version difference is the
     # system prompt, not a tool-schema treatment.
     "2.4.1": TOOL_DESCRIPTIONS_V240,
+    "2.5.0": TOOL_DESCRIPTIONS_V250,
 }
 
 #: Default catalog contract (workload 2.3.0). Callers that execute a
@@ -116,7 +142,11 @@ def tool_descriptions(workload_version: str | None = None) -> dict[str, str]:
     return TOOL_DESCRIPTIONS_BY_VERSION[require_workload_version(workload_version)]
 
 
-_PYTHON_TO_JSON_TYPE = {str: "string", int: "integer"}
+_PYTHON_TO_JSON_SCHEMA: dict[object, dict] = {
+    str: {"type": "string"},
+    int: {"type": "integer"},
+    list: {"type": "array", "items": {"type": "string"}},
+}
 
 _REASONING_DELTA_KEYS = ("reasoning", "reasoning_content", "reasoning_text")
 
@@ -124,19 +154,21 @@ _REASONING_DELTA_KEYS = ("reasoning", "reasoning_content", "reasoning_text")
 def openai_tool_definitions(workload_version: str | None = None) -> list[dict]:
     """Deterministic OpenAI ``tools`` array for the executed workload contract."""
     descriptions = tool_descriptions(workload_version)
+    specs = tool_specs(workload_version)
     definitions: list[dict] = []
-    for name in sorted(TOOL_SPECS):
-        spec = TOOL_SPECS[name]
-        properties: dict[str, dict[str, str]] = {}
-        for argument, python_type in {**spec["required"], **spec["optional"]}.items():
-            json_type = _PYTHON_TO_JSON_TYPE.get(python_type)
-            if json_type is None:
+    for name in sorted(specs):
+        spec = specs[name]
+        properties: dict[str, dict] = {}
+        arguments = {**spec["required"], **spec["optional"], **spec.get("controller", {})}
+        for argument, python_type in arguments.items():
+            json_schema = _PYTHON_TO_JSON_SCHEMA.get(python_type)
+            if json_schema is None:
                 raise ValueError(f"unsupported TOOL_SPECS type for {name}.{argument}")
-            properties[argument] = {"type": json_type}
+            properties[argument] = dict(json_schema)
         parameters = {
             "type": "object",
             "properties": properties,
-            "required": sorted(spec["required"]),
+            "required": advertised_required_arguments(spec),
             "additionalProperties": False,
         }
         definitions.append(
@@ -193,8 +225,13 @@ def _valid_tool_call_index(value: object) -> int | None:
 
 @dataclass
 class ToolCallAssembler:
-    """Assembles streamed native ``delta.tool_calls`` fragments by index."""
+    """Assembles streamed native ``delta.tool_calls`` fragments by index.
 
+    ``workload_version`` selects the argument contract the assembled call is
+    validated against (default: the catalog contract 2.3.0).
+    """
+
+    workload_version: str | None = None
     slots: dict[int, dict[str, str]] = field(default_factory=dict)
     event_types: list[str] = field(default_factory=list)
     content_chars: int = 0
@@ -300,7 +337,7 @@ class ToolCallAssembler:
                 arguments_json_ok=False,
             )
         try:
-            validate_tool_call(name, parsed)
+            validate_tool_call(name, parsed, self.workload_version)
         except Exception:
             return self._error(
                 "invalid_arguments",

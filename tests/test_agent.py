@@ -62,6 +62,7 @@ class TestPolicyConstants:
             "invalid_tool_name",
             "invalid_tool_arguments",
             "no_terminal_recommendation",
+            "direct_evidence_required",
             "task_timeout",
             "agent_runtime_error",
         }

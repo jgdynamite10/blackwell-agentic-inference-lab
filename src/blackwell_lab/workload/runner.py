@@ -75,6 +75,7 @@ from blackwell_lab.workload.evaluator import (
     Evaluation,
     evaluate,
 )
+from blackwell_lab.workload.evidence import controller_for_workload
 from blackwell_lab.workload.model_client import (
     DeterministicMockClient,
     GenerationSettings,
@@ -415,6 +416,11 @@ def _observation(outcome: TaskOutcome) -> dict:
             if execution.tool_call_diagnostics
             else {}
         ),
+        **(
+            {"evidence_grounding": execution.evidence_grounding}
+            if execution.evidence_grounding
+            else {}
+        ),
         "evaluation": {
             "evaluator_version": outcome.evaluation.evaluator_version,
             "success": outcome.evaluation.success,
@@ -459,6 +465,8 @@ def build_manifest(
     ended_at_utc: str,
 ) -> dict:
     """A schema-valid run manifest for one mock-mode repetition."""
+    executed_version = require_workload_version(settings.workload_version)
+    controller = controller_for_workload(executed_version)
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "run_id": run_id,
@@ -491,7 +499,8 @@ def build_manifest(
         },
         "workload": {
             "name": WORKLOAD_NAME,
-            "version": require_workload_version(settings.workload_version),
+            "version": executed_version,
+            **({"controller": controller} if controller else {}),
             "catalog_digest": catalog_digest(),
             "profile": profile.name,
             "concurrency": concurrency,
