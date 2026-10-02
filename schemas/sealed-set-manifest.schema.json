@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/schemas/sealed-set-manifest.schema.json",
+  "title": "Sealed qualification-set custody manifest",
+  "description": "Content-free public custody manifest. SHA-256 digests provide integrity, not confidentiality. This document is not encryption and is not a cryptographic seal. It must not contain task bodies, accepted answers, scenario names, private filenames, or task identifiers. Key management is outside this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "finalized",
+    "integrity_statement",
+    "controller_commit",
+    "controller_digest",
+    "development_task_count",
+    "holdout_task_count",
+    "development_aggregate_digest",
+    "holdout_aggregate_digest",
+    "file_digests",
+    "custody_manifest_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "kind": {
+      "type": "string",
+      "const": "sealed-qualification-set"
+    },
+    "finalized": {
+      "type": "boolean",
+      "const": true
+    },
+    "integrity_statement": {
+      "type": "string",
+      "const": "SHA-256 digests provide integrity, not confidentiality. This manifest is not encryption and is not a cryptographic seal."
+    },
+    "controller_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Frozen canonical Git commit the controller checkout was verified against."
+    },
+    "controller_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Digest of the sealed-set controller sources that wrote this manifest."
+    },
+    "development_task_count": {
+      "type": "integer",
+      "const": 20
+    },
+    "holdout_task_count": {
+      "type": "integer",
+      "const": 20
+    },
+    "development_aggregate_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "holdout_aggregate_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "file_digests": {
+      "type": "array",
+      "minItems": 40,
+      "maxItems": 40,
+      "uniqueItems": true,
+      "description": "Sorted per-file content digests for both stages. Identifiers and filenames are omitted.",
+      "items": {
+        "type": "string",
+        "pattern": "^sha256:[0-9a-f]{64}$"
+      }
+    },
+    "custody_manifest_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 of the canonical manifest bytes with this field excluded."
+    }
+  }
+}
