@@ -50,6 +50,51 @@ TOOL_SPECS: dict[str, dict[str, dict[str, type | tuple[type, ...]]]] = {
 #: recommendation (diagnosis_id + rationale + remediation_id).
 TERMINAL_TOOL = "recommend_remediation"
 
+#: Workload 2.5.0 terminal argument: the observation IDs cited as evidence.
+EVIDENCE_REFS_ARGUMENT = "evidence_refs"
+
+#: Workload 2.5.0 contract. The five evidence tools are unchanged. The
+#: terminal tool gains ``evidence_refs`` (array of strings). It is advertised
+#: as required on the wire, but its *absence* is adjudicated by the evidence
+#: controller (``direct_evidence_required``), never as a schema violation, so
+#: it lives in the ``controller`` bucket rather than ``required``.
+TOOL_SPECS_V250: dict[str, dict[str, dict[str, type | tuple[type, ...]]]] = {
+    **TOOL_SPECS,
+    TERMINAL_TOOL: {
+        "required": dict(TOOL_SPECS[TERMINAL_TOOL]["required"]),
+        "optional": {},
+        "controller": {EVIDENCE_REFS_ARGUMENT: list},
+    },
+}
+
+#: Executed workload contract -> tool argument specs. 2.3.0, 2.4.0, and
+#: 2.4.1 share the original specs byte for byte.
+TOOL_SPECS_BY_VERSION: dict[str, dict[str, dict[str, dict[str, type | tuple[type, ...]]]]] = {
+    "2.3.0": TOOL_SPECS,
+    "2.4.0": TOOL_SPECS,
+    "2.4.1": TOOL_SPECS,
+    "2.5.0": TOOL_SPECS_V250,
+}
+
+
+def tool_specs(
+    workload_version: str | None = None,
+) -> dict[str, dict[str, dict[str, type | tuple[type, ...]]]]:
+    """Argument specs for the executed workload contract (fails closed)."""
+    from blackwell_lab.workload.native_tools import require_workload_version
+
+    return TOOL_SPECS_BY_VERSION[require_workload_version(workload_version)]
+
+
+def _spec_arguments(spec: dict) -> dict[str, type | tuple[type, ...]]:
+    return {**spec["required"], **spec["optional"], **spec.get("controller", {})}
+
+
+def advertised_required_arguments(spec: dict) -> list[str]:
+    """Arguments the wire schema marks required (schema-required plus
+    controller-adjudicated)."""
+    return sorted({*spec["required"], *spec.get("controller", {})})
+
 
 class ToolError(Exception):
     """Base class for tool-invocation failures."""
@@ -72,14 +117,21 @@ class ToolResult:
     simulated_latency_ms: float
 
 
-def validate_tool_call(name: str, arguments: dict[str, Any]) -> None:
-    """Validates a tool call against the tool registry, raising on violation."""
-    spec = TOOL_SPECS.get(name)
-    if spec is None:
+def validate_tool_call(
+    name: str, arguments: dict[str, Any], workload_version: str | None = None
+) -> None:
+    """Validates a tool call against the executed contract, raising on violation.
+
+    ``workload_version`` selects the contract (default: the catalog
+    contract 2.3.0). Unknown tool names are rejected before the version is
+    resolved, so an unknown version never masquerades as an unknown tool.
+    """
+    if name not in TOOL_SPECS:
         raise InvalidToolNameError(f"unknown tool: {name!r}")
+    spec = tool_specs(workload_version)[name]
     if not isinstance(arguments, dict):
         raise InvalidToolArgumentsError(f"{name}: arguments must be an object")
-    allowed = {**spec["required"], **spec["optional"]}
+    allowed = _spec_arguments(spec)
     for arg in arguments:
         if arg not in allowed:
             raise InvalidToolArgumentsError(f"{name}: unexpected argument {arg!r}")
@@ -129,8 +181,15 @@ class SimulatedToolbox:
         self._metric_window_s = metric_window_s
         self._clock = clock
 
-    def execute(self, name: str, arguments: dict[str, Any]) -> ToolResult:
-        validate_tool_call(name, arguments)
+    def execute(
+        self, name: str, arguments: dict[str, Any], *, workload_version: str | None = None
+    ) -> ToolResult:
+        """Validates against the executed contract, then runs the tool.
+
+        ``workload_version`` must be the contract the agent loop executes
+        (the agent passes it); the default is the catalog contract 2.3.0.
+        """
+        validate_tool_call(name, arguments, workload_version)
         handler = getattr(self, f"_tool_{name}")
         latency_ms = TOOL_LATENCY_MS[name]
         # Simulated latency is consumed, not merely recorded: it occupies the
@@ -193,14 +252,21 @@ class SimulatedToolbox:
         return {"changes": list(changes)}
 
     def _tool_recommend_remediation(
-        self, diagnosis_id: str, rationale: str, remediation_id: str
+        self,
+        diagnosis_id: str,
+        rationale: str,
+        remediation_id: str,
+        evidence_refs: list | None = None,
     ) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "acknowledged": True,
             "diagnosis_id": diagnosis_id,
             "rationale": rationale,
             "remediation_id": remediation_id,
         }
+        if evidence_refs is not None:
+            payload[EVIDENCE_REFS_ARGUMENT] = list(evidence_refs)
+        return payload
 
 
 def series_end(series: dict[str, Any]) -> int:

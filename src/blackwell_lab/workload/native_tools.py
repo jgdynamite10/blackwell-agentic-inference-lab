@@ -15,7 +15,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from blackwell_lab.workload.model_client import NativeToolCall, NativeToolCallError, StreamEvent
-from blackwell_lab.workload.tools import TOOL_SPECS, validate_tool_call
+from blackwell_lab.workload.tools import (
+    TOOL_SPECS,
+    advertised_required_arguments,
+    tool_specs,
+    validate_tool_call,
+)
 
 #: Identity recorded in private gpu-mode manifests so native-tool results
 #: cannot be confused with run-e's custom-text TOOL_CALL protocol.
@@ -93,6 +98,11 @@ TOOL_DESCRIPTIONS_BY_VERSION: dict[str, dict[str, str]] = {
     # 2.4.1 reuses the 2.4.0 tool text. The version difference is the
     # system prompt, not a tool-schema treatment.
     "2.4.1": TOOL_DESCRIPTIONS_V240,
+    # 2.5.0 also reuses the 2.4.0 tool text verbatim (decision D-0022). Its
+    # only model-visible difference is the version-bound ``evidence_refs``
+    # argument in the recommend_remediation JSON schema (TOOL_SPECS_V250);
+    # the evidence-grounding controller adds no description prose.
+    "2.5.0": TOOL_DESCRIPTIONS_V240,
 }
 
 #: Default catalog contract (workload 2.3.0). Callers that execute a
@@ -116,7 +126,11 @@ def tool_descriptions(workload_version: str | None = None) -> dict[str, str]:
     return TOOL_DESCRIPTIONS_BY_VERSION[require_workload_version(workload_version)]
 
 
-_PYTHON_TO_JSON_TYPE = {str: "string", int: "integer"}
+_PYTHON_TO_JSON_SCHEMA: dict[object, dict] = {
+    str: {"type": "string"},
+    int: {"type": "integer"},
+    list: {"type": "array", "items": {"type": "string"}},
+}
 
 _REASONING_DELTA_KEYS = ("reasoning", "reasoning_content", "reasoning_text")
 
@@ -124,19 +138,21 @@ _REASONING_DELTA_KEYS = ("reasoning", "reasoning_content", "reasoning_text")
 def openai_tool_definitions(workload_version: str | None = None) -> list[dict]:
     """Deterministic OpenAI ``tools`` array for the executed workload contract."""
     descriptions = tool_descriptions(workload_version)
+    specs = tool_specs(workload_version)
     definitions: list[dict] = []
-    for name in sorted(TOOL_SPECS):
-        spec = TOOL_SPECS[name]
-        properties: dict[str, dict[str, str]] = {}
-        for argument, python_type in {**spec["required"], **spec["optional"]}.items():
-            json_type = _PYTHON_TO_JSON_TYPE.get(python_type)
-            if json_type is None:
+    for name in sorted(specs):
+        spec = specs[name]
+        properties: dict[str, dict] = {}
+        arguments = {**spec["required"], **spec["optional"], **spec.get("controller", {})}
+        for argument, python_type in arguments.items():
+            json_schema = _PYTHON_TO_JSON_SCHEMA.get(python_type)
+            if json_schema is None:
                 raise ValueError(f"unsupported TOOL_SPECS type for {name}.{argument}")
-            properties[argument] = {"type": json_type}
+            properties[argument] = dict(json_schema)
         parameters = {
             "type": "object",
             "properties": properties,
-            "required": sorted(spec["required"]),
+            "required": advertised_required_arguments(spec),
             "additionalProperties": False,
         }
         definitions.append(
@@ -193,8 +209,13 @@ def _valid_tool_call_index(value: object) -> int | None:
 
 @dataclass
 class ToolCallAssembler:
-    """Assembles streamed native ``delta.tool_calls`` fragments by index."""
+    """Assembles streamed native ``delta.tool_calls`` fragments by index.
 
+    ``workload_version`` selects the argument contract the assembled call is
+    validated against (default: the catalog contract 2.3.0).
+    """
+
+    workload_version: str | None = None
     slots: dict[int, dict[str, str]] = field(default_factory=dict)
     event_types: list[str] = field(default_factory=list)
     content_chars: int = 0
@@ -300,7 +321,7 @@ class ToolCallAssembler:
                 arguments_json_ok=False,
             )
         try:
-            validate_tool_call(name, parsed)
+            validate_tool_call(name, parsed, self.workload_version)
         except Exception:
             return self._error(
                 "invalid_arguments",

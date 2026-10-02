@@ -48,6 +48,7 @@ from blackwell_lab.schemas import (
 )
 from blackwell_lab.workload.clock import SYSTEM_CLOCK, Clock
 from blackwell_lab.workload.evaluator import EVALUATOR_VERSION, QUALITY_THRESHOLD
+from blackwell_lab.workload.evidence import require_controller_binding
 from blackwell_lab.workload.model_client import GenerationSettings, ModelClient
 from blackwell_lab.workload.native_tools import (
     REASONING_PARSER,
@@ -147,6 +148,11 @@ class RealRunSpec:
     template_ids: tuple[str, ...] | None = None
     artifact_family: str = "real-runs"
     workload_version: str | None = None
+    #: Declared agent controller. Must equal the controller bound to the
+    #: executed workload version (None for 2.3.0/2.4.0/2.4.1,
+    #: ``evidence-grounding-v1`` for 2.5.0); any other combination fails
+    #: closed before the client is used.
+    controller: str | None = None
     topology_kind: str | None = None
     gpu_count: int = 1
     node_count: int = 1
@@ -213,6 +219,7 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
     executed_version = require_workload_version(spec.workload_version)
     if spec.generation.workload_version not in (None, executed_version):
         raise ConfigError("generation.workload_version must match the run workload version")
+    require_controller_binding(executed_version, spec.controller)
     from blackwell_lab.engines.adapters import require_real_spec_contract
 
     require_real_spec_contract(spec)
@@ -288,6 +295,7 @@ def build_real_manifest(
         "workload": {
             "name": WORKLOAD_NAME,
             "version": require_workload_version(spec.workload_version),
+            **({"controller": spec.controller} if spec.controller else {}),
             "catalog_digest": catalog_digest(),
             "profile": profile.name,
             "concurrency": spec.concurrency,
