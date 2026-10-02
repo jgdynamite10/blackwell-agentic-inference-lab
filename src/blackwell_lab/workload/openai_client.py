@@ -195,7 +195,12 @@ class OpenAICompatibleClient(ModelClient):
 
         try:
             lines = self._transport(self.chat_completions_url, body, headers, timeout_s)
-            yield from self._parse_stream(lines, deadline=deadline, clock=clock)
+            yield from self._parse_stream(
+                lines,
+                deadline=deadline,
+                clock=clock,
+                workload_version=settings.workload_version,
+            )
         except (ModelClientTimeout, ModelClientError):
             raise
         except urllib.error.HTTPError as exc:
@@ -265,8 +270,9 @@ class OpenAICompatibleClient(ModelClient):
         *,
         deadline: float | None,
         clock: Clock,
+        workload_version: str | None = None,
     ) -> Iterator[StreamEvent]:
-        assembler = ToolCallAssembler()
+        assembler = ToolCallAssembler(workload_version=workload_version)
         for raw in lines:
             if deadline is not None and clock.monotonic() >= deadline:
                 raise ModelClientTimeout("turn deadline elapsed mid-stream")

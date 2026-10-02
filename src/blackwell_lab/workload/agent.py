@@ -52,6 +52,14 @@ Category                        Meaning
                                 mock path that reaches the toolbox).
 ``no_terminal_recommendation``  The agent exhausted ``max_turns`` without ever
                                 calling ``recommend_remediation``.
+``direct_evidence_required``    Workload 2.5.0 only: the agent exhausted
+                                ``max_turns`` after the evidence-grounding
+                                controller rejected at least one terminal
+                                attempt for missing or invalid
+                                ``evidence_refs`` and never submitted an
+                                accepted recommendation. The turn budget is
+                                unchanged; rejected attempts consume turns
+                                like any tool call.
 ``task_timeout``                The per-task deadline (profile-specific)
                                 elapsed before a terminal recommendation.
 ``agent_runtime_error``         An unexpected exception in the client, a tool,
@@ -64,10 +72,12 @@ Category                        Meaning
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from blackwell_lab.workload.clock import SYSTEM_CLOCK, Clock
+from blackwell_lab.workload.evidence import DIRECT_EVIDENCE_REQUIRED, build_controller
 from blackwell_lab.workload.model_client import (
     GenerationSettings,
     Message,
@@ -97,6 +107,7 @@ ERROR_TAXONOMY = (
     "invalid_tool_name",
     "invalid_tool_arguments",
     "no_terminal_recommendation",
+    "direct_evidence_required",
     "task_timeout",
     "agent_runtime_error",
 )
@@ -165,6 +176,8 @@ class TaskExecution:
     remediation_id: str | None = None
     tool_trace: list[ToolTrace] = field(default_factory=list)
     tool_call_diagnostics: dict | None = None
+    #: Sanitized evidence-controller counts (workload 2.5.0 only; else None).
+    evidence_grounding: dict | None = None
     turns: list[TurnRecord] = field(default_factory=list)
     e2e_ms: float = 0.0
     queue_wait_ms: float = 0.0
@@ -287,10 +300,15 @@ SYSTEM_PROMPT_V241 = SYSTEM_PROMPT_V240.replace(
     1,
 )
 
+#: Workload 2.5.0 executes the 2.4.1 prompt byte-for-byte (decision
+#: D-0022): the evidence-grounding controller is the only treatment, and it
+#: adds no model-visible instruction text. ``evidence_refs`` is exposed to
+#: the model solely through the version-bound native-tool argument schema.
 SYSTEM_PROMPTS_BY_VERSION = {
     "2.3.0": SYSTEM_PROMPT_V230,
     "2.4.0": SYSTEM_PROMPT_V240,
     "2.4.1": SYSTEM_PROMPT_V241,
+    "2.5.0": SYSTEM_PROMPT_V241,
 }
 
 
@@ -299,8 +317,8 @@ def system_prompt(scenario: Scenario, workload_version: str | None = None) -> st
 
     Workload 2.3.0 keeps the pre-D-0019 wording. Workload 2.4.0 uses the
     D-0019 tool-contract correction. Workload 2.4.1 keeps that correction
-    and clarifies evidence acquisition. None of them names accepted
-    remediations.
+    and clarifies evidence acquisition. Workload 2.5.0 executes the 2.4.1
+    prompt unchanged. None of them names accepted remediations.
     """
     from blackwell_lab.workload.native_tools import require_workload_version
 
@@ -342,6 +360,7 @@ def run_task(
     clock: Clock = SYSTEM_CLOCK,
     instance: TaskInstance | None = None,
     submitted_at: float | None = None,
+    evidence_context: str | None = None,
 ) -> TaskExecution:
     """Executes one task instance end-to-end and returns its record.
 
@@ -350,10 +369,18 @@ def run_task(
     start coincide. The deadline is ``submitted_at + timeout_s``: driver
     queue wait consumes timeout budget. All durations are monotonic-clock
     deltas; wall-clock UTC timestamps are recorded for correlation only.
+
+    ``evidence_context`` is the private context from which workload 2.5.0
+    observation IDs are derived. It defaults to a fresh random token per
+    task execution, so IDs are never shared across tasks, repetitions,
+    scheduler workers, or re-executions of the same instance. The workload
+    contract and its controller binding are resolved **before** the client
+    is used; an unknown version never reaches the model.
     """
     from blackwell_lab.workload.native_tools import require_workload_version
 
     executed_version = require_workload_version(settings.workload_version)
+    controller = build_controller(executed_version, evidence_context or uuid.uuid4().hex)
     started_at = clock.monotonic()
     submitted = submitted_at if submitted_at is not None else started_at
     execution = TaskExecution(
@@ -380,6 +407,8 @@ def run_task(
         execution.error_category = error_category
         execution.e2e_ms = (clock.monotonic() - submitted) * 1000.0
         execution.ended_at_utc = datetime.now(timezone.utc).isoformat()
+        if controller is not None:
+            execution.evidence_grounding = controller.summary()
         return execution
 
     for _turn in range(max_turns):
@@ -481,7 +510,7 @@ def run_task(
             Message("assistant", content="", tool_calls=(call,)),
         )
         try:
-            result = toolbox.execute(call.name, call.arguments)
+            result = toolbox.execute(call.name, call.arguments, workload_version=executed_version)
         except InvalidToolNameError:
             return finish("error", "invalid_tool_name")
         except InvalidToolArgumentsError:
@@ -489,11 +518,27 @@ def run_task(
         except Exception:
             return finish("error", "agent_runtime_error")
 
+        payload = result.payload
+        terminal_accepted = result.tool == TERMINAL_TOOL
+        if controller is not None:
+            try:
+                if result.tool == TERMINAL_TOOL:
+                    # Provenance and structure only; the verdict never
+                    # names a reference or a reason.
+                    verdict = controller.validate_terminal(call.arguments)
+                    terminal_accepted = verdict.accepted
+                    if not verdict.accepted:
+                        payload = verdict.tool_payload()
+                else:
+                    payload = controller.annotate(payload, controller.record(result.tool, payload))
+            except Exception:
+                return finish("error", "agent_runtime_error")
+
         execution.tool_trace.append(
             ToolTrace(
                 tool=result.tool,
                 arguments=dict(call.arguments),
-                result=result.payload,
+                result=payload,
                 simulated_latency_ms=result.simulated_latency_ms,
             )
         )
@@ -504,18 +549,23 @@ def run_task(
         if clock.monotonic() >= deadline:
             return finish("timeout", "task_timeout")
 
-        if result.tool == TERMINAL_TOOL:
+        if terminal_accepted:
             execution.diagnosis_id = call.arguments["diagnosis_id"]
             execution.rationale = call.arguments["rationale"]
             execution.remediation_id = call.arguments["remediation_id"]
             return finish("completed")
 
+        # A rejected terminal attempt returns the generic failure payload as
+        # an ordinary tool message and the loop continues under the SAME
+        # max_turns budget: no extra turn, retry, or hidden call is added.
         messages.append(
             Message(
                 "tool",
-                content=json.dumps(result.payload, sort_keys=True),
+                content=json.dumps(payload, sort_keys=True),
                 tool_call_id=call.call_id,
             )
         )
 
+    if controller is not None and controller.rejected_terminal_attempts > 0:
+        return finish("error", DIRECT_EVIDENCE_REQUIRED)
     return finish("error", "no_terminal_recommendation")

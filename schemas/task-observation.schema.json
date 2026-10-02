@@ -74,6 +74,27 @@
             "usage_completion_tokens": { "type": ["integer", "null"] }
           }
         },
+        "evidence_grounding": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Sanitized evidence-grounding controller accounting (workload 2.5.0, controller evidence-grounding-v1). Counts only: never observation IDs, payloads, prompts, completions, reasoning, or scenario data. Absent for controller-free workloads.",
+          "required": [
+            "controller",
+            "observations",
+            "eligible_observations",
+            "terminal_attempts",
+            "rejected_terminal_attempts",
+            "accepted_evidence_refs"
+          ],
+          "properties": {
+            "controller": { "type": "string", "enum": ["evidence-grounding-v1"] },
+            "observations": { "type": "integer", "minimum": 0 },
+            "eligible_observations": { "type": "integer", "minimum": 0 },
+            "terminal_attempts": { "type": "integer", "minimum": 0 },
+            "rejected_terminal_attempts": { "type": "integer", "minimum": 0 },
+            "accepted_evidence_refs": { "type": ["integer", "null"], "minimum": 1 }
+          }
+        },
         "task_index": { "type": "integer", "minimum": 0, "description": "0-based submission order within the repetition." },
         "template_id": { "type": "string", "minLength": 1, "description": "Incident template (scenario) id." },
         "instance_id": { "type": "string", "minLength": 1, "description": "Seeded task-instance id (template_id#occurrence)." },
@@ -81,7 +102,7 @@
         "status": { "type": "string", "enum": ["completed", "error", "timeout"] },
         "error_category": {
           "type": ["string", "null"],
-          "description": "Sanitized execution-error category from the documented taxonomy; null for completed tasks. Never contains raw exception text."
+          "description": "Sanitized execution-error category from the documented taxonomy (including direct_evidence_required for workload 2.5.0); null for completed tasks. Never contains raw exception text."
         },
         "submitted_at_utc": { "type": "string", "format": "date-time" },
         "submitted_offset_ms": { "type": "number", "minimum": 0, "description": "Driver submission instant, monotonic offset from repetition start." },

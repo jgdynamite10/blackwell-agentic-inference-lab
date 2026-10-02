@@ -15,7 +15,7 @@ be claimed, and this track does not claim one.
 The public manifest schema is
 [sealed-set-manifest.schema.json](../schemas/sealed-set-manifest.schema.json),
 version 1.1.0. The decision record is
-[D-0022](decision-log.md).
+[D-0023](decision-log.md).
 
 ## Invocation
 

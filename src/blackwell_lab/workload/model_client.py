@@ -175,6 +175,37 @@ def _chunk(text: str, words_per_chunk: int = MOCK_WORDS_PER_CHUNK) -> list[str]:
     return chunks
 
 
+def _eligible_refs(messages: Sequence[Message]) -> list[str]:
+    """Observation IDs of structurally eligible tool results in a conversation.
+
+    Reads only the conversation it is given: each ``role=tool`` message is
+    paired with the assistant call that produced it, and the structural
+    eligibility rules of the evidence controller decide inclusion.
+    """
+    import json
+
+    from blackwell_lab.workload.evidence import ELIGIBLE, OBSERVATION_ID_FIELD, classify_observation
+
+    tool_names: dict[str, str] = {}
+    refs: list[str] = []
+    for message in messages:
+        if message.role == "assistant":
+            for call in message.tool_calls:
+                tool_names[call.call_id] = call.name
+        if message.role != "tool" or not message.tool_call_id:
+            continue
+        try:
+            payload = json.loads(message.content)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or OBSERVATION_ID_FIELD not in payload:
+            continue
+        tool = tool_names.get(message.tool_call_id, "")
+        if classify_observation(tool, payload) == ELIGIBLE:
+            refs.append(str(payload[OBSERVATION_ID_FIELD]))
+    return refs
+
+
 #: Behaviors the mock client can exhibit, used to exercise every branch of the
 #: agent loop and evaluator in tests. "correct" is the default benchmark
 #: behavior; the others deterministically simulate failure/adversarial modes.
@@ -260,6 +291,13 @@ class DeterministicMockClient(ModelClient):
                 yield StreamEvent(kind="content_chunk", text=piece)
             return
         call = self._turn_call(scenario, turn_index)
+        if settings.workload_version == "2.5.0" and call["tool"] == "recommend_remediation":
+            # Workload 2.5.0: cite every eligible observation_id visible in
+            # THIS conversation (never state shared across tasks or threads).
+            call = {
+                "tool": call["tool"],
+                "arguments": {**call["arguments"], "evidence_refs": _eligible_refs(messages)},
+            }
         if deadline is not None and clock.monotonic() >= deadline:
             raise ModelClientTimeout("turn deadline elapsed mid-stream")
         yield StreamEvent(kind="native_tool_call_delta")
