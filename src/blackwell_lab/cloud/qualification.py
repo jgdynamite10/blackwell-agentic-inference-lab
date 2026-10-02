@@ -35,6 +35,10 @@ from blackwell_lab.cloud.mvl import (
     FROZEN_TOP_P,
     FROZEN_VLLM_IMAGE_DIGEST,
 )
+from blackwell_lab.workload.evidence import (
+    CONTROLLER_EVIDENCE_GROUNDING_V1,
+    require_controller_binding,
+)
 from blackwell_lab.workload.native_tools import (
     REASONING_PARSER,
     TOOL_CALL_PARSER,
@@ -63,10 +67,12 @@ SPLIT_RULE = "sha256-hex-sort"
 CANDIDATE_C1 = "C1"
 CANDIDATE_C2 = "C2"
 CANDIDATE_P1 = "P1"
-AUTHORIZED_CANDIDATES = (CANDIDATE_C1, CANDIDATE_C2, CANDIDATE_P1)
+CANDIDATE_P2 = "P2"
+AUTHORIZED_CANDIDATES = (CANDIDATE_C1, CANDIDATE_C2, CANDIDATE_P1, CANDIDATE_P2)
 C1_TEMPERATURE = 1.0
 C2_TEMPERATURE = 0.2
 P1_TEMPERATURE = C2_TEMPERATURE
+P2_TEMPERATURE = C2_TEMPERATURE
 FROZEN_MAX_TOKENS = 1024
 
 STAGE_DEVELOPMENT = "development"
@@ -241,15 +247,28 @@ def require_complete_stage_evidence(stage: str, outcomes: Sequence[object]) -> N
 
 
 #: C1 and C2 stay on the 2.4.0 tool-contract correction. P1 is the
-#: workload 2.4.1 prompt-only candidate. Development remains the first
-#: required gate for every candidate; this mapping does not skip it.
+#: workload 2.4.1 prompt-only candidate. P2 is the workload 2.5.0
+#: evidence-grounding candidate (controller ``evidence-grounding-v1``).
+#: Development remains the first required gate for every candidate; this
+#: mapping does not skip it.
 P1_WORKLOAD_VERSION = "2.4.1"
+P2_WORKLOAD_VERSION = "2.5.0"
+P2_CONTROLLER = CONTROLLER_EVIDENCE_GROUNDING_V1
 CANDIDATE_WORKLOAD_VERSIONS = {
     CANDIDATE_C1: QUALIFICATION_WORKLOAD_VERSION,
     CANDIDATE_C2: QUALIFICATION_WORKLOAD_VERSION,
     CANDIDATE_P1: P1_WORKLOAD_VERSION,
+    CANDIDATE_P2: P2_WORKLOAD_VERSION,
 }
-_UNKNOWN_CANDIDATE = "qualification candidate must be C1, C2, or P1"
+#: Controller bound to each candidate. It must agree with the workload's
+#: own binding (:data:`blackwell_lab.workload.evidence.WORKLOAD_CONTROLLERS`).
+CANDIDATE_CONTROLLERS: dict[str, str | None] = {
+    CANDIDATE_C1: None,
+    CANDIDATE_C2: None,
+    CANDIDATE_P1: None,
+    CANDIDATE_P2: P2_CONTROLLER,
+}
+_UNKNOWN_CANDIDATE = "qualification candidate must be C1, C2, P1, or P2"
 
 
 def candidate_workload_version(candidate_id: str) -> str:
@@ -260,6 +279,19 @@ def candidate_workload_version(candidate_id: str) -> str:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
 
 
+def candidate_controller(candidate_id: str) -> str | None:
+    """Agent controller bound to one candidate, cross-checked with the workload.
+
+    Fails closed if the candidate table and the workload binding disagree,
+    so no P2 run can start with a controller the workload does not bind.
+    """
+    try:
+        controller = CANDIDATE_CONTROLLERS[candidate_id]
+    except KeyError as exc:
+        raise ConfigError(_UNKNOWN_CANDIDATE) from exc
+    return require_controller_binding(candidate_workload_version(candidate_id), controller)
+
+
 def candidate_temperature(candidate_id: str) -> float:
     if candidate_id == CANDIDATE_C1:
         return C1_TEMPERATURE
@@ -267,16 +299,22 @@ def candidate_temperature(candidate_id: str) -> float:
         return C2_TEMPERATURE
     if candidate_id == CANDIDATE_P1:
         return P1_TEMPERATURE
+    if candidate_id == CANDIDATE_P2:
+        return P2_TEMPERATURE
     raise ConfigError(_UNKNOWN_CANDIDATE)
 
 
 def frozen_candidate_fields(candidate_id: str) -> dict[str, Any]:
     if candidate_id not in AUTHORIZED_CANDIDATES:
         raise ConfigError(_UNKNOWN_CANDIDATE)
+    controller = candidate_controller(candidate_id)
     return {
         "candidate_id": candidate_id,
         "workflow": QUALIFICATION_WORKFLOW,
         "workload_version": candidate_workload_version(candidate_id),
+        # The controller key exists only for controller-bound candidates so
+        # the C1, C2, and P1 identity serializations stay byte-identical.
+        **({"controller": controller} if controller else {}),
         "catalog_workload_version": CATALOG_WORKLOAD_VERSION,
         "provider": FROZEN_PROVIDER,
         "region": FROZEN_REGION,
@@ -448,6 +486,12 @@ def validate_authorized_qualification_config(
     if config.get("workload_version") not in (None, expected_version):
         raise ConfigError(
             f"qualify-agent {candidate_id} workload_version must equal {expected_version}"
+        )
+    expected_controller = candidate_controller(candidate_id)
+    if "controller" in config and config.get("controller") != expected_controller:
+        raise ConfigError(
+            f"qualify-agent {candidate_id} controller must equal "
+            f"{expected_controller or 'null'} (workload {expected_version})"
         )
     if WORKLOAD_VERSION != CATALOG_WORKLOAD_VERSION:
         raise ConfigError("the scenario catalog identity must remain 2.3.0")
@@ -911,6 +955,7 @@ def sanitized_receipt(
         "config_sha256": config_sha256,
         "candidate_identity_sha256": identity_digest,
         "workload_version": candidate_workload_version(candidate_id),
+        "controller": candidate_controller(candidate_id),
         "catalog_workload_version": CATALOG_WORKLOAD_VERSION,
         "gates": gates,
         "stopped": stopped,

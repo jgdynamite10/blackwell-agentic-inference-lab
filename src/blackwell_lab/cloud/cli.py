@@ -21,9 +21,10 @@ Subcommands map one-to-one to the separated workflows required by Phase 3A:
 - ``mvl-baseline``    owner-approved D-0017 Akamai minimum valuable lab
                       (provider-native, three cells; fail-closed).
 - ``qualify-agent``   owner-approved agent-quality qualification
-                      (C1/C2 on workload 2.4.0, P1 on workload 2.4.1;
-                      frozen dev/holdout/freeze; fail-closed; no
-                      infrastructure changes).
+                      (C1/C2 on workload 2.4.0, P1 on workload 2.4.1,
+                      P2 on workload 2.5.0 with the evidence-grounding-v1
+                      controller; frozen dev/holdout/freeze; fail-closed;
+                      no infrastructure changes).
 - ``full-baseline``   DISABLED: the research-grade 12-cell baseline is not
                       part of the MVL.
 - ``verify-results``  external verification of persisted genuine results;
@@ -1113,6 +1114,7 @@ def _qualify_stop(message: str, *, results_dir: Path | None, run_label: str) -> 
 
 def cmd_qualify_agent(args: argparse.Namespace) -> int:
     from blackwell_lab.cloud import lifecycle, provenance, qualification, realbench, telemetry
+    from blackwell_lab.workload.evidence import require_controller_binding
     from blackwell_lab.workload.model_client import GenerationSettings
     from blackwell_lab.workload.openai_client import OpenAICompatibleClient
 
@@ -1122,7 +1124,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         candidate_id = args.candidate
         stage = args.stage
         if candidate_id not in qualification.AUTHORIZED_CANDIDATES:
-            raise ConfigError("qualification candidate must be C1, C2, or P1")
+            raise ConfigError("qualification candidate must be C1, C2, P1, or P2")
         if stage not in qualification.AUTHORIZED_STAGES:
             raise ConfigError("qualification stage must be development, holdout, or freeze")
         qualification.require_frozen_split()
@@ -1247,7 +1249,11 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             template_ids=spec["template_ids"],
             artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
             workload_version=qualification.candidate_workload_version(candidate_id),
+            controller=qualification.candidate_controller(candidate_id),
         )
+        # The workload/controller binding is re-checked against the
+        # assembled spec before any client exists (fail closed, no inference).
+        require_controller_binding(run_spec.workload_version, run_spec.controller)
         client = OpenAICompatibleClient(
             endpoint["base_url"],
             endpoint["model"],
@@ -1530,7 +1536,8 @@ def build_parser() -> argparse.ArgumentParser:
         "qualify-agent",
         help=(
             "Owner-approved agent-quality qualification "
-            "(C1/C2 on workload 2.4.0, P1 on workload 2.4.1; "
+            "(C1/C2 on workload 2.4.0, P1 on workload 2.4.1, P2 on workload "
+            "2.5.0 with the evidence-grounding-v1 controller; "
             "frozen development/holdout/freeze stages)."
         ),
     )
@@ -1539,10 +1546,12 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1"),
+        choices=("C1", "C2", "P1", "P2"),
         help=(
             "C1 (temperature 1.0, workload 2.4.0), "
-            "C2 (temperature 0.2, workload 2.4.0), or "
+            "C2 (temperature 0.2, workload 2.4.0), "
+            "P2 (temperature 0.2, workload 2.5.0, evidence-grounding-v1 "
+            "controller), or "
             "P1, the workload 2.4.1 prompt-only variant at temperature 0.2."
         ),
     )
