@@ -12,11 +12,11 @@ provider.
 from blackwell_lab.sealed_sets.model import (
     INTEGRITY_STATEMENT,
     approval_phrase,
-    controller_source_digest,
+    running_controller_digest,
 )
 
 __all__ = [
     "INTEGRITY_STATEMENT",
     "approval_phrase",
-    "controller_source_digest",
+    "running_controller_digest",
 ]

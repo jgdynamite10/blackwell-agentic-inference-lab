@@ -27,26 +27,46 @@ from blackwell_lab.sealed_sets.custody import (
     import_authorized_set,
     load_bundle_directory,
     load_manifest_schema,
+    prepare_import_request,
     report_receipt,
+    require_bound_controller,
     validate_public_manifest,
     verify_custody,
 )
 from blackwell_lab.sealed_sets.model import (
     APPROVAL_TEMPLATE,
+    CONTROLLER_SOURCE_PATHS,
     INTEGRITY_STATEMENT,
+    REQUEST_VERSION,
     CustodyError,
     OpaqueTask,
     approval_phrase,
+    build_import_request,
     build_public_manifest,
+    canonical_document_bytes,
     canonical_manifest_bytes,
-    controller_source_digest,
+    controller_digest_from_sources,
+    running_controller_digest,
+    running_controller_parts,
     sha256_digest,
     synthetic_placeholders,
     validate_bundles,
 )
 
 GIT = shutil.which("git")
+GIT_IDENTITY = [
+    "-c",
+    "user.email=custody-test@example.invalid",
+    "-c",
+    "user.name=Custody Test",
+    "-c",
+    "commit.gpgsign=false",
+]
 PACKAGE = Path(__file__).resolve().parents[1] / "src" / "blackwell_lab" / "sealed_sets"
+OLD_APPROVAL_TEMPLATE = (
+    "I approve sealed qualification-set generation at canonical commit "
+    "{commit} using controller digest {controller_digest}"
+)
 SENTINEL_BODY = b"ARTIFICIAL-BODY-SENTINEL\n"
 SENTINEL_ID = "d00placeholder"
 
@@ -80,28 +100,65 @@ def init_fixture_repo(path: Path) -> str:
         capture_output=True,
         text=True,
     )
-    identity = [
-        "-c",
-        "user.email=custody-test@example.invalid",
-        "-c",
-        "user.name=Custody Test",
-        "-c",
-        "commit.gpgsign=false",
-    ]
     (path / "README").write_text("synthetic fixture\n", encoding="utf-8")
+    return commit_files(path, ["README"], "synthetic fixture")
+
+
+def commit_files(repo: Path, paths: Sequence[str], message: str) -> str:
     subprocess.run(
-        [GIT, "-C", str(path), *identity, "add", "README"],
+        [GIT, "-C", str(repo), *GIT_IDENTITY, "add", "--", *paths],
         check=True,
         capture_output=True,
         text=True,
     )
     subprocess.run(
-        [GIT, "-C", str(path), *identity, "commit", "-m", "synthetic fixture"],
+        [GIT, "-C", str(repo), *GIT_IDENTITY, "commit", "-m", message],
         check=True,
         capture_output=True,
         text=True,
     )
-    return _git(path, "rev-parse", "HEAD")
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def write_controller_tree(repo: Path, *, mutate: bytes = b"", mode: int = 0o644) -> list[str]:
+    written: list[str] = []
+    for rel in CONTROLLER_SOURCE_PATHS:
+        destination = repo / rel
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        payload = (repository_root() / rel).read_bytes()
+        if mutate and rel.endswith("model.py"):
+            payload += mutate
+        destination.write_bytes(payload)
+        os.chmod(destination, mode)
+        written.append(rel)
+    return written
+
+
+def assert_status_and_diff_clean(repo: Path) -> None:
+    status = subprocess.run(
+        [GIT, "-C", str(repo), "status", "--porcelain", "-uall"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert status.stdout == ""
+    diff = subprocess.run(
+        [GIT, "-C", str(repo), "diff", "--quiet", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert diff.returncode == 0
+
+
+def verify_at_lab(output: Path) -> CustodyReceipt:
+    repo, commit = _lab()
+    return verify_custody(output, repo=repo, expected_commit=commit)
+
+
+def report_at_lab(output: Path) -> CustodyReceipt:
+    repo, commit = _lab()
+    return report_receipt(output, repo=repo, expected_commit=commit)
 
 
 @pytest.fixture
@@ -131,26 +188,52 @@ def bundles(
     return stage_tasks("d", "dev", dev_count), stage_tasks("h", "hold", hold_count)
 
 
+def _lab() -> tuple[Path, str]:
+    repo = repository_root()
+    return repo, _git(repo, "rev-parse", "HEAD")
+
+
 def attempt(
     fixture: Fixture,
     development: Sequence[OpaqueTask] | None = None,
     holdout: Sequence[OpaqueTask] | None = None,
     *,
     controller_digest: str | None = None,
+    request_digest: str | None = None,
     commit: str | None = None,
     approval: str | None = None,
     output: Path | str | None = None,
     checkpoint: Callable[[str], None] | None = None,
+    use_fixture: bool = False,
 ) -> CustodyReceipt:
     if development is None or holdout is None:
         development, holdout = bundles()
-    digest = controller_source_digest()
+    if use_fixture:
+        repo = fixture.repo
+        resolved_commit = fixture.commit if commit is None else commit
+    else:
+        repo, head = _lab()
+        resolved_commit = head if commit is None else commit
+    if controller_digest is None or request_digest is None or approval is None:
+        request = prepare_import_request(
+            repo=repo,
+            expected_commit=resolved_commit,
+            development=development,
+            holdout=holdout,
+        )
+        if controller_digest is None:
+            controller_digest = str(request["controller_digest"])
+        if request_digest is None:
+            request_digest = str(request["import_request_digest"])
+        if approval is None:
+            approval = approval_phrase(str(request["import_request_digest"]))
     return import_authorized_set(
-        repo=fixture.repo,
+        repo=repo,
         output_root=fixture.output if output is None else output,
-        expected_commit=fixture.commit if commit is None else commit,
-        expected_controller_digest=digest if controller_digest is None else controller_digest,
-        approval=approval_phrase(fixture.commit, digest) if approval is None else approval,
+        expected_commit=resolved_commit,
+        expected_controller_digest=controller_digest,
+        expected_request_digest=request_digest,
+        approval=approval,
         development=development,
         holdout=holdout,
         checkpoint=checkpoint,
@@ -248,16 +331,26 @@ def test_sources_do_not_import_catalog_or_provider_modules() -> None:
 def test_synthetic_validation_is_in_memory_and_content_free() -> None:
     development, holdout = synthetic_placeholders()
     validation = validate_bundles(development, holdout)
+    request = build_import_request(
+        commit="a" * 40,
+        controller_digest=running_controller_digest(),
+        development=development,
+        holdout=holdout,
+    )
     manifest = build_public_manifest(
         commit="a" * 40,
-        controller_digest=controller_source_digest(),
+        controller_digest=running_controller_digest(),
         validation=validation,
+        request=request,
     )
     validate_public_manifest(manifest)
     encoded = json.dumps(manifest)
     assert "synthetic-placeholder" not in encoded
     assert "ph00devplaceholder" not in encoded
     assert "ph00holdplaceholder" not in encoded
+    assert manifest["schema_version"] == "1.1.0"
+    assert manifest["request_version"] == REQUEST_VERSION
+    assert manifest["replay_scope"] == "selected-custody-location"
     assert manifest["development_task_count"] == 20
     assert manifest["holdout_task_count"] == 20
     assert len(manifest["file_digests"]) == 40
@@ -270,16 +363,14 @@ def test_synthetic_validation_is_in_memory_and_content_free() -> None:
 
 
 def test_approval_phrase_is_defined_and_does_not_import(tmp_path: Path) -> None:
-    commit = "589d4f4bfe53367edddaefd18caf55899622510d"
-    digest = controller_source_digest()
-    phrase = approval_phrase(commit, digest)
+    digest = "sha256:" + ("ab" * 32)
+    phrase = approval_phrase(digest)
     assert phrase == (
-        "I approve sealed qualification-set generation at canonical commit "
-        f"{commit} using controller digest {digest}"
+        "I approve sealed qualification-set import using request sha256:" + ("ab" * 32)
     )
     assert list(tmp_path.iterdir()) == []
     with pytest.raises(CustodyError) as caught:
-        approval_phrase("not-a-commit", digest)
+        approval_phrase("not-a-digest")
     assert caught.value.reason == "approval-mismatch"
 
 
@@ -295,11 +386,12 @@ def test_validate_synthetic_and_approval_phrase_commands() -> None:
     assert payload["development_task_count"] == 20
     assert payload["holdout_task_count"] == 20
     assert payload["controller_commit"] == ""
-    assert payload["controller_digest"] == controller_source_digest()
+    assert payload["controller_digest"] == running_controller_digest()
+    assert payload["set_identity"].startswith("sha256:")
     phrase = run_controller("approval-phrase")
     assert phrase.returncode == 0
     assert phrase.stdout == APPROVAL_TEMPLATE + "\n"
-    assert "sha256:" not in phrase.stdout
+    assert "{request_digest}" in phrase.stdout
     with pytest.raises(SystemExit) as caught:
         main([])
     assert caught.value.code == 2
@@ -307,13 +399,14 @@ def test_validate_synthetic_and_approval_phrase_commands() -> None:
 
 def test_successful_import_binds_counts_modes_and_digests(fixture: Fixture) -> None:
     development, holdout = bundles()
+    repo, commit = _lab()
     receipt = attempt(fixture, development, holdout)
     assert receipt.status == "pass"
     assert receipt.operation == "import"
     assert receipt.development_task_count == 20
     assert receipt.holdout_task_count == 20
-    assert receipt.controller_commit == fixture.commit
-    assert receipt.controller_digest == controller_source_digest()
+    assert receipt.controller_commit == commit
+    assert receipt.controller_digest == require_bound_controller(repo, commit)
     assert_modes(fixture.output)
     manifest = json.loads((fixture.output / "manifest.json").read_text(encoding="utf-8"))
     validate_public_manifest(manifest)
@@ -349,17 +442,20 @@ def test_successful_import_binds_counts_modes_and_digests(fixture: Fixture) -> N
     assert not dev_digests & hold_digests
     assert manifest["file_digests"] == sorted(dev_digests | hold_digests)
     assert manifest["custody_manifest_digest"] == sha256_digest(canonical_manifest_bytes(manifest))
-    assert manifest["controller_commit"] == fixture.commit
-    assert manifest["controller_digest"] == controller_source_digest()
+    assert manifest["controller_commit"] == commit
+    assert manifest["controller_digest"] == require_bound_controller(repo, commit)
+    assert manifest["set_identity"] == receipt.set_identity
+    assert manifest["import_request_digest"] == receipt.import_request_digest
+    assert manifest["replay_scope"] == "selected-custody-location"
     other = fixture.root / "custody-output-2"
     again = attempt(fixture, development, holdout, output=other)
     assert again.custody_manifest_digest == receipt.custody_manifest_digest
-    verified = verify_custody(fixture.output, repo=fixture.repo, expected_commit=fixture.commit)
+    verified = verify_at_lab(fixture.output)
     assert verified.operation == "verify"
     assert verified.custody_manifest_digest == receipt.custody_manifest_digest
     stored = json.loads((fixture.output / "receipt.json").read_text(encoding="utf-8"))
     assert stored["operation"] == "import"
-    reported = report_receipt(fixture.output, repo=fixture.repo, expected_commit=fixture.commit)
+    reported = report_at_lab(fixture.output)
     assert reported.operation == "receipt"
     assert stored == json.loads((fixture.output / "receipt.json").read_text(encoding="utf-8"))
 
@@ -371,16 +467,34 @@ def test_cli_import_verify_and_receipt_do_not_leak(fixture: Fixture) -> None:
     hold_dir = fixture.root / "bundle-hold"
     write_bundle(dev_dir, development)
     write_bundle(hold_dir, holdout)
-    digest = controller_source_digest()
-    phrase = approval_phrase(fixture.commit, digest)
+    repo, commit = _lab()
+    prepared = run_controller(
+        "prepare",
+        "--repo",
+        str(repo),
+        "--commit",
+        commit,
+        "--development",
+        str(dev_dir),
+        "--holdout",
+        str(hold_dir),
+    )
+    assert prepared.returncode == 0
+    assert prepared.stderr == ""
+    request = json.loads(prepared.stdout)
+    digest = request["controller_digest"]
+    request_digest = request["import_request_digest"]
+    phrase = approval_phrase(request_digest)
     blocked = run_controller(
         "import-bundles",
         "--repo",
-        str(fixture.repo),
+        str(repo),
         "--commit",
-        fixture.commit,
+        commit,
         "--controller-digest",
         digest,
+        "--request-digest",
+        request_digest,
         "--development",
         str(dev_dir),
         "--holdout",
@@ -397,11 +511,13 @@ def test_cli_import_verify_and_receipt_do_not_leak(fixture: Fixture) -> None:
     imported = run_controller(
         "import-bundles",
         "--repo",
-        str(fixture.repo),
+        str(repo),
         "--commit",
-        fixture.commit,
+        commit,
         "--controller-digest",
         digest,
+        "--request-digest",
+        request_digest,
         "--development",
         str(dev_dir),
         "--holdout",
@@ -416,18 +532,18 @@ def test_cli_import_verify_and_receipt_do_not_leak(fixture: Fixture) -> None:
     verified = run_controller(
         "verify",
         "--repo",
-        str(fixture.repo),
+        str(repo),
         "--commit",
-        fixture.commit,
+        commit,
         "--output",
         str(fixture.output),
     )
     reported = run_controller(
         "receipt",
         "--repo",
-        str(fixture.repo),
+        str(repo),
         "--commit",
-        fixture.commit,
+        commit,
         "--output",
         str(fixture.output),
     )
@@ -441,7 +557,7 @@ def test_cli_import_verify_and_receipt_do_not_leak(fixture: Fixture) -> None:
         "index.json",
         "blobs",
     ]
-    for proc in (blocked, imported, verified, reported):
+    for proc in (prepared, blocked, imported, verified, reported):
         for secret in secrets:
             assert secret not in proc.stdout
             assert secret not in proc.stderr
@@ -449,8 +565,9 @@ def test_cli_import_verify_and_receipt_do_not_leak(fixture: Fixture) -> None:
     assert payload["status"] == "pass"
     assert payload["development_task_count"] == 20
     assert payload["holdout_task_count"] == 20
-    assert payload["controller_commit"] == fixture.commit
+    assert payload["controller_commit"] == commit
     assert payload["controller_digest"] == digest
+    assert payload["import_request_digest"] == request_digest
     assert json.loads(verified.stdout)["operation"] == "verify"
     assert json.loads(reported.stdout)["operation"] == "receipt"
     public = (fixture.output / "manifest.json").read_text(encoding="utf-8")
@@ -592,15 +709,21 @@ def test_nonempty_and_permissive_destinations_are_rejected(fixture: Fixture) -> 
 
 def test_dirty_tree_wrong_commit_and_wrong_digest(fixture: Fixture) -> None:
     (fixture.repo / "untracked.txt").write_text("dirty\n", encoding="utf-8")
-    expect_blocked(fixture, "dirty-checkout")
+    expect_blocked(fixture, "dirty-checkout", use_fixture=True)
     assert not fixture.output.exists()
-    (fixture.repo / "untracked.txt").unlink()
+    (fixture.repo / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+    subprocess.run(
+        [GIT, "-C", str(fixture.repo), "add", "tracked.txt"],
+        check=True,
+        capture_output=True,
+    )
+    expect_blocked(fixture, "dirty-checkout", use_fixture=True)
     other = "0123456789abcdef0123456789abcdef01234567"
-    assert other != fixture.commit
+    assert other != _lab()[1]
     expect_blocked(fixture, "commit-mismatch", commit=other)
     assert not fixture.output.exists()
     bad = "sha256:" + ("ab" * 32)
-    assert bad != controller_source_digest()
+    assert bad != running_controller_digest()
     expect_blocked(fixture, "controller-digest-mismatch", controller_digest=bad)
     assert not fixture.output.exists()
 
@@ -638,7 +761,7 @@ def test_malformed_and_content_bearing_manifests_fail(fixture: Fixture) -> None:
     manifest_path.write_text('{"accepted_answers":"artificial-answer"}\n', encoding="utf-8")
     os.chmod(manifest_path, 0o600)
     with pytest.raises(CustodyError) as on_disk:
-        verify_custody(fixture.output, repo=fixture.repo, expected_commit=fixture.commit)
+        verify_at_lab(fixture.output)
     assert on_disk.value.reason == "manifest-invalid"
     assert "artificial-answer" not in str(on_disk.value)
     assert_no_valid_finalized(fixture.output)
@@ -677,7 +800,7 @@ def test_tamper_after_finalization_is_rejected(fixture: Fixture) -> None:
     blob.write_bytes(b"tampered-artificial\n")
     os.chmod(blob, 0o600)
     with pytest.raises(CustodyError) as blob_error:
-        verify_custody(fixture.output, repo=fixture.repo, expected_commit=fixture.commit)
+        verify_at_lab(fixture.output)
     assert blob_error.value.reason == "tamper"
     fresh = fixture.root / "fresh-output"
     attempt(fixture, output=fresh)
@@ -687,14 +810,14 @@ def test_tamper_after_finalization_is_rejected(fixture: Fixture) -> None:
     receipt_path.write_text(json.dumps(stored) + "\n", encoding="utf-8")
     os.chmod(receipt_path, 0o600)
     with pytest.raises(CustodyError) as receipt_error:
-        verify_custody(fresh, repo=fixture.repo, expected_commit=fixture.commit)
+        verify_at_lab(fresh)
     assert receipt_error.value.reason == "tamper"
     permissive = fixture.root / "mode-output"
     attempt(fixture, output=permissive)
     manifest_path = permissive / "manifest.json"
     os.chmod(manifest_path, 0o644)
     with pytest.raises(CustodyError) as mode_error:
-        verify_custody(permissive, repo=fixture.repo, expected_commit=fixture.commit)
+        verify_at_lab(permissive)
     assert mode_error.value.reason == "permissive-mode"
     assert receipt.custody_manifest_digest != ""
 
@@ -704,9 +827,9 @@ def test_rerun_against_finalized_set_does_not_replace_it(fixture: Fixture) -> No
     before = (fixture.output / "manifest.json").read_bytes()
     with pytest.raises(CustodyError) as caught:
         attempt(fixture)
-    assert caught.value.reason == "destination-nonempty"
+    assert caught.value.reason == "replay"
     assert (fixture.output / "manifest.json").read_bytes() == before
-    verified = verify_custody(fixture.output, repo=fixture.repo, expected_commit=fixture.commit)
+    verified = verify_at_lab(fixture.output)
     assert verified.custody_manifest_digest == receipt.custody_manifest_digest
     assert verified.status == "pass"
 
@@ -722,3 +845,399 @@ def test_directory_task_count_is_rejected(fixture: Fixture) -> None:
     with pytest.raises(CustodyError) as long_error:
         load_bundle_directory(long, repo=fixture.repo)
     assert long_error.value.reason == "task-count"
+
+
+def _hide_tracked_edit(fixture: Fixture, flag: str) -> None:
+    subprocess.run(
+        [GIT, "-C", str(fixture.repo), "update-index", flag, "README"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (fixture.repo / "README").write_text("changed while hidden from status\n", encoding="utf-8")
+    assert_status_and_diff_clean(fixture.repo)
+    recorded = subprocess.run(
+        [GIT, "-C", str(fixture.repo), "show", "HEAD:README"],
+        check=True,
+        capture_output=True,
+    )
+    assert (fixture.repo / "README").read_bytes() != recorded.stdout
+
+
+def test_skip_worktree_hides_changed_bytes_and_is_rejected(fixture: Fixture) -> None:
+    _hide_tracked_edit(fixture, "--skip-worktree")
+    assert _git(fixture.repo, "ls-files", "-v", "--", "README").startswith("S ")
+    expect_blocked(fixture, "dirty-checkout", use_fixture=True)
+    assert not fixture.output.exists()
+
+
+def test_assume_unchanged_hides_changed_bytes_and_is_rejected(fixture: Fixture) -> None:
+    _hide_tracked_edit(fixture, "--assume-unchanged")
+    assert _git(fixture.repo, "ls-files", "-v", "--", "README").startswith("h ")
+    expect_blocked(fixture, "dirty-checkout", use_fixture=True)
+    assert not fixture.output.exists()
+
+
+def test_unstaged_tracked_edit_is_rejected(fixture: Fixture) -> None:
+    (fixture.repo / "README").write_text("ordinary tracked edit\n", encoding="utf-8")
+    status = subprocess.run(
+        [GIT, "-C", str(fixture.repo), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert status.stdout != ""
+    expect_blocked(fixture, "dirty-checkout", use_fixture=True)
+    assert not fixture.output.exists()
+
+
+def test_missing_tracked_file_is_rejected(fixture: Fixture) -> None:
+    (fixture.repo / "README").unlink()
+    expect_blocked(fixture, "dirty-checkout", use_fixture=True)
+    assert not fixture.output.exists()
+
+
+def test_executable_mode_change_is_rejected(fixture: Fixture) -> None:
+    script = fixture.repo / "synthetic-tool"
+    script.write_text("#!/bin/sh\necho synthetic\n", encoding="utf-8")
+    os.chmod(script, 0o644)
+    fixture.commit = commit_files(fixture.repo, ["synthetic-tool"], "add synthetic tool")
+    os.chmod(script, 0o755)  # noqa: S103
+    expect_blocked(fixture, "dirty-checkout", use_fixture=True)
+    assert not fixture.output.exists()
+
+
+def test_regular_file_replaced_by_symlink_is_rejected(fixture: Fixture) -> None:
+    readme = fixture.repo / "README"
+    readme.unlink()
+    readme.symlink_to("other-target")
+    expect_blocked(fixture, "dirty-checkout", use_fixture=True)
+    assert not fixture.output.exists()
+
+
+def test_symlink_replaced_by_regular_file_is_rejected(fixture: Fixture) -> None:
+    link = fixture.repo / "synthetic-link"
+    link.symlink_to("README")
+    fixture.commit = commit_files(fixture.repo, ["synthetic-link"], "add synthetic link")
+    link.unlink()
+    link.write_text("regular-file\n", encoding="utf-8")
+    recorded = _git(fixture.repo, "ls-tree", "HEAD", "synthetic-link")
+    assert recorded.startswith("120000 ")
+    expect_blocked(fixture, "dirty-checkout", use_fixture=True)
+    assert not fixture.output.exists()
+
+
+def test_controller_absent_from_supplied_commit(fixture: Fixture) -> None:
+    with pytest.raises(CustodyError) as caught:
+        require_bound_controller(fixture.repo, fixture.commit)
+    assert caught.value.reason == "controller-absent"
+    expect_blocked(fixture, "controller-absent", use_fixture=True)
+    assert not fixture.output.exists()
+    partial = fixture.root / "partial-repo"
+    partial_commit = init_fixture_repo(partial)
+    paths = write_controller_tree(partial)
+    (partial / paths[-1]).unlink()
+    partial_commit = commit_files(partial, paths[:-1], "partial controller")
+    with pytest.raises(CustodyError) as missing:
+        require_bound_controller(partial, partial_commit)
+    assert missing.value.reason == "controller-absent"
+
+
+def test_controller_digest_changes_with_order_mode_and_bytes() -> None:
+    parts = running_controller_parts()
+    assert tuple(path for path, _mode, _blob in parts) == CONTROLLER_SOURCE_PATHS
+    original = controller_digest_from_sources(parts)
+    assert original == running_controller_digest()
+    assert controller_digest_from_sources(tuple(reversed(parts))) != original
+    flipped = tuple(
+        (path, "100755" if mode == "100644" else "100644", blob) for path, mode, blob in parts
+    )
+    assert controller_digest_from_sources(flipped) != original
+    changed = ((parts[0][0], parts[0][1], parts[0][2] + b"\n"), *parts[1:])
+    assert controller_digest_from_sources(changed) != original
+
+
+def test_copied_controller_does_not_bind_another_repository(fixture: Fixture) -> None:
+    mutated = fixture.root / "mutated-repo"
+    init_fixture_repo(mutated)
+    mutated_paths = write_controller_tree(mutated, mutate=b"\n# synthetic-controller-delta\n")
+    mutated_commit = commit_files(mutated, mutated_paths, "mutated controller")
+    assert_status_and_diff_clean(mutated)
+    with pytest.raises(CustodyError) as mismatch:
+        require_bound_controller(mutated, mutated_commit)
+    assert mismatch.value.reason == "controller-digest-mismatch"
+    fixture.repo = mutated
+    fixture.commit = mutated_commit
+    expect_blocked(
+        fixture,
+        "controller-digest-mismatch",
+        use_fixture=True,
+        output=fixture.root / "mutated-output",
+    )
+    assert not (fixture.root / "mutated-output").exists()
+
+    mode_repo = fixture.root / "mode-repo"
+    init_fixture_repo(mode_repo)
+    mode_paths = write_controller_tree(mode_repo, mode=0o755)
+    mode_commit = commit_files(mode_repo, mode_paths, "executable controller")
+    listed = _git(mode_repo, "ls-tree", "HEAD", CONTROLLER_SOURCE_PATHS[-1])
+    assert listed.startswith("100755 ")
+    with pytest.raises(CustodyError) as mode_error:
+        require_bound_controller(mode_repo, mode_commit)
+    assert mode_error.value.reason == "controller-digest-mismatch"
+
+    copied = fixture.root / "copied-repo"
+    init_fixture_repo(copied)
+    copied_paths = write_controller_tree(copied)
+    copied_commit = commit_files(copied, copied_paths, "copied controller")
+    assert_status_and_diff_clean(copied)
+    with pytest.raises(CustodyError) as location:
+        require_bound_controller(copied, copied_commit)
+    assert location.value.reason == "controller-location"
+    fixture.repo = copied
+    fixture.commit = copied_commit
+    expect_blocked(
+        fixture,
+        "controller-location",
+        use_fixture=True,
+        output=fixture.root / "copied-output",
+    )
+    assert not (fixture.root / "copied-output").exists()
+
+
+def test_runtime_controller_modified_after_commit_is_rejected(fixture: Fixture) -> None:
+    repo, commit = _lab()
+    assert require_bound_controller(repo, commit) == running_controller_digest()
+    target = repo / CONTROLLER_SOURCE_PATHS[-1]
+    original = target.read_bytes()
+    mode = stat.S_IMODE(target.stat().st_mode)
+    try:
+        target.write_bytes(original + b"\n")
+        with pytest.raises(CustodyError) as mismatch:
+            require_bound_controller(repo, commit)
+        assert mismatch.value.reason == "controller-digest-mismatch"
+        expect_blocked(fixture, "dirty-checkout")
+        assert not fixture.output.exists()
+    finally:
+        target.write_bytes(original)
+        os.chmod(target, mode)
+
+
+def test_running_source_matches_commit_bound_controller() -> None:
+    repo, commit = _lab()
+    bound = require_bound_controller(repo, commit)
+    assert bound == running_controller_digest()
+    assert bound.startswith("sha256:")
+
+
+def test_import_request_binds_exact_input_and_replay_is_local(fixture: Fixture) -> None:
+    development, holdout = bundles()
+    repo, commit = _lab()
+    request = prepare_import_request(
+        repo=repo,
+        expected_commit=commit,
+        development=development,
+        holdout=holdout,
+    )
+    assert set(request) == {
+        "request_version",
+        "controller_commit",
+        "controller_digest",
+        "set_identity",
+        "development_task_count",
+        "holdout_task_count",
+        "development_aggregate_digest",
+        "holdout_aggregate_digest",
+        "import_request_digest",
+    }
+    assert request["request_version"] == REQUEST_VERSION
+    assert request["controller_commit"] == commit
+    assert request["controller_digest"] == running_controller_digest()
+    assert request["development_task_count"] == 20
+    assert request["holdout_task_count"] == 20
+    body = dict(request)
+    request_digest = str(body.pop("import_request_digest"))
+    assert sha256_digest(canonical_document_bytes(body, exclude="import_request_digest")) == (
+        request_digest
+    )
+    encoded = json.dumps(request)
+    for task in (*development, *holdout):
+        assert task.task_id not in encoded
+        assert task.content.decode("utf-8") not in encoded
+    phrase = approval_phrase(request_digest)
+    controller_digest = str(request["controller_digest"])
+
+    other_dev = (
+        OpaqueTask(development[0].task_id, b"artificial-dev-substituted\n"),
+        *development[1:],
+    )
+    substituted_dev = prepare_import_request(
+        repo=repo,
+        expected_commit=commit,
+        development=other_dev,
+        holdout=holdout,
+    )
+    assert substituted_dev["import_request_digest"] != request_digest
+    expect_blocked(
+        fixture,
+        "request-mismatch",
+        development=other_dev,
+        holdout=holdout,
+        controller_digest=controller_digest,
+        request_digest=request_digest,
+        approval=phrase,
+        output=fixture.root / "substituted-dev",
+    )
+    old_phrase = OLD_APPROVAL_TEMPLATE.format(commit=commit, controller_digest=controller_digest)
+    expect_blocked(
+        fixture,
+        "approval-mismatch",
+        development=other_dev,
+        holdout=holdout,
+        controller_digest=controller_digest,
+        request_digest=str(substituted_dev["import_request_digest"]),
+        approval=old_phrase,
+        output=fixture.root / "old-phrase-dev",
+    )
+
+    other_hold = (
+        OpaqueTask(holdout[0].task_id, b"artificial-hold-substituted\n"),
+        *holdout[1:],
+    )
+    substituted_hold = prepare_import_request(
+        repo=repo,
+        expected_commit=commit,
+        development=development,
+        holdout=other_hold,
+    )
+    expect_blocked(
+        fixture,
+        "request-mismatch",
+        development=development,
+        holdout=other_hold,
+        controller_digest=controller_digest,
+        request_digest=request_digest,
+        approval=phrase,
+        output=fixture.root / "substituted-hold",
+    )
+    expect_blocked(
+        fixture,
+        "approval-mismatch",
+        development=development,
+        holdout=other_hold,
+        controller_digest=controller_digest,
+        request_digest=str(substituted_hold["import_request_digest"]),
+        approval=old_phrase,
+        output=fixture.root / "old-phrase-hold",
+    )
+
+    reordered = (development[1], development[0], *development[2:])
+    reordered_request = prepare_import_request(
+        repo=repo,
+        expected_commit=commit,
+        development=reordered,
+        holdout=holdout,
+    )
+    assert (
+        reordered_request["development_aggregate_digest"]
+        == (request["development_aggregate_digest"])
+    )
+    assert reordered_request["holdout_aggregate_digest"] == request["holdout_aggregate_digest"]
+    assert reordered_request["set_identity"] != request["set_identity"]
+    assert reordered_request["import_request_digest"] != request_digest
+    expect_blocked(
+        fixture,
+        "request-mismatch",
+        development=reordered,
+        holdout=holdout,
+        controller_digest=controller_digest,
+        request_digest=request_digest,
+        approval=phrase,
+        output=fixture.root / "reordered-output",
+    )
+
+    short, _hold = bundles(19, 20)
+    expect_blocked(
+        fixture,
+        "task-count",
+        development=short,
+        holdout=holdout,
+        output=fixture.root / "short-output",
+    )
+    expect_blocked(
+        fixture,
+        "commit-mismatch",
+        commit="0" * 40,
+        output=fixture.root / "bad-commit",
+    )
+    expect_blocked(
+        fixture,
+        "controller-digest-mismatch",
+        controller_digest="sha256:" + ("ab" * 32),
+        request_digest=request_digest,
+        approval=phrase,
+        output=fixture.root / "bad-controller",
+    )
+    forged = build_import_request(
+        commit="b" * 40,
+        controller_digest=controller_digest,
+        development=development,
+        holdout=holdout,
+    )
+    expect_blocked(
+        fixture,
+        "request-mismatch",
+        controller_digest=controller_digest,
+        request_digest=str(forged["import_request_digest"]),
+        approval=approval_phrase(str(forged["import_request_digest"])),
+        output=fixture.root / "forged-commit",
+    )
+
+    receipt = attempt(
+        fixture,
+        development,
+        holdout,
+        controller_digest=controller_digest,
+        request_digest=request_digest,
+        approval=phrase,
+    )
+    assert receipt.import_request_digest == request_digest
+    assert receipt.set_identity == request["set_identity"]
+    before = (fixture.output / "manifest.json").read_bytes()
+    with pytest.raises(CustodyError) as replay:
+        attempt(
+            fixture,
+            development,
+            holdout,
+            controller_digest=controller_digest,
+            request_digest=request_digest,
+            approval=phrase,
+        )
+    assert replay.value.reason == "replay"
+    assert (fixture.output / "manifest.json").read_bytes() == before
+    verified = verify_at_lab(fixture.output)
+    assert verified.status == "pass"
+    assert verified.custody_manifest_digest == receipt.custody_manifest_digest
+
+    second = fixture.root / "second-custody-location"
+    again = attempt(
+        fixture,
+        development,
+        holdout,
+        controller_digest=controller_digest,
+        request_digest=request_digest,
+        approval=phrase,
+        output=second,
+    )
+    assert again.import_request_digest == request_digest
+    assert (fixture.output / "manifest.json").read_bytes() == before
+
+    with pytest.raises(CustodyError) as occupied:
+        attempt(
+            fixture,
+            other_dev,
+            holdout,
+            output=fixture.output,
+        )
+    assert occupied.value.reason == "destination-nonempty"
+    assert (fixture.output / "manifest.json").read_bytes() == before

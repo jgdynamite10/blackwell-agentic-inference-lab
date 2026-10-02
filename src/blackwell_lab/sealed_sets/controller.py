@@ -12,11 +12,16 @@ Later sequence, not executed by this module:
 1. The P2 implementation is merged.
 2. Post-merge CI passes.
 3. The code is frozen at one exact canonical commit.
-4. The owner supplies the digest-bearing generation approval.
-5. A local run then imports exactly 20 development and 20 holdout opaque
-   tasks into an external directory and returns only counts, aggregate
-   digests, the controller commit, the controller digest, the custody
-   manifest digest, and pass/fail status.
+4. The owner prepares a content-free import request and supplies the
+   approval phrase bound to that request digest.
+5. A local run then imports exactly those 20 development and 20 holdout
+   opaque tasks into an external directory and returns only counts,
+   aggregate digests, the controller commit, the controller digest, the
+   custody manifest digest, and pass/fail status.
+
+The approval phrase does not provide global anti-replay. A second custody
+location is outside this tool. SHA-256 digests are integrity checks, not
+encryption and not a cryptographic seal.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from blackwell_lab.sealed_sets.custody import (
     CustodyReceipt,
     import_authorized_set,
     load_bundle_directory,
+    prepare_import_request,
     report_receipt,
     verify_custody,
 )
@@ -37,7 +43,8 @@ from blackwell_lab.sealed_sets.model import (
     APPROVAL_TEMPLATE,
     INTEGRITY_STATEMENT,
     CustodyError,
-    controller_source_digest,
+    running_controller_digest,
+    set_identity_for,
     sha256_digest,
     synthetic_placeholders,
     validate_bundles,
@@ -52,15 +59,18 @@ def _validate_synthetic() -> CustodyReceipt:
     """In-memory placeholder check. Does not write a custody set."""
     development, holdout = synthetic_placeholders()
     validation = validate_bundles(development, holdout)
-    controller_digest = controller_source_digest()
+    controller_digest = running_controller_digest()
+    identity = set_identity_for(development, holdout)
     preview = {
         "operation": "validate-synthetic",
         "controller_digest": controller_digest,
+        "set_identity": identity,
         "development_aggregate_digest": validation.development.aggregate_digest,
         "holdout_aggregate_digest": validation.holdout.aggregate_digest,
         "file_digests": list(validation.file_digests),
     }
     preview_bytes = (json.dumps(preview, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    preview_digest = sha256_digest(preview_bytes)
     return CustodyReceipt(
         status="pass",
         operation="validate-synthetic",
@@ -70,7 +80,9 @@ def _validate_synthetic() -> CustodyReceipt:
         holdout_aggregate_digest=validation.holdout.aggregate_digest,
         controller_commit="",
         controller_digest=controller_digest,
-        custody_manifest_digest=sha256_digest(preview_bytes),
+        custody_manifest_digest=preview_digest,
+        set_identity=identity,
+        import_request_digest=preview_digest,
     )
 
 
@@ -90,7 +102,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_parser(
         "approval-phrase",
-        help="Print the approval phrase format without approving generation.",
+        help="Print the approval phrase format without approving import.",
+    )
+    preparer = sub.add_parser(
+        "prepare",
+        help="Print a content-free import request. Does not write or approve.",
     )
     importer = sub.add_parser(
         "import-bundles",
@@ -104,13 +120,16 @@ def _parser() -> argparse.ArgumentParser:
         "receipt",
         help="Content-free receipt for a finalized external custody set.",
     )
-    for target in (importer, verifier, reporter):
+    for target in (preparer, importer, verifier, reporter):
         target.add_argument("--repo", required=True)
         target.add_argument("--commit", required=True)
+    for target in (preparer, importer):
+        target.add_argument("--development", required=True)
+        target.add_argument("--holdout", required=True)
+    for target in (importer, verifier, reporter):
         target.add_argument("--output", required=True)
     importer.add_argument("--controller-digest", required=True)
-    importer.add_argument("--development", required=True)
-    importer.add_argument("--holdout", required=True)
+    importer.add_argument("--request-digest", required=True)
     importer.add_argument("--approve", required=True)
     return parser
 
@@ -126,6 +145,17 @@ def main(argv: list[str] | None = None) -> int:
             print(APPROVAL_TEMPLATE)
             return 0
         repo = Path(args.repo)
+        if args.command == "prepare":
+            development = load_bundle_directory(args.development, repo=repo)
+            holdout = load_bundle_directory(args.holdout, repo=repo)
+            request = prepare_import_request(
+                repo=repo,
+                expected_commit=args.commit,
+                development=development,
+                holdout=holdout,
+            )
+            print(json.dumps(request, sort_keys=True, separators=(",", ":")))
+            return 0
         if args.command == "import-bundles":
             development = load_bundle_directory(args.development, repo=repo)
             holdout = load_bundle_directory(args.holdout, repo=repo)
@@ -134,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
                 output_root=args.output,
                 expected_commit=args.commit,
                 expected_controller_digest=args.controller_digest,
+                expected_request_digest=args.request_digest,
                 approval=args.approve,
                 development=development,
                 holdout=holdout,
