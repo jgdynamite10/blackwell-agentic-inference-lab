@@ -200,7 +200,10 @@ report that failure):
 - A task is an **execution error** if the serving endpoint returns a failure
   (`endpoint_error`), the agent emits a malformed/invalid tool call
   (`malformed_tool_call`, `invalid_tool_name`, `invalid_tool_arguments`),
-  no terminal recommendation is produced (`no_terminal_recommendation`), or
+  no terminal recommendation is produced (`no_terminal_recommendation`),
+  the turn budget is exhausted after at least one terminal recommendation
+  was rejected by a workload-bound evidence controller
+  (`direct_evidence_required`, workload 2.5.0 only), or
   an unexpected client/tool/runtime exception occurs — contained and
   sanitized as `agent_runtime_error` so one task can never abort a
   repetition and no raw exception text enters any record. Retry policy:

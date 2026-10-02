@@ -1028,3 +1028,74 @@ serialization is unchanged.
 **Rationale.** Owner instruction to clarify evidence acquisition in the
 system prompt only. Private diagnostic notes motivated the wording and
 are not recorded here.
+
+## 2026-10-02 — D-0022: Workload 2.5.0 evidence-grounding controller and candidate P2
+
+**Workloads 2.3.0, 2.4.0, and 2.4.1, candidates C1, C2, and P1, evaluator
+3.1.0, scenario content, accepted answers, evidence predicates, thresholds,
+tool behavior, tool latencies, the turn budget, the Nemotron BF16 model and
+revision, vLLM 0.27.1, the native OpenAI tool transport, infrastructure, the
+six-hour lifecycle, and publication policy are unchanged.** The 2.4.1 system
+prompt is byte-identical to D-0021. No qualification outcome is published
+with this entry. This entry does not execute qualification, provision
+resources, run inference, download models, or claim that the controller
+improves quality.
+
+**Decision.** Add immutable workload version **2.5.0**, derived from 2.4.1,
+bound to the provenance-checking controller **`evidence-grounding-v1`**
+(`src/blackwell_lab/workload/evidence.py`; methodology in
+`methodology/workload-definition.md`):
+
+1. Every non-terminal tool result carries an opaque, task-local
+   `observation_id`. Controller state is isolated per task execution,
+   repetition, and concurrency slot; IDs from any other execution never
+   resolve.
+2. `recommend_remediation` gains `evidence_refs`, a list of
+   `observation_id` strings that must each resolve to an **eligible**
+   observation recorded earlier in the same task.
+3. Eligible observations are successful, nonempty diagnostic results: a
+   log search with at least one match, a usable service-health response,
+   or a found metric with data points. Zero-match searches, not-found
+   lookups, unknown or unusable health, malformed results, runbooks, change
+   records (guidance only), and fabricated, stale, cross-task,
+   cross-repetition, or cross-concurrency references are ineligible.
+4. A rejected attempt returns only the generic payload
+   `{"accepted": false, "failure_category": "direct_evidence_required"}`
+   and the task continues inside its unchanged `max_turns` budget. Budget
+   exhaustion after at least one rejection is the new execution-error
+   category `direct_evidence_required`; a task that never attempts the
+   terminal tool remains `no_terminal_recommendation`.
+5. The controller validates provenance and structure only. It never reads
+   scenario identifiers, expected queries, accepted answers, or evaluator
+   predicates; irrelevant but structurally valid evidence passes the
+   controller and fails the evaluator as before.
+6. Measurement accounting is retained for every turn, tool call, rejected
+   attempt, usage record, latency, and failure. Task observations gain an
+   `evidence_grounding` count summary and run manifests record
+   `workload.controller`. No prompt, completion, reasoning text, raw
+   observation payload, or credential is persisted by the controller.
+7. The 2.5.0 system prompt is the unchanged 2.4.1 prompt plus one generic
+   grounding instruction; only the terminal tool description is extended.
+   Neither names a scenario, accepted answer, log line, or predicate.
+8. Workload/controller bindings are closed: 2.3.0, 2.4.0, and 2.4.1 bind
+   no controller; 2.5.0 binds `evidence-grounding-v1`. Any other
+   combination, in `qualify-agent` configuration or in a real-run spec,
+   fails closed before a model client is constructed.
+
+Candidate **P2** is an authorized `qualify-agent` candidate: workload
+2.5.0, controller `evidence-grounding-v1`, temperature 0.2, and the
+existing top_p, seed, max tokens, model and revision, container and
+engine, tool transport, development, holdout, and freeze schedules,
+evaluator 3.1.0, thresholds, accepted answers, and task counts. The
+candidate mapping is C1 to 2.4.0, C2 to 2.4.0, P1 to 2.4.1, and P2 to
+2.5.0. Compared with P1, serialized experimental behavior differs only in
+candidate identity, workload version, controller, the version-bound system
+prompt, and the resulting digests. The `controller` field is serialized
+only for P2, so C1, C2, and P1 identity digests are unchanged. Development
+remains the first required gate; each stage keeps its own digest-bearing
+approval. Authorizing the candidate does not execute it.
+
+**Rationale.** Owner instruction to add a provenance-grounding controller
+as a bounded, offline-tested treatment, separable from the prompt-only P1
+variant. Private diagnostic notes motivated the design and are not recorded
+here.
