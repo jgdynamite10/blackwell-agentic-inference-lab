@@ -23,6 +23,7 @@ provider, credential, or inference endpoint is involved. The suite proves:
 from __future__ import annotations
 
 import builtins
+import glob
 import hashlib
 import io
 import json
@@ -36,10 +37,15 @@ import pytest
 from fakes import FakeClock
 from sealed_fixtures import (
     binding_for,
+    other_stage,
     placeholder_binding,
     stage_blob_paths,
+    stage_dir,
+    stage_index_file,
+    stage_task_ids,
     synthetic_stage,
     tree_snapshot,
+    write_legacy_combined_custody,
     write_synthetic_custody,
 )
 from test_evidence_grounding import (
@@ -101,7 +107,7 @@ from blackwell_lab.workload.clock import SYSTEM_CLOCK
 from blackwell_lab.workload.evaluator import EVALUATOR_VERSION, QUALITY_THRESHOLD
 from blackwell_lab.workload.model_client import GenerationSettings
 from blackwell_lab.workload.openai_client import OpenAICompatibleClient
-from blackwell_lab.workload.scenarios import catalog
+from blackwell_lab.workload.scenarios import catalog, catalog_digest
 from blackwell_lab.workload.validation import (
     ConfigError,
     SemanticValidationError,
@@ -137,34 +143,155 @@ def _expect(reason: str):
     return pytest.raises(SealedSetError, match=rf"^sealed-set: {reason}$")
 
 
-class _OpenRecorder:
-    """Records every path opened through io.open, builtins.open, or os.open."""
+_LISTING_OPS = frozenset({"listdir", "scandir", "walk", "glob", "iglob"})
 
-    def __init__(self, monkeypatch):
-        self.paths: list[Path] = []
-        real_io_open = io.open
-        real_os_open = os.open
 
-        def io_open(file, *args, **kwargs):
-            if isinstance(file, (str, bytes, os.PathLike)):
-                self.paths.append(Path(os.fsdecode(file)))
-            return real_io_open(file, *args, **kwargs)
+class _AccessRecorder:
+    """Records every filesystem name the process touches, by operation.
 
-        def os_open(path, flags, mode=0o777, *, dir_fd=None):
-            if isinstance(path, (str, bytes, os.PathLike)):
-                self.paths.append(Path(os.fsdecode(path)))
-            return real_os_open(path, flags, mode, dir_fd=dir_fd)
+    Instruments ``io.open``/``builtins.open``, ``os.open``, ``os.stat``,
+    ``os.lstat``, ``os.access``, ``os.readlink``, ``os.listdir``,
+    ``os.scandir``, ``os.walk``, ``glob.glob``/``glob.iglob`` and, on
+    Python 3.10, the ``pathlib`` accessor that binds those functions at
+    import time (3.11+ pathlib calls ``os`` at call time). ``os.path.*``
+    helpers resolve to ``os.stat``/``os.lstat`` at call time and are
+    therefore covered too. Descriptor-based calls carry no names.
+    """
 
-        monkeypatch.setattr(io, "open", io_open)
+    def __init__(self, monkeypatch, events: list[tuple[str, Path]] | None = None):
+        self.events: list[tuple[str, Path]] = [] if events is None else events
+        if events is not None:
+            return
+        recorder = self
+
+        def _note(op, target):
+            if isinstance(target, (str, bytes, os.PathLike)):
+                recorder.events.append((op, Path(os.fsdecode(target))))
+
+        def wrap(module, name, op, position=0):
+            real = getattr(module, name)
+
+            def wrapper(*args, **kwargs):
+                if len(args) > position:
+                    _note(op, args[position])
+                elif "path" in kwargs:
+                    _note(op, kwargs["path"])
+                elif "top" in kwargs:
+                    _note(op, kwargs["top"])
+                elif "pathname" in kwargs:
+                    _note(op, kwargs["pathname"])
+                return real(*args, **kwargs)
+
+            monkeypatch.setattr(module, name, wrapper)
+            return wrapper
+
+        io_open = wrap(io, "open", "open")
         monkeypatch.setattr(builtins, "open", io_open)
-        monkeypatch.setattr(os, "open", os_open)
-        # Python 3.10 pathlib binds io.open at import time on its accessor.
+        os_open = wrap(os, "open", "open")
+        os_stat = wrap(os, "stat", "stat")
+        os_lstat = wrap(os, "lstat", "lstat")
+        wrap(os, "access", "access")
+        wrap(os, "readlink", "readlink")
+        os_listdir = wrap(os, "listdir", "listdir")
+        os_scandir = wrap(os, "scandir", "scandir")
+        wrap(os, "walk", "walk")
+        wrap(glob, "glob", "glob")
+        wrap(glob, "iglob", "iglob")
         accessor = getattr(pathlib, "_NormalAccessor", None)
-        if accessor is not None and hasattr(accessor, "open"):
-            monkeypatch.setattr(accessor, "open", staticmethod(io_open))
+        if accessor is not None:
+            for name, fn in (
+                ("open", io_open),
+                ("stat", os_stat),
+                ("lstat", os_lstat),
+                ("listdir", os_listdir),
+                ("scandir", os_scandir),
+            ):
+                if hasattr(accessor, name):
+                    monkeypatch.setattr(accessor, name, staticmethod(fn))
+        del os_open
 
-    def under(self, directory: Path) -> set[Path]:
-        return {p for p in self.paths if directory == p or directory in p.parents}
+    def frozen(self) -> _AccessRecorder:
+        """A snapshot that stops growing while the test reads its own oracles."""
+        return _AccessRecorder(None, events=list(self.events))
+
+    @property
+    def paths(self) -> list[Path]:
+        return [path for _op, path in self.events]
+
+    def under(self, directory: Path, *, ops: frozenset | None = None) -> set[Path]:
+        return {
+            path
+            for op, path in self.events
+            if (ops is None or op in ops) and (directory == path or directory in path.parents)
+        }
+
+    def opened_under(self, directory: Path) -> set[Path]:
+        return self.under(directory, ops=frozenset({"open"}))
+
+    def listings_under(self, directory: Path) -> set[Path]:
+        return self.under(directory, ops=_LISTING_OPS)
+
+    def text(self) -> str:
+        return "\n".join(f"{op} {path}" for op, path in self.events)
+
+
+def _stage_oracle(root: Path, stage: str) -> tuple[set[Path], set[str]]:
+    """Other-stage blob paths and task ids, read by the test before any damage."""
+    return stage_blob_paths(root, stage), stage_task_ids(root, stage)
+
+
+def _assert_stage_only_access(
+    recorder: _AccessRecorder,
+    root: Path,
+    stage: str,
+    *,
+    other_oracle: tuple[set[Path], set[str]] | None = None,
+) -> None:
+    """Prove the custody footprint of one stage-specific run.
+
+    Allowed names: the root, its ``.git`` probe (``require_external_directory``
+    confirms the root is not inside a repository), the two public files,
+    the ``private`` directory, the selected stage directory, its ``blobs``
+    directory, its index and exactly its twenty blobs. Nothing under the
+    other stage may be touched by any operation, no directory under the
+    root may be listed/walked/globbed, and no other-stage blob name or task
+    id may appear in any recorded path.
+    """
+    recorder = recorder.frozen()
+    other = other_stage(stage)
+    other_blobs, other_ids = (
+        other_oracle if other_oracle is not None else _stage_oracle(root, other)
+    )
+    selected_blobs = stage_blob_paths(root, stage)
+    allowed = {
+        root,
+        root / ".git",
+        root / "manifest.json",
+        root / "receipt.json",
+        root / "private",
+        stage_dir(root, stage),
+        stage_dir(root, stage) / "blobs",
+        stage_index_file(root, stage),
+        *selected_blobs,
+    }
+    touched = recorder.under(root)
+    assert touched <= allowed, sorted(str(p.relative_to(root)) for p in touched - allowed)
+    assert recorder.under(stage_dir(root, other)) == set()
+    assert recorder.listings_under(root) == set()
+    assert recorder.opened_under(stage_dir(root, stage) / "blobs") == selected_blobs
+    assert stage_index_file(root, stage) in recorder.opened_under(root)
+    assert recorder.opened_under(root) <= {
+        root / "manifest.json",
+        root / "receipt.json",
+        stage_index_file(root, stage),
+        *selected_blobs,
+    }
+    recorded = recorder.text()
+    assert len(other_blobs) == 20 and len(other_ids) == 20
+    for other_blob in other_blobs:
+        assert other_blob.name not in recorded
+    for task_id in other_ids:
+        assert task_id not in recorded
 
 
 class _Harness:
@@ -275,6 +402,47 @@ def _rewrite_json(path: Path, mutate) -> None:
         return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
     _tamper_file(path, _apply)
+
+
+#: (damage, reason the damaged stage itself fails with) for other-stage isolation tests.
+STAGE_DAMAGE = [
+    ("index-missing", "tamper"),
+    ("index-corrupt", "tamper"),
+    ("index-permissive", "permissive-mode"),
+    ("blob-missing", "tamper"),
+    ("blob-corrupt", "tamper"),
+    ("blob-permissive", "permissive-mode"),
+    ("stage-dir-missing", "tamper"),
+    ("stage-dir-unreadable", "permissive-mode"),
+]
+
+
+def _damage_stage(root: Path, stage: str, damage: str):
+    """Break one stage's private tree; return a callable that restores modes."""
+    index = stage_index_file(root, stage)
+    blob = sorted(stage_blob_paths(root, stage))[2]
+    directory = stage_dir(root, stage)
+    restore = lambda: None  # noqa: E731
+    if damage == "index-missing":
+        index.unlink()
+    elif damage == "index-corrupt":
+        _tamper_file(index, lambda data: b"{" + data)
+    elif damage == "index-permissive":
+        os.chmod(index, 0o644)
+    elif damage == "blob-missing":
+        blob.unlink()
+    elif damage == "blob-corrupt":
+        _tamper_file(blob, lambda data: data + b" ")
+    elif damage == "blob-permissive":
+        os.chmod(blob, 0o644)
+    elif damage == "stage-dir-missing":
+        shutil.rmtree(directory)
+    elif damage == "stage-dir-unreadable":
+        os.chmod(directory, 0o000)
+        restore = lambda: os.chmod(directory, 0o700)  # noqa: E731
+    else:  # pragma: no cover - guard against typos in parametrization
+        raise AssertionError(damage)
+    return restore
 
 
 # --- payload contract -----------------------------------------------------------------
@@ -563,14 +731,82 @@ class TestStageLoader:
         selected = stage_blob_paths(root, stage)
         other = stage_blob_paths(root, OTHER[stage])
         assert len(selected) == len(other) == 20 and not selected & other
-        recorder = _OpenRecorder(monkeypatch)
+        recorder = _AccessRecorder(monkeypatch)
         observed: list[Path] = []
         loaded = _load(root, manifest, stage, opened=observed.append)
         assert len(loaded.tasks) == 20
-        opened_blobs = recorder.under(root / "private" / "blobs")
-        assert opened_blobs == selected
-        assert not opened_blobs & other
+        _assert_stage_only_access(recorder, root, stage)
         assert set(observed) == selected
+
+    @pytest.mark.parametrize("stage", STAGES)
+    @pytest.mark.parametrize(("damage", "reason"), STAGE_DAMAGE)
+    def test_other_stage_damage_is_invisible_to_the_selected_stage(
+        self, monkeypatch, custody, stage, damage, reason
+    ):
+        root, manifest = custody
+        other = OTHER[stage]
+        expected = _load(root, manifest, stage).task_ids
+        oracle = _stage_oracle(root, other)
+        restore = _damage_stage(root, other, damage)
+        try:
+            recorder = _AccessRecorder(monkeypatch)
+            loaded = _load(root, manifest, stage)
+            assert loaded.task_ids == expected
+            _assert_stage_only_access(recorder, root, stage, other_oracle=oracle)
+            with _expect(reason):
+                _load(root, manifest, other)
+        finally:
+            restore()
+
+    def test_legacy_combined_index_package_is_rejected(self, tmp_path, monkeypatch):
+        root = tmp_path / "legacy"
+        manifest = write_legacy_combined_custody(root, commit=COMMIT)
+        assert (root / "private" / "index.json").is_file()
+        assert manifest["schema_version"] == "1.1.0"
+        section = binding_for(root, manifest, "development")
+        binding = SealedSetBinding.from_config(section, stage="development")
+        recorder = _AccessRecorder(monkeypatch)
+        with _expect("layout-version-unsupported"):
+            load_sealed_stage(binding, custody_dir=root, repo=REPO, canonical_commit=COMMIT)
+        # The gate fires on the public manifest alone: nothing private is touched.
+        assert recorder.under(root / "private") == set()
+        from blackwell_lab.sealed_sets.custody import validate_public_manifest
+        from blackwell_lab.sealed_sets.model import CustodyError
+
+        with pytest.raises(CustodyError) as caught:
+            validate_public_manifest(manifest)
+        assert caught.value.reason == "layout-version-unsupported"
+        # The legacy tree is left byte-for-byte untouched (no migration).
+        assert manifest == json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+
+    def test_full_custody_verification_covers_both_stages_but_the_adapter_does_not(
+        self, monkeypatch, custody
+    ):
+        import inspect
+
+        from blackwell_lab.cloud import sealed_binding as adapter
+        from blackwell_lab.sealed_sets import custody as custody_module
+
+        root, manifest = custody
+        recorder = _AccessRecorder(monkeypatch)
+        custody_module._require_tree_modes(root)
+        custody_module._check_all_stages(manifest, root)
+        for stage in STAGES:
+            assert recorder.opened_under(stage_dir(root, stage) / "blobs") == stage_blob_paths(
+                root, stage
+            )
+        assert recorder.listings_under(root)
+        # qualify-agent and validate-only reach custody only through the
+        # stage-specific adapter, which never imports the full verifier or
+        # walks the private tree.
+        adapter_source = inspect.getsource(adapter)
+        for forbidden in ("verify_custody", "_check_all_stages", "_require_tree_modes", "os.walk"):
+            assert forbidden not in adapter_source
+        for forbidden in ("iterdir", "listdir", "scandir", "glob(", "rglob"):
+            assert forbidden not in adapter_source
+        cli_source = inspect.getsource(cli)
+        assert "verify_custody" not in cli_source
+        assert "verify_stage_tree" not in cli_source
 
     def test_order_is_independent_of_import_order(self, tmp_path):
         development = synthetic_stage("development")
@@ -682,39 +918,44 @@ class TestStageLoader:
         _rewrite_json(root / "receipt.json", lambda d: d.__setitem__("status", "pass"))
         _load(root, manifest, "development")
 
-        def swap_rows(d):
-            d["development"][0], d["development"][1] = d["development"][1], d["development"][0]
+        dev_index = stage_index_file(root, "development")
 
-        _rewrite_json(root / "private" / "index.json", swap_rows)
-        with _expect("tamper"):
-            _load(root, manifest, "development")
+        def swap_rows(d):
+            d["rows"][0], d["rows"][1] = d["rows"][1], d["rows"][0]
 
         def duplicate_id(d):
-            d["development"][1]["task_id"] = d["development"][0]["task_id"]
-
-        shutil.rmtree(root)
-        write_synthetic_custody(root, commit=COMMIT)
-        _rewrite_json(root / "private" / "index.json", duplicate_id)
-        with _expect("tamper"):
-            _load(root, manifest, "development")
+            d["rows"][1]["task_id"] = d["rows"][0]["task_id"]
 
         def duplicate_digest(d):
-            d["holdout"][1]["content_digest"] = d["holdout"][0]["content_digest"]
-
-        shutil.rmtree(root)
-        write_synthetic_custody(root, commit=COMMIT)
-        _rewrite_json(root / "private" / "index.json", duplicate_digest)
-        with _expect("tamper"):
-            _load(root, manifest, "development")
+            d["rows"][1]["content_digest"] = d["rows"][0]["content_digest"]
 
         def extra_key(d):
             d["notes"] = []
 
-        shutil.rmtree(root)
-        write_synthetic_custody(root, commit=COMMIT)
-        _rewrite_json(root / "private" / "index.json", extra_key)
-        with _expect("tamper"):
-            _load(root, manifest, "development")
+        def relabel_stage(d):
+            d["stage"] = "holdout"
+
+        def legacy_layout(d):
+            d["private_layout"] = "combined"
+
+        # Every byte of the stage index is bound by the manifest's index
+        # digest, so each alteration is a tamper; a relabelled layout is
+        # refused by the layout gate first.
+        for mutate, reason in (
+            (swap_rows, "tamper"),
+            (duplicate_id, "tamper"),
+            (duplicate_digest, "tamper"),
+            (extra_key, "tamper"),
+            (relabel_stage, "tamper"),
+            (legacy_layout, "layout-version-unsupported"),
+        ):
+            shutil.rmtree(root)
+            write_synthetic_custody(root, commit=COMMIT)
+            _rewrite_json(dev_index, mutate)
+            with _expect(reason):
+                _load(root, manifest, "development")
+            # The holdout stage is unaffected by development-index damage.
+            _load(root, manifest, "holdout")
 
     def test_payload_tampering_fails_and_leaves_custody_unchanged(self, custody):
         root, manifest = custody
@@ -883,8 +1124,14 @@ class TestSealedRun:
         record = records[0]
         workload = record.manifest["workload"]
         validate_run_manifest(record.manifest)
-        assert workload["sealed_set"] == binding.provenance()
-        assert workload["catalog_digest"] == binding.stage_aggregate_digest
+        assert workload["task_source"] == {
+            "kind": "sealed",
+            "digest": binding.stage_aggregate_digest,
+            "sealed_set": binding.provenance(),
+        }
+        assert "catalog_digest" not in workload
+        assert "sealed_set" not in workload
+        assert workload["task_source"]["digest"] != catalog_digest()
         assert workload["tasks_per_repetition"] == 20
         assert workload["scenario_count"] == 10
         assert workload["version"] == "2.5.0" and workload["controller"] == "evidence-grounding-v1"
@@ -953,32 +1200,79 @@ class TestSealedRun:
             clock=FakeClock(),
             sealed_tasks=loaded,
         )[0]
+        binding = loaded.binding
+        aggregate = binding.stage_aggregate_digest
+
+        def copy_manifest():
+            return json.loads(json.dumps(record.manifest))
+
+        def sealed_block(document):
+            return document["workload"]["task_source"]["sealed_set"]
+
         for field in BINDING_FIELDS:
-            tampered = json.loads(json.dumps(record.manifest))
-            value = tampered["workload"]["sealed_set"][field]
-            tampered["workload"]["sealed_set"][field] = (
+            tampered = copy_manifest()
+            value = sealed_block(tampered)[field]
+            sealed_block(tampered)[field] = (
                 value + 1
                 if isinstance(value, int)
                 else ("holdout" if field == "stage" else value[:-1] + "x")
             )
             with _expect("provenance-mismatch"):
-                require_manifest_provenance(tampered, loaded.binding)
-        no_block = json.loads(json.dumps(record.manifest))
-        del no_block["workload"]["sealed_set"]
+                require_manifest_provenance(tampered, binding)
+        no_block = copy_manifest()
+        del no_block["workload"]["task_source"]
         with _expect("provenance-mismatch"):
-            require_manifest_provenance(no_block, loaded.binding)
-        wrong_digest = json.loads(json.dumps(record.manifest))
-        wrong_digest["workload"]["catalog_digest"] = "sha256:" + "0" * 64
-        with _expect("provenance-mismatch"):
-            require_manifest_provenance(wrong_digest, loaded.binding)
+            require_manifest_provenance(no_block, binding)
+        # (10) A sealed manifest without the explicit discriminator fails schema
+        # and semantics: with no task_source it is a catalog run lacking its
+        # catalog_digest.
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(no_block)
         with pytest.raises(SemanticValidationError):
-            validate_result_semantics(wrong_digest, record.result)
-        wrong_count = json.loads(json.dumps(record.manifest))
-        wrong_count["workload"]["sealed_set"]["task_count"] = 19
+            validate_result_semantics(no_block, record.result)
+        # (7) The public catalog digest substituted for the stage aggregate fails.
+        substituted = copy_manifest()
+        substituted["workload"]["task_source"]["digest"] = catalog_digest()
+        with _expect("provenance-mismatch"):
+            require_manifest_provenance(substituted, binding)
+        with pytest.raises(SemanticValidationError):
+            validate_result_semantics(substituted, record.result)
+        both = copy_manifest()
+        both["workload"]["task_source"]["digest"] = catalog_digest()
+        sealed_block(both)["stage_aggregate_digest"] = catalog_digest()
+        with _expect("provenance-mismatch"):
+            require_manifest_provenance(both, binding)
+        # (8) The stage aggregate placed in catalog_digest fails everywhere.
+        overloaded = copy_manifest()
+        overloaded["workload"]["catalog_digest"] = aggregate
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(overloaded)
+        with pytest.raises(SemanticValidationError):
+            validate_result_semantics(overloaded, record.result)
+        with _expect("provenance-mismatch"):
+            require_manifest_provenance(overloaded, binding)
+        # The retired top-level location is refused outright.
+        legacy_location = copy_manifest()
+        legacy_location["workload"]["sealed_set"] = binding.provenance()
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(legacy_location)
+        with pytest.raises(SemanticValidationError):
+            validate_result_semantics(legacy_location, record.result)
+        with _expect("provenance-mismatch"):
+            require_manifest_provenance(legacy_location, binding)
+        # A catalog discriminator on a sealed run fails.
+        relabelled = copy_manifest()
+        relabelled["workload"]["task_source"]["kind"] = "catalog"
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(relabelled)
+        with _expect("provenance-mismatch"):
+            require_manifest_provenance(relabelled, binding)
+        wrong_count = copy_manifest()
+        sealed_block(wrong_count)["task_count"] = 19
         with pytest.raises(jsonschema.ValidationError):
             validate_run_manifest(wrong_count)
-        with_path = json.loads(json.dumps(record.manifest))
-        with_path["workload"]["sealed_set"]["custody_dir"] = "/private"
+        with_path = copy_manifest()
+        sealed_block(with_path)["custody_dir"] = "/private"
         with pytest.raises(jsonschema.ValidationError):
             validate_run_manifest(with_path)
         other_stage = [
@@ -997,9 +1291,54 @@ class TestSealedRun:
         run_dir = external / "qualification-runs" / "p2-manifest"
         manifest_path = next(run_dir.glob("*.manifest.json"))
         document = json.loads(manifest_path.read_text(encoding="utf-8"))
-        document["workload"]["catalog_digest"] = "sha256:" + "1" * 64
+        document["workload"]["catalog_digest"] = aggregate
         manifest_path.write_text(json.dumps(document), encoding="utf-8")
         assert main(["verify-results", "--subdirectory", "qualification-runs"]) == 1
+        document["workload"].pop("catalog_digest")
+        document["workload"]["task_source"]["digest"] = catalog_digest()
+        manifest_path.write_text(json.dumps(document), encoding="utf-8")
+        assert main(["verify-results", "--subdirectory", "qualification-runs"]) == 1
+
+    def test_catalog_manifest_with_sealed_provenance_fails(self, tmp_path, monkeypatch, custody):
+        # (9) and (11): a catalog run must not validate with sealed provenance
+        # attached, while the explicit catalog discriminator and the legacy
+        # (pre-discriminator) shape both verify.
+        root, manifest = custody
+        external = tmp_path / "external"
+        external.mkdir()
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        binding = _binding(root, manifest, "development")
+        record = run_real_cell(
+            _real_spec(artifact_family="qualification-runs"),
+            _UsageMockClient(),
+            host=_HOST,
+            sampler_factory=_FakeSampler,
+            clock=FakeClock(),
+        )[0]
+        workload = record.manifest["workload"]
+        assert workload["task_source"] == {"kind": "catalog"}
+        assert workload["catalog_digest"] == catalog_digest()
+        validate_run_manifest(record.manifest)
+        validate_result_semantics(record.manifest, record.result)
+        legacy = json.loads(json.dumps(record.manifest))
+        del legacy["workload"]["task_source"]
+        validate_run_manifest(legacy)
+        validate_result_semantics(legacy, record.result)
+        for attach in (
+            lambda w: w.__setitem__("sealed_set", binding.provenance()),
+            lambda w: w.__setitem__("task_source", binding.task_source()),
+            lambda w: w["task_source"].__setitem__("sealed_set", binding.provenance()),
+            lambda w: w["task_source"].__setitem__("digest", binding.stage_aggregate_digest),
+            lambda w: w.__setitem__("task_source", {"kind": "sealed"}),
+        ):
+            tainted = json.loads(json.dumps(record.manifest))
+            attach(tainted["workload"])
+            with pytest.raises(jsonschema.ValidationError):
+                validate_run_manifest(tainted)
+            with pytest.raises(SemanticValidationError):
+                validate_result_semantics(tainted, record.result)
+            with _expect("provenance-mismatch"):
+                require_manifest_provenance(tainted, binding)
 
 
 # --- CLI: fail before client, isolation, validate-only, leakage ---------------------------
@@ -1020,14 +1359,13 @@ class TestQualifyAgentCli:
             raise AssertionError("the public catalog must not be consulted for a sealed run")
 
         monkeypatch.setattr(realbench, "catalog", no_catalog)
-        recorder = _OpenRecorder(monkeypatch)
+        recorder = _AccessRecorder(monkeypatch)
         config = qualification_config_dict("P2", stage, sealed_set=section)
         code = harness.run(config, stage=stage, custody_dir=root)
         out, err = capsys.readouterr()
         assert code == 0, err
         assert err == ""
-        assert recorder.under(root / "private" / "blobs") == stage_blob_paths(root, stage)
-        assert not recorder.under(root / "private" / "blobs") & stage_blob_paths(root, OTHER[stage])
+        _assert_stage_only_access(recorder, root, stage)
         report = json.loads(out)
         assert report["sealed_set"] == section
         assert report["stage"] == stage and report["candidate_id"] == "P2"
@@ -1046,9 +1384,81 @@ class TestQualifyAgentCli:
         persisted_manifest = json.loads(
             next(run_dir.glob("*.manifest.json")).read_text(encoding="utf-8")
         )
-        assert persisted_manifest["workload"]["sealed_set"] == section
+        assert persisted_manifest["workload"]["task_source"] == {
+            "kind": "sealed",
+            "digest": section["stage_aggregate_digest"],
+            "sealed_set": section,
+        }
+        assert "catalog_digest" not in persisted_manifest["workload"]
         _clean_stream(json.dumps(persisted_manifest), root, tasks)
         assert main(["verify-results", "--subdirectory", "qualification-runs"]) == 0
+
+    def test_legacy_combined_index_package_fails_before_client(self, tmp_path, monkeypatch, capsys):
+        harness = _Harness(tmp_path, monkeypatch)
+        root = tmp_path / "legacy"
+        manifest = write_legacy_combined_custody(root, commit=COMMIT)
+        section = binding_for(root, manifest, "development")
+        before = tree_snapshot(root)
+        recorder = _AccessRecorder(monkeypatch)
+        code = harness.run(
+            qualification_config_dict("P2", "development", sealed_set=section), custody_dir=root
+        )
+        out, err = capsys.readouterr()
+        assert code == 1 and out == ""
+        assert "BLOCKED: sealed-set: layout-version-unsupported" in err
+        harness.assert_nothing_live()
+        assert recorder.under(root / "private") == set()
+        assert tree_snapshot(root) == before
+        _clean_stream(err, root, [])
+        assert not list(harness.external.rglob("*receipt*"))
+        # validate-only reports the same stable reason with zero client work.
+        code = harness.run(
+            qualification_config_dict("P2", "development", sealed_set=section),
+            custody_dir=root,
+            extra=("--validate-only",),
+        )
+        assert code == 1
+        assert "layout-version-unsupported" in capsys.readouterr().err
+        harness.assert_nothing_live()
+
+    @pytest.mark.parametrize("stage", STAGES)
+    @pytest.mark.parametrize(("damage", "reason"), STAGE_DAMAGE)
+    def test_other_stage_damage_does_not_affect_execution(
+        self, tmp_path, monkeypatch, capsys, stage, damage, reason
+    ):
+        harness = _Harness(tmp_path, monkeypatch)
+        root = tmp_path / "custody"
+        manifest = write_synthetic_custody(root, commit=COMMIT)
+        section = binding_for(root, manifest, stage)
+        other = OTHER[stage]
+        oracle = _stage_oracle(root, other)
+        restore = _damage_stage(root, other, damage)
+        try:
+            harness.go_live()
+            recorder = _AccessRecorder(monkeypatch)
+            code = harness.run(
+                qualification_config_dict("P2", stage, sealed_set=section),
+                stage=stage,
+                custody_dir=root,
+            )
+            out, err = capsys.readouterr()
+            assert code == 0, err
+            _assert_stage_only_access(recorder, root, stage, other_oracle=oracle)
+            assert json.loads(out)["sealed_set"] == section
+            # The damaged stage itself still fails closed, before any client.
+            constructed_before = len(harness.constructed)
+            code = harness.run(
+                qualification_config_dict(
+                    "P2", other, sealed_set=binding_for(root, manifest, other)
+                ),
+                stage=other,
+                custody_dir=root,
+            )
+            assert code == 1
+            assert f"BLOCKED: sealed-set: {reason}" in capsys.readouterr().err
+            assert len(harness.constructed) == constructed_before
+        finally:
+            restore()
 
     def test_missing_binding_or_custody_dir_fails_before_client(
         self, tmp_path, monkeypatch, capsys
@@ -1179,7 +1589,7 @@ class TestQualifyAgentCli:
                 "P2", "development", sealed_set=binding_for(other, other_manifest, "development")
             ),
         )
-        _tamper_file(root / "manifest.json", lambda d: d.replace(b"1.1.0", b"1.1.1"))
+        _tamper_file(root / "manifest.json", lambda d: d.replace(b"1.2.0", b"1.2.1"))
         expect("manifest-hash-mismatch")
         shutil.rmtree(root)
         write_synthetic_custody(root, commit=COMMIT)
@@ -1187,7 +1597,7 @@ class TestQualifyAgentCli:
         expect("receipt-invalid")
         shutil.rmtree(root)
         write_synthetic_custody(root, commit=COMMIT)
-        _rewrite_json(root / "private" / "index.json", lambda d: d["development"].pop())
+        _rewrite_json(stage_index_file(root, "development"), lambda d: d["rows"].pop())
         expect("tamper")
         shutil.rmtree(root)
         write_synthetic_custody(root, commit=COMMIT)
@@ -1220,13 +1630,13 @@ class TestQualifyAgentCli:
         # still run because it never reads holdout bytes; holdout must refuse.
         _tamper_file(hold_blob, lambda d: d.replace(b"syn-hol", b"syn-xol"))
         harness.go_live()
-        recorder = _OpenRecorder(monkeypatch)
+        recorder = _AccessRecorder(monkeypatch)
         config = qualification_config_dict(
             "P2", "development", sealed_set=binding_for(root, manifest, "development")
         )
         assert harness.run(config, custody_dir=root) == 0, capsys.readouterr().err
         capsys.readouterr()
-        assert recorder.under(root / "private" / "blobs") == stage_blob_paths(root, "development")
+        _assert_stage_only_access(recorder, root, "development")
         assert hold_blob not in recorder.paths
         hold_config = qualification_config_dict(
             "P2", "holdout", sealed_set=binding_for(root, manifest, "holdout")
@@ -1245,7 +1655,7 @@ class TestQualifyAgentCli:
         root = tmp_path / "custody"
         manifest = write_synthetic_custody(root, commit=COMMIT)
         section = binding_for(root, manifest, stage)
-        recorder = _OpenRecorder(monkeypatch)
+        recorder = _AccessRecorder(monkeypatch)
         config = qualification_config_dict("P2", stage, sealed_set=section)
         path = tmp_path / "validate.json"
         path.write_text(json.dumps(config), encoding="utf-8")
@@ -1278,10 +1688,12 @@ class TestQualifyAgentCli:
         assert report["sealed_set"] == section
         assert report["sealed_tasks_loaded"] == 20
         assert report["sealed_scenario_count"] == 10
+        assert report["custody_access"] == "stage-specific"
+        assert report["other_stage_observed"] is False
         assert report["candidate_identity_sha256"] == candidate_identity_digest("P2")
         harness.assert_nothing_live()
         assert not harness.external.exists()
-        assert recorder.under(root / "private" / "blobs") == stage_blob_paths(root, stage)
+        _assert_stage_only_access(recorder, root, stage)
         _clean_stream(out, root, _load(root, manifest, stage).tasks)
         # A broken custody set is reported, still without any client.
         _tamper_file(root / "manifest.json", lambda d: d + b"\n")
@@ -1377,6 +1789,39 @@ class TestUnchangedSurfaces:
         )
         assert PAYLOAD_SCHEMA_VERSION == "1.0.0"
 
+    @pytest.mark.parametrize(("candidate", "stage"), [("C1", "development"), ("C2", "holdout")])
+    def test_catalog_cells_perform_zero_custody_reads(
+        self, tmp_path, monkeypatch, capsys, candidate, stage
+    ):
+        # (12) A finalized custody tree sits next to the results directory;
+        # a catalog cell never touches a single name under it and its
+        # identity digest is the frozen one.
+        harness = _Harness(tmp_path, monkeypatch)
+        root = tmp_path / "custody"
+        write_synthetic_custody(root, commit=COMMIT)
+        harness.go_live()
+        recorder = _AccessRecorder(monkeypatch)
+        code = harness.run(
+            qualification_config_dict(candidate, stage), candidate=candidate, stage=stage
+        )
+        out, err = capsys.readouterr()
+        assert code == 0, err
+        assert recorder.under(root) == set()
+        report = json.loads(out)
+        assert (
+            report["candidate_identity_sha256"]
+            == {
+                "C1": FROZEN_C1_IDENTITY_SHA256,
+                "C2": FROZEN_C2_IDENTITY_SHA256,
+            }[candidate]
+        )
+        assert "sealed_set" not in report
+        run_dir = harness.external / "qualification-runs" / f"qual-a-{candidate.lower()}-{stage}"
+        persisted = json.loads(next(run_dir.glob("*.manifest.json")).read_text(encoding="utf-8"))
+        assert persisted["workload"]["task_source"] == {"kind": "catalog"}
+        assert persisted["workload"]["catalog_digest"] == catalog_digest()
+        assert main(["verify-results", "--subdirectory", "qualification-runs"]) == 0
+
     def test_catalog_runs_are_byte_for_byte_unaffected(self, tmp_path, monkeypatch):
         external = tmp_path / "external"
         external.mkdir()
@@ -1395,7 +1840,9 @@ class TestUnchangedSurfaces:
         )
         workload = records[0].manifest["workload"]
         assert "sealed_set" not in workload
-        assert workload["catalog_digest"].startswith("sha256:")
+        assert workload["task_source"] == {"kind": "catalog"}
+        assert workload["catalog_digest"] == catalog_digest()
+        validate_run_manifest(records[0].manifest)
         validate_result_semantics(
             records[0].manifest,
             records[0].result,
