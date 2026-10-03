@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from blackwell_lab.cloud.sealed_binding import SealedSetBinding, SealedStageTasks
 from blackwell_lab.paths import RunMode, resolve_results_dir
 from blackwell_lab.schemas import (
     validate_benchmark_result,
@@ -82,6 +83,7 @@ from blackwell_lab.workload.scenarios import (
 from blackwell_lab.workload.stats import measure_from_values, unavailable_measure
 from blackwell_lab.workload.validation import (
     ConfigError,
+    catalog_task_source,
     validate_result_semantics,
     validate_runner_config,
 )
@@ -156,6 +158,29 @@ class RealRunSpec:
     topology_kind: str | None = None
     gpu_count: int = 1
     node_count: int = 1
+    #: Content-free binding of the sealed custody stage that supplies every
+    #: task of this cell (decision D-0024). When set, the public scenario
+    #: catalog is never consulted and ``run_real_cell`` requires the
+    #: matching decoded stage. ``None`` for every catalog-driven run.
+    sealed_set: SealedSetBinding | None = None
+
+
+def _validate_sealed_spec(spec: RealRunSpec) -> None:
+    binding = spec.sealed_set
+    if binding is None:
+        return
+    if not isinstance(binding, SealedSetBinding):
+        raise ConfigError("sealed_set must be a SealedSetBinding")
+    if spec.template_ids is not None:
+        raise ConfigError("sealed runs take every task from custody; template_ids must be None")
+    if spec.warmup_passes != 0:
+        raise ConfigError("sealed runs perform no warm-up passes")
+    if spec.repetitions != 1:
+        raise ConfigError("sealed runs execute exactly one measured repetition")
+    if spec.tasks_per_repetition != binding.task_count:
+        raise ConfigError("sealed runs must schedule exactly the bound task count")
+    if spec.artifact_family != "qualification-runs":
+        raise ConfigError("sealed runs are qualification runs")
 
 
 def _validate_spec(spec: RealRunSpec) -> Profile:
@@ -209,6 +234,7 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
         raise ConfigError("instance_type and region are required for genuine runs")
     if spec.artifact_family not in {"real-runs", "qualification-runs"}:
         raise ConfigError("artifact_family must be real-runs or qualification-runs")
+    _validate_sealed_spec(spec)
     if spec.template_ids is not None:
         known = catalog()
         missing = [template_id for template_id in spec.template_ids if template_id not in known]
@@ -296,7 +322,15 @@ def build_real_manifest(
             "name": WORKLOAD_NAME,
             "version": require_workload_version(spec.workload_version),
             **({"controller": spec.controller} if spec.controller else {}),
-            "catalog_digest": catalog_digest(),
+            # Catalog and sealed provenance are mutually exclusive. A sealed
+            # run records its stage aggregate only under task_source and
+            # never touches catalog_digest, which keeps its public-catalog
+            # meaning and is absent here.
+            **(
+                {"task_source": spec.sealed_set.task_source()}
+                if spec.sealed_set is not None
+                else {"catalog_digest": catalog_digest(), "task_source": catalog_task_source()}
+            ),
             "profile": profile.name,
             "concurrency": spec.concurrency,
             "tasks_per_repetition": spec.tasks_per_repetition,
@@ -539,6 +573,7 @@ def run_real_cell(
     sampler_factory: SamplerFactory,
     results_dir: Path | None = None,
     clock: Clock = SYSTEM_CLOCK,
+    sealed_tasks: SealedStageTasks | None = None,
 ) -> list[RepetitionRecord]:
     """Executes one genuine experimental cell and persists every repetition.
 
@@ -550,8 +585,23 @@ def run_real_cell(
     closed), and an explicitly passed ``results_dir`` is re-validated
     through the same guard so no caller can steer genuine output into the
     repository.
+
+    ``sealed_tasks`` is the decoded custody stage for a sealed run
+    (decision D-0024). It is required exactly when ``spec.sealed_set`` is
+    set, must carry the identical binding, and then supplies every task
+    instance and scenario; the public catalog is not consulted. Catalog
+    runs must not pass it.
     """
     profile = _validate_spec(spec)
+    if (spec.sealed_set is None) != (sealed_tasks is None):
+        raise ConfigError("sealed runs require the decoded sealed stage and nothing else")
+    if sealed_tasks is not None:
+        if not isinstance(sealed_tasks, SealedStageTasks):
+            raise ConfigError("sealed_tasks must be a SealedStageTasks")
+        if sealed_tasks.binding != spec.sealed_set:
+            raise ConfigError("sealed stage binding does not match the run specification")
+        if len(sealed_tasks.tasks) != spec.tasks_per_repetition:
+            raise ConfigError("sealed stage task count does not match the run specification")
     if results_dir is None:
         resolved = resolve_results_dir(mode=RunMode.REAL)
     else:
@@ -570,8 +620,14 @@ def run_real_cell(
     if existing:
         raise ConfigError("refusing to overwrite existing genuine artifacts in this run label")
 
-    full_catalog = catalog()
-    template_ids = list(spec.template_ids) if spec.template_ids is not None else list(full_catalog)
+    if sealed_tasks is not None:
+        scenarios_by_id = sealed_tasks.scenarios_by_id
+        template_ids = list(sealed_tasks.scenario_ids)
+    else:
+        scenarios_by_id = catalog()
+        template_ids = (
+            list(spec.template_ids) if spec.template_ids is not None else list(scenarios_by_id)
+        )
     settings = GenerationSettings(
         temperature=spec.generation.temperature,
         top_p=spec.generation.top_p,
@@ -582,10 +638,15 @@ def run_real_cell(
     )
     run_ids = [str(uuid.uuid4()) for _ in range(spec.repetitions)]
 
+    def _schedule(seed: int) -> list:
+        if sealed_tasks is not None:
+            return list(sealed_tasks.instances)
+        return generate_task_instances(template_ids, spec.tasks_per_repetition, seed)
+
     def _pass(instances: list) -> RepetitionData:
         return _run_pass(
             instances=instances,
-            scenarios_by_id=full_catalog,
+            scenarios_by_id=scenarios_by_id,
             client=client,
             profile=profile,
             concurrency=spec.concurrency,
@@ -598,8 +659,7 @@ def run_real_cell(
     warmup_outcomes: list[TaskOutcome] = []
     for warmup_index in range(spec.warmup_passes):
         warmup_seed = spec.seed - warmup_index - 1
-        instances = generate_task_instances(template_ids, spec.tasks_per_repetition, warmup_seed)
-        warmup_outcomes.extend(_pass(instances).outcomes)
+        warmup_outcomes.extend(_pass(_schedule(warmup_seed)).outcomes)
     warmup_document = None
     if spec.warmup_passes > 0:
         warmup_document = _observation_document(
@@ -614,9 +674,7 @@ def run_real_cell(
     for repetition_index in range(1, spec.repetitions + 1):
         run_id = run_ids[repetition_index - 1]
         repetition_seed = spec.seed + repetition_index
-        instances = generate_task_instances(
-            template_ids, spec.tasks_per_repetition, repetition_seed
-        )
+        instances = _schedule(repetition_seed)
         sampler = sampler_factory()
         started_at_utc = _utc_now()
         sampler.start()  # type: ignore[attr-defined]

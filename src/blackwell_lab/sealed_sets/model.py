@@ -10,13 +10,18 @@ import hashlib
 import json
 import re
 import stat
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 REQUEST_VERSION = "1.0.0"
 MANIFEST_KIND = "sealed-qualification-set"
+#: Private layout of an execution-eligible custody set (D-0024). Each stage
+#: has its own private index and blob directory, so a stage-specific reader
+#: never has to open, list, or stat anything that belongs to the other stage.
+PRIVATE_LAYOUT = "stage-separated"
+STAGE_INDEX_KIND = "sealed-qualification-stage-index"
 REPLAY_SCOPE = "selected-custody-location"
 INTEGRITY_STATEMENT = (
     "SHA-256 digests provide integrity, not confidentiality. "
@@ -212,6 +217,166 @@ def canonical_document_bytes(document: dict, *, exclude: str) -> bytes:
     return (json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
 
+def canonical_bytes(document: object) -> bytes:
+    """Canonical JSON bytes of a whole document (sorted keys, trailing newline)."""
+    return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+@dataclass(frozen=True)
+class StageIndex:
+    """Verified content of one stage-private index.
+
+    ``rows`` are ``(task_id, content_digest)`` sorted by task id; ``order``
+    is the supplied (import-time) sequence of content digests. Neither
+    carries bodies. This object is private and is never printed.
+    """
+
+    stage: str
+    rows: tuple[tuple[str, str], ...]
+    order: tuple[str, ...]
+
+    @property
+    def aggregate_digest(self) -> str:
+        return stage_aggregate_from_rows(self.rows)
+
+    @property
+    def content_digests(self) -> tuple[str, ...]:
+        return tuple(digest for _task_id, digest in self.rows)
+
+
+def stage_aggregate_from_rows(rows: Sequence[tuple[str, str]]) -> str:
+    """The public stage aggregate: SHA-256 over id-sorted ``id TAB digest NL`` lines."""
+    ordered = sorted(rows, key=lambda item: item[0])
+    preimage = "".join(f"{task_id}\t{digest}\n" for task_id, digest in ordered).encode("utf-8")
+    return sha256_digest(preimage)
+
+
+def build_stage_index(stage: str, tasks: Sequence[OpaqueTask]) -> dict:
+    """The stage-private index document for one stage (``PRIVATE_LAYOUT``).
+
+    Rows are sorted by task id; ``order`` keeps the supplied sequence of
+    content digests that the set identity binds. The document is private:
+    it names task identifiers and must never be printed or copied into a
+    public artifact.
+    """
+    if stage not in STAGES:
+        raise CustodyError("stage-separation")
+    digest = _stage_digest(tasks)
+    rows = sorted(
+        (
+            {"task_id": task.task_id, "content_digest": sha256_digest(task.content)}
+            for task in tasks
+        ),
+        key=lambda row: row["task_id"],
+    )
+    return {
+        "kind": STAGE_INDEX_KIND,
+        "schema_version": SCHEMA_VERSION,
+        "private_layout": PRIVATE_LAYOUT,
+        "stage": stage,
+        "task_count": digest.task_count,
+        "aggregate_digest": digest.aggregate_digest,
+        "rows": rows,
+        "order": [sha256_digest(task.content) for task in tasks],
+    }
+
+
+def stage_index_digest(document: dict) -> str:
+    """Digest of the canonical stage-index bytes; recorded in the public manifest."""
+    return sha256_digest(canonical_bytes(document))
+
+
+def verify_stage_index(document: object, *, stage: str, manifest: dict) -> StageIndex:
+    """Verify one stage-private index against the public manifest.
+
+    Uses only that stage's public fields (count, aggregate, index digest).
+    Nothing belonging to the other stage is consulted, so a stage-specific
+    reader can call this without ever observing other-stage metadata.
+    """
+    if stage not in STAGES:
+        raise CustodyError("stage-separation")
+    if not isinstance(document, dict):
+        raise CustodyError("tamper")
+    expected_keys = {
+        "kind",
+        "schema_version",
+        "private_layout",
+        "stage",
+        "task_count",
+        "aggregate_digest",
+        "rows",
+        "order",
+    }
+    if set(document) != expected_keys:
+        raise CustodyError("tamper")
+    if document["kind"] != STAGE_INDEX_KIND:
+        raise CustodyError("tamper")
+    if document["schema_version"] != SCHEMA_VERSION or document["private_layout"] != PRIVATE_LAYOUT:
+        raise CustodyError("layout-version-unsupported")
+    if stage_index_digest(document) != manifest.get(f"{stage}_index_digest"):
+        raise CustodyError("tamper")
+    if document["stage"] != stage:
+        raise CustodyError("tamper")
+    rows_raw = document["rows"]
+    order_raw = document["order"]
+    if not isinstance(rows_raw, list) or len(rows_raw) != TASKS_PER_STAGE:
+        raise CustodyError("tamper")
+    if not isinstance(order_raw, list) or len(order_raw) != TASKS_PER_STAGE:
+        raise CustodyError("tamper")
+    if document["task_count"] != TASKS_PER_STAGE:
+        raise CustodyError("tamper")
+    if manifest.get(f"{stage}_task_count") != TASKS_PER_STAGE:
+        raise CustodyError("tamper")
+    seen_ids: set[str] = set()
+    seen_digests: set[str] = set()
+    rows: list[tuple[str, str]] = []
+    for row in rows_raw:
+        if not isinstance(row, dict) or set(row) != {"task_id", "content_digest"}:
+            raise CustodyError("tamper")
+        task_id = row["task_id"]
+        digest = row["content_digest"]
+        if not isinstance(task_id, str) or _ID_RE.fullmatch(task_id) is None:
+            raise CustodyError("tamper")
+        if not isinstance(digest, str) or _DIGEST_RE.fullmatch(digest) is None:
+            raise CustodyError("tamper")
+        if task_id in seen_ids or digest in seen_digests:
+            raise CustodyError("tamper")
+        seen_ids.add(task_id)
+        seen_digests.add(digest)
+        rows.append((task_id, digest))
+    if rows != sorted(rows, key=lambda item: item[0]):
+        raise CustodyError("tamper")
+    if not all(isinstance(item, str) and _DIGEST_RE.fullmatch(item) for item in order_raw):
+        raise CustodyError("tamper")
+    order = tuple(str(item) for item in order_raw)
+    if sorted(order) != sorted(seen_digests):
+        raise CustodyError("tamper")
+    aggregate = stage_aggregate_from_rows(rows)
+    if aggregate != document["aggregate_digest"]:
+        raise CustodyError("tamper")
+    if aggregate != manifest.get(f"{stage}_aggregate_digest"):
+        raise CustodyError("tamper")
+    return StageIndex(stage=stage, rows=tuple(rows), order=order)
+
+
+def require_execution_layout(document: object) -> dict:
+    """Gate every reader on the stage-separated layout before any other check.
+
+    An older combined-index package (schema 1.1.0) is a historical custody
+    object: it is not mutated, not migrated, and not execution-eligible.
+    """
+    if not isinstance(document, dict):
+        raise CustodyError("manifest-invalid")
+    if document.get("kind") != MANIFEST_KIND:
+        raise CustodyError("manifest-invalid")
+    if (
+        document.get("schema_version") != SCHEMA_VERSION
+        or document.get("private_layout") != PRIVATE_LAYOUT
+    ):
+        raise CustodyError("layout-version-unsupported")
+    return document
+
+
 def canonical_manifest_bytes(document: dict) -> bytes:
     """Bytes covered by the custody manifest digest.
 
@@ -269,7 +434,18 @@ def build_public_manifest(
     controller_digest: str,
     validation: BundleValidation,
     request: dict,
+    index_digests: Mapping[str, str],
 ) -> dict:
+    """Content-free public manifest (schema 1.2.0, stage-separated layout).
+
+    ``index_digests`` maps each stage to the digest of its stage-private
+    index document, so a stage-specific reader can verify its own index
+    against the public manifest without touching the other stage.
+    """
+    if set(index_digests) != set(STAGES):
+        raise CustodyError("stage-separation")
+    for stage in STAGES:
+        require_digest(index_digests[stage])
     if request.get("request_version") != REQUEST_VERSION:
         raise CustodyError("request-mismatch")
     if request.get("controller_commit") != require_commit(commit):
@@ -307,6 +483,7 @@ def build_public_manifest(
     document = {
         "schema_version": SCHEMA_VERSION,
         "kind": MANIFEST_KIND,
+        "private_layout": PRIVATE_LAYOUT,
         "finalized": True,
         "integrity_statement": INTEGRITY_STATEMENT,
         "replay_scope": REPLAY_SCOPE,
@@ -318,6 +495,8 @@ def build_public_manifest(
         "holdout_task_count": validation.holdout.task_count,
         "development_aggregate_digest": validation.development.aggregate_digest,
         "holdout_aggregate_digest": validation.holdout.aggregate_digest,
+        "development_index_digest": index_digests[DEVELOPMENT_STAGE],
+        "holdout_index_digest": index_digests[HOLDOUT_STAGE],
         "import_request_digest": request_digest,
         "file_digests": list(validation.file_digests),
     }

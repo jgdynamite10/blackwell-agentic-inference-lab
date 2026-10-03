@@ -97,6 +97,7 @@ from blackwell_lab.workload.stats import measure_from_values, unavailable_measur
 from blackwell_lab.workload.tools import SimulatedToolbox
 from blackwell_lab.workload.validation import (
     ConfigError,
+    catalog_task_source,
     validate_result_semantics,
     validate_runner_config,
 )
@@ -502,6 +503,7 @@ def build_manifest(
             "version": executed_version,
             **({"controller": controller} if controller else {}),
             "catalog_digest": catalog_digest(),
+            "task_source": catalog_task_source(),
             "profile": profile.name,
             "concurrency": concurrency,
             "tasks_per_repetition": tasks_per_repetition,

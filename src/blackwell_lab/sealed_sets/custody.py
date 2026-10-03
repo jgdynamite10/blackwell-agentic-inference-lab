@@ -23,28 +23,55 @@ from blackwell_lab.paths import repository_root
 from blackwell_lab.sealed_sets.model import (
     CONTROLLER_SOURCE_PATHS,
     INTEGRITY_STATEMENT,
+    STAGES,
     TASKS_PER_STAGE,
     BundleValidation,
     CustodyError,
     OpaqueTask,
+    StageIndex,
     approval_phrase,
     build_import_request,
     build_public_manifest,
+    build_stage_index,
+    canonical_bytes,
     canonical_manifest_bytes,
     controller_digest_from_sources,
     require_commit,
+    require_execution_layout,
     running_controller_parts,
     set_identity_from_digests,
     sha256_digest,
+    stage_index_digest,
     validate_bundles,
+    verify_stage_index,
 )
 
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
-_MANIFEST_NAME = "manifest.json"
-_RECEIPT_NAME = "receipt.json"
-_INDEX_NAME = "index.json"
-_BLOB_DIR = "blobs"
+MANIFEST_NAME = "manifest.json"
+RECEIPT_NAME = "receipt.json"
+PRIVATE_DIR = "private"
+INDEX_NAME = "index.json"
+BLOB_DIR = "blobs"
+
+
+def stage_private_dir(root: Path, stage: str) -> Path:
+    """``<root>/private/<stage>``: the only private directory a stage reader touches."""
+    if stage not in STAGES:
+        raise CustodyError("stage-separation")
+    return root / PRIVATE_DIR / stage
+
+
+def stage_index_path(root: Path, stage: str) -> Path:
+    return stage_private_dir(root, stage) / INDEX_NAME
+
+
+def stage_blob_path(root: Path, stage: str, content_digest: str) -> Path:
+    """Blob path built only from the selected stage and one of its own digests."""
+    hex_digest = content_digest.removeprefix("sha256:")
+    if len(hex_digest) != 64 or any(ch not in "0123456789abcdef" for ch in hex_digest):
+        raise CustodyError("tamper")
+    return stage_private_dir(root, stage) / BLOB_DIR / hex_digest
 
 
 @dataclass(frozen=True)
@@ -96,8 +123,14 @@ def load_manifest_schema() -> dict:
 
 
 def validate_public_manifest(document: object) -> dict:
+    """Schema-validate a public manifest after the layout gate.
+
+    The layout gate runs first so a 1.1.0 combined-index package fails
+    with ``layout-version-unsupported`` rather than a generic schema error.
+    """
     if not isinstance(document, dict):
         raise CustodyError("manifest-invalid")
+    require_execution_layout(document)
     schema = load_manifest_schema()
     try:
         jsonschema.validate(document, schema)
@@ -279,22 +312,26 @@ def verify_custody(
     expected_commit: str,
     operation: str = "verify",
 ) -> CustodyReceipt:
-    """Recompute digests and return a content-free receipt."""
+    """Recompute digests and return a content-free receipt.
+
+    This is **full-custody** verification: it deliberately walks the whole
+    tree and verifies both stages. ``qualify-agent`` never calls it; the
+    execution adapter uses stage-specific verification only.
+    """
     commit = verify_clean_checkout(repo, expected_commit)
     controller_digest = require_bound_controller(repo, commit)
     destination = require_external_directory(output_root, repo=repo)
     if not destination.is_dir():
         raise CustodyError("manifest-invalid")
     _require_tree_modes(destination)
-    manifest = _read_json(destination / _MANIFEST_NAME)
+    manifest = _read_json(destination / MANIFEST_NAME)
     manifest = validate_public_manifest(manifest)
     if manifest["controller_commit"] != commit:
         raise CustodyError("commit-mismatch")
     if manifest["controller_digest"] != controller_digest:
         raise CustodyError("controller-digest-mismatch")
-    index = _read_json(destination / "private" / _INDEX_NAME)
-    _check_index(index, manifest, destination)
-    receipt_document = _read_json(destination / _RECEIPT_NAME)
+    _check_all_stages(manifest, destination)
+    receipt_document = _read_json(destination / RECEIPT_NAME)
     expected_stored = _receipt_from_manifest(manifest, operation="import").public_dict()
     if receipt_document != expected_stored:
         raise CustodyError("tamper")
@@ -342,27 +379,17 @@ def _write_tree(
     request: dict,
     checkpoint: Callable[[str], None] | None,
 ) -> None:
-    private = destination / "private"
-    blobs = private / _BLOB_DIR
+    private = destination / PRIVATE_DIR
     _mkdir(private)
-    _mkdir(blobs)
-    index: dict[str, object] = {
-        "development": [],
-        "holdout": [],
-        "development_order": [],
-        "holdout_order": [],
-    }
+    indexes: dict[str, dict] = {}
     for stage, tasks in (("development", development), ("holdout", holdout)):
-        rows = []
-        order = []
+        stage_dir = stage_private_dir(destination, stage)
+        _mkdir(stage_dir)
+        _mkdir(stage_dir / BLOB_DIR)
         for task in tasks:
             digest = sha256_digest(task.content)
-            _write_bytes(blobs / digest.removeprefix("sha256:"), task.content)
-            rows.append({"task_id": task.task_id, "content_digest": digest})
-            order.append(digest)
-        rows.sort(key=lambda item: item["task_id"])
-        index[stage] = rows
-        index[f"{stage}_order"] = order
+            _write_bytes(stage_blob_path(destination, stage, digest), task.content)
+        indexes[stage] = build_stage_index(stage, tasks)
     if checkpoint is not None:
         checkpoint("before-manifest")
     fresh = build_import_request(
@@ -373,88 +400,146 @@ def _write_tree(
     )
     if fresh != request:
         raise CustodyError("request-mismatch")
-    for stage in ("development", "holdout"):
-        rows = index[stage]
-        if not isinstance(rows, list):
-            raise CustodyError("request-mismatch")
-        for row in rows:
-            if not isinstance(row, dict):
-                raise CustodyError("request-mismatch")
+    for stage in STAGES:
+        for row in indexes[stage]["rows"]:
             digest = row["content_digest"]
-            blob = blobs / str(digest).removeprefix("sha256:")
             try:
-                payload = blob.read_bytes()
+                payload = stage_blob_path(destination, stage, digest).read_bytes()
             except OSError:
                 raise CustodyError("request-mismatch") from None
             if sha256_digest(payload) != digest:
                 raise CustodyError("request-mismatch")
-    _write_bytes(private / _INDEX_NAME, _canonical_bytes(index))
+    for stage in STAGES:
+        _write_bytes(stage_index_path(destination, stage), canonical_bytes(indexes[stage]))
     manifest = build_public_manifest(
         commit=commit,
         controller_digest=controller_digest,
         validation=validation,
         request=request,
+        index_digests={stage: stage_index_digest(indexes[stage]) for stage in STAGES},
     )
     validate_public_manifest(manifest)
-    _write_bytes(destination / _MANIFEST_NAME, _canonical_bytes(manifest))
+    _write_bytes(destination / MANIFEST_NAME, canonical_bytes(manifest))
     receipt = _receipt_from_manifest(manifest, operation="import")
-    _write_bytes(destination / _RECEIPT_NAME, _canonical_bytes(receipt.public_dict()))
+    _write_bytes(destination / RECEIPT_NAME, canonical_bytes(receipt.public_dict()))
 
 
-def _check_index(index: object, manifest: dict, destination: Path) -> None:
-    expected_keys = {"development", "holdout", "development_order", "holdout_order"}
-    if not isinstance(index, dict) or set(index) != expected_keys:
+def load_stage_index(root: Path, manifest: dict, stage: str) -> StageIndex:
+    """Stage-specific verification of one stage's private index.
+
+    Touches only ``<root>/private``, ``<root>/private/<stage>`` and that
+    stage's ``index.json`` (``lstat`` for modes, one ``open`` for the
+    index). It never lists, walks, stats, or opens anything under the
+    other stage, so a development reader cannot observe holdout
+    identifiers, digests, order, filenames, or bytes (and vice versa).
+    """
+    stage_dir = stage_private_dir(root, stage)
+    _require_private_dir(root / PRIVATE_DIR)
+    _require_private_dir(stage_dir)
+    _require_private_dir(stage_dir / BLOB_DIR)
+    index_bytes = _read_private_file(stage_index_path(root, stage), reason="tamper")
+    try:
+        document = json.loads(index_bytes.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        raise CustodyError("tamper") from None
+    if canonical_bytes(document) != index_bytes:
         raise CustodyError("tamper")
-    seen_ids: set[str] = set()
-    seen_digests: set[str] = set()
-    blob_root = destination / "private" / _BLOB_DIR
-    supplied_orders: dict[str, list[str]] = {}
-    for stage in ("development", "holdout"):
-        rows = index[stage]
-        order = index[f"{stage}_order"]
-        if not isinstance(rows, list) or len(rows) != TASKS_PER_STAGE:
-            raise CustodyError("tamper")
-        if not isinstance(order, list) or len(order) != TASKS_PER_STAGE:
-            raise CustodyError("tamper")
-        if not all(isinstance(item, str) for item in order):
-            raise CustodyError("tamper")
-        supplied_orders[stage] = [str(item) for item in order]
-        ordered: list[tuple[str, str]] = []
-        for row in rows:
-            if not isinstance(row, dict) or set(row) != {"task_id", "content_digest"}:
-                raise CustodyError("tamper")
-            task_id = row["task_id"]
-            digest = row["content_digest"]
-            if not isinstance(task_id, str) or not isinstance(digest, str):
-                raise CustodyError("tamper")
-            if task_id in seen_ids:
-                raise CustodyError("tamper")
-            if digest in seen_digests:
-                raise CustodyError("tamper")
-            seen_ids.add(task_id)
-            seen_digests.add(digest)
-            blob = blob_root / digest.removeprefix("sha256:")
-            if blob.is_symlink() or not blob.is_file():
-                raise CustodyError("tamper")
-            try:
-                payload = blob.read_bytes()
-            except OSError:
-                raise CustodyError("tamper") from None
-            if sha256_digest(payload) != digest:
-                raise CustodyError("tamper")
-            ordered.append((task_id, digest))
-        ordered.sort(key=lambda item: item[0])
-        preimage = "".join(f"{task_id}\t{digest}\n" for task_id, digest in ordered).encode()
-        aggregate = sha256_digest(preimage)
-        if aggregate != manifest[f"{stage}_aggregate_digest"]:
-            raise CustodyError("tamper")
-        if sorted(supplied_orders[stage]) != sorted(digest for _task_id, digest in ordered):
-            raise CustodyError("tamper")
-    identity = set_identity_from_digests(supplied_orders["development"], supplied_orders["holdout"])
+    return verify_stage_index(document, stage=stage, manifest=manifest)
+
+
+def read_stage_blob(root: Path, stage: str, content_digest: str) -> bytes:
+    """Read one blob by a path built only from the selected stage's own digest."""
+    payload = _read_private_file(stage_blob_path(root, stage, content_digest), reason="tamper")
+    if sha256_digest(payload) != content_digest:
+        raise CustodyError("tamper")
+    return payload
+
+
+def verify_stage_tree(root: Path, manifest: dict, stage: str) -> StageIndex:
+    """Stage-specific verification of one stage's index and every blob it names."""
+    index = load_stage_index(root, manifest, stage)
+    for _task_id, digest in index.rows:
+        read_stage_blob(root, stage, digest)
+    return index
+
+
+def _check_all_stages(manifest: dict, destination: Path) -> None:
+    """Full-custody cross-stage checks. Not used by stage-specific readers."""
+    indexes = {stage: verify_stage_tree(destination, manifest, stage) for stage in STAGES}
+    dev_ids = {task_id for task_id, _digest in indexes["development"].rows}
+    hold_ids = {task_id for task_id, _digest in indexes["holdout"].rows}
+    if dev_ids & hold_ids:
+        raise CustodyError("tamper")
+    dev_digests = set(indexes["development"].content_digests)
+    hold_digests = set(indexes["holdout"].content_digests)
+    if dev_digests & hold_digests:
+        raise CustodyError("tamper")
+    identity = set_identity_from_digests(indexes["development"].order, indexes["holdout"].order)
     if identity != manifest.get("set_identity"):
         raise CustodyError("tamper")
-    if tuple(sorted(seen_digests)) != tuple(manifest["file_digests"]):
+    if tuple(sorted(dev_digests | hold_digests)) != tuple(manifest["file_digests"]):
         raise CustodyError("tamper")
+    for stage in STAGES:
+        blob_dir = stage_private_dir(destination, stage) / BLOB_DIR
+        names = {entry.name for entry in blob_dir.iterdir()}
+        expected = {digest.removeprefix("sha256:") for digest in indexes[stage].content_digests}
+        if names != expected:
+            raise CustodyError("tamper")
+        stage_entries = {entry.name for entry in stage_private_dir(destination, stage).iterdir()}
+        if stage_entries != {INDEX_NAME, BLOB_DIR}:
+            raise CustodyError("tamper")
+    if {entry.name for entry in (destination / PRIVATE_DIR).iterdir()} != set(STAGES):
+        raise CustodyError("tamper")
+
+
+def _require_private_dir(path: Path) -> None:
+    try:
+        info = path.lstat()
+    except OSError:
+        raise CustodyError("tamper") from None
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise CustodyError("symlink-escape" if stat.S_ISLNK(info.st_mode) else "tamper")
+    if stat.S_IMODE(info.st_mode) != _DIR_MODE:
+        raise CustodyError("permissive-mode")
+
+
+_OPEN_FLAGS = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+
+
+def _read_private_file(path: Path, *, reason: str) -> bytes:
+    """Read one regular ``0600`` file by exact path, without following symlinks.
+
+    The descriptor is re-checked with ``fstat`` so the bytes hashed are
+    the regular file that was inspected, not a swap-in.
+    """
+    try:
+        info = path.lstat()
+    except OSError:
+        raise CustodyError(reason) from None
+    if stat.S_ISLNK(info.st_mode):
+        raise CustodyError("symlink-escape")
+    if not stat.S_ISREG(info.st_mode):
+        raise CustodyError(reason)
+    if stat.S_IMODE(info.st_mode) != _FILE_MODE:
+        raise CustodyError("permissive-mode")
+    try:
+        fd = os.open(path, _OPEN_FLAGS)
+    except OSError:
+        raise CustodyError(reason) from None
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise CustodyError(reason)
+        if stat.S_IMODE(opened.st_mode) != _FILE_MODE:
+            raise CustodyError("permissive-mode")
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            return handle.read()
+    except OSError:
+        raise CustodyError(reason) from None
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def _receipt_from_manifest(manifest: dict, *, operation: str) -> CustodyReceipt:
@@ -479,7 +564,7 @@ def _prepare_destination(destination: Path, *, request: dict) -> bool:
             raise CustodyError("symlink-escape")
         if _mode(destination) != _DIR_MODE:
             raise CustodyError("permissive-mode")
-        manifest_path = destination / _MANIFEST_NAME
+        manifest_path = destination / MANIFEST_NAME
         if manifest_path.exists():
             if manifest_path.is_symlink() or not manifest_path.is_file():
                 raise CustodyError("destination-nonempty")
@@ -747,7 +832,3 @@ def _read_json(path: Path) -> object:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         raise CustodyError("manifest-invalid") from None
-
-
-def _canonical_bytes(document: object) -> bytes:
-    return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")

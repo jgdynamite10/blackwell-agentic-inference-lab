@@ -35,6 +35,13 @@ from blackwell_lab.cloud.mvl import (
     FROZEN_TOP_P,
     FROZEN_VLLM_IMAGE_DIGEST,
 )
+from blackwell_lab.cloud.sealed_binding import (
+    SEALED_CANDIDATES,
+    SEALED_STAGES,
+    SealedSetBinding,
+    binding_from_config,
+    requires_sealed_set,
+)
 from blackwell_lab.workload.evidence import (
     CONTROLLER_EVIDENCE_GROUNDING_V1,
     require_controller_binding,
@@ -589,6 +596,27 @@ def validate_authorized_qualification_config(
         config=config,
         artifact_family=QUALIFICATION_ARTIFACT_FAMILY,
     )
+    require_sealed_binding(config, candidate_id=candidate_id, stage=stage)
+
+
+def require_sealed_binding(
+    config: dict, *, candidate_id: str, stage: str
+) -> SealedSetBinding | None:
+    """P2 development and holdout must bind a sealed stage (decision D-0024).
+
+    Returns the validated binding, or ``None`` for cells that execute the
+    public catalog (C1, C2, P1, and every freeze stage). A binding on such
+    a cell is refused, so their configs and digests are unchanged. The
+    binding's stage must equal the requested stage and its count must be
+    exactly twenty; anything missing, partial, malformed, or mismatched
+    fails here, before any model client exists.
+    """
+    if set(SEALED_CANDIDATES) != {CANDIDATE_P2} or set(SEALED_STAGES) != {
+        STAGE_DEVELOPMENT,
+        STAGE_HOLDOUT,
+    }:
+        raise ConfigError("sealed-set candidate table drifted from P2 development/holdout")
+    return binding_from_config(config, candidate_id=candidate_id, stage=stage)
 
 
 def load_qualification_config(path: Path, *, candidate_id: str, stage: str) -> tuple[dict, str]:
@@ -942,7 +970,10 @@ def sanitized_receipt(
     files: Sequence[str],
     stopped: bool,
     message: str | None = None,
+    sealed_set: SealedSetBinding | None = None,
 ) -> dict[str, Any]:
+    if requires_sealed_set(candidate_id, stage) != (sealed_set is not None):
+        raise QualificationError("sealed-set provenance is required exactly for P2 dev/holdout")
     return {
         "workflow": QUALIFICATION_WORKFLOW,
         "artifact_family": QUALIFICATION_ARTIFACT_FAMILY,
@@ -957,6 +988,9 @@ def sanitized_receipt(
         "workload_version": candidate_workload_version(candidate_id),
         "controller": candidate_controller(candidate_id),
         "catalog_workload_version": CATALOG_WORKLOAD_VERSION,
+        # Content-free sealed-stage provenance (digests, identity, stage,
+        # count). Present only for sealed cells so other receipts are unchanged.
+        **({"sealed_set": sealed_set.provenance()} if sealed_set is not None else {}),
         "gates": gates,
         "stopped": stopped,
         "files": list(files),

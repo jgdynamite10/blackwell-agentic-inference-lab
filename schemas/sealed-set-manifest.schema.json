@@ -2,12 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/schemas/sealed-set-manifest.schema.json",
   "title": "Sealed qualification-set custody manifest",
-  "description": "Content-free public custody manifest. SHA-256 digests provide integrity, not confidentiality. This document is not encryption and is not a cryptographic seal. Replay protection applies only to the selected custody location and is not a global anti-replay guarantee. It must not contain task bodies, accepted answers, scenario names, private filenames, or task identifiers. Key management is outside this schema.",
+  "description": "Content-free public custody manifest (1.2.0, stage-separated private layout). SHA-256 digests provide integrity, not confidentiality. This document is not encryption and is not a cryptographic seal. Replay protection applies only to the selected custody location and is not a global anti-replay guarantee. It must not contain task bodies, accepted answers, scenario names, private filenames, or task identifiers. Key management is outside this schema. Packages written under the 1.1.0 combined-index layout are immutable historical custody objects; they are not migrated and are not execution-eligible.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "kind",
+    "private_layout",
     "finalized",
     "integrity_statement",
     "replay_scope",
@@ -19,6 +20,8 @@
     "holdout_task_count",
     "development_aggregate_digest",
     "holdout_aggregate_digest",
+    "development_index_digest",
+    "holdout_index_digest",
     "import_request_digest",
     "file_digests",
     "custody_manifest_digest"
@@ -26,11 +29,16 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "1.1.0"
+      "const": "1.2.0"
     },
     "kind": {
       "type": "string",
       "const": "sealed-qualification-set"
+    },
+    "private_layout": {
+      "type": "string",
+      "const": "stage-separated",
+      "description": "Each stage has its own private index (private/<stage>/index.json) and blob directory (private/<stage>/blobs/). A stage-specific reader touches only its own stage directory."
     },
     "finalized": {
       "type": "boolean",
@@ -80,6 +88,16 @@
     "holdout_aggregate_digest": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "development_index_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 of the canonical development-private index document. Lets a development-only reader verify its index without touching holdout."
+    },
+    "holdout_index_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 of the canonical holdout-private index document. Lets a holdout-only reader verify its index without touching development."
     },
     "import_request_digest": {
       "type": "string",
