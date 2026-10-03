@@ -83,6 +83,7 @@ from blackwell_lab.workload.scenarios import (
 from blackwell_lab.workload.stats import measure_from_values, unavailable_measure
 from blackwell_lab.workload.validation import (
     ConfigError,
+    catalog_task_source,
     validate_result_semantics,
     validate_runner_config,
 )
@@ -321,15 +322,15 @@ def build_real_manifest(
             "name": WORKLOAD_NAME,
             "version": require_workload_version(spec.workload_version),
             **({"controller": spec.controller} if spec.controller else {}),
-            # A sealed run's task set is content-addressed by its stage
-            # aggregate digest (ids plus content digests), never by the
-            # public catalog it did not use.
-            "catalog_digest": (
-                spec.sealed_set.stage_aggregate_digest
+            # Catalog and sealed provenance are mutually exclusive. A sealed
+            # run records its stage aggregate only under task_source and
+            # never touches catalog_digest, which keeps its public-catalog
+            # meaning and is absent here.
+            **(
+                {"task_source": spec.sealed_set.task_source()}
                 if spec.sealed_set is not None
-                else catalog_digest()
+                else {"catalog_digest": catalog_digest(), "task_source": catalog_task_source()}
             ),
-            **({"sealed_set": spec.sealed_set.provenance()} if spec.sealed_set else {}),
             "profile": profile.name,
             "concurrency": spec.concurrency,
             "tasks_per_repetition": spec.tasks_per_repetition,

@@ -20,9 +20,52 @@ from blackwell_lab.workload.agent import ERROR_TAXONOMY
 
 _SAFE_RELATIVE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+_SHA256_PREFIXED = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 #: Tolerance for comparing recomputed rates against recorded (rounded) rates.
 _RATE_TOLERANCE = 5e-7
+
+#: ``workload.task_source.kind`` discriminator (decision D-0024). A catalog
+#: run draws tasks from the public scenario catalog and records its
+#: ``catalog_digest``; a sealed run draws every task from one D-0023 custody
+#: stage and records that stage's aggregate under ``task_source.digest``
+#: with the content-free binding under ``task_source.sealed_set``. The two
+#: are mutually exclusive. Manifests that predate the discriminator carry
+#: no ``task_source`` and are catalog runs.
+TASK_SOURCE_CATALOG = "catalog"
+TASK_SOURCE_SEALED = "sealed"
+_SEALED_SET_FIELDS = frozenset(
+    {
+        "schema_version",
+        "custody_manifest_sha256",
+        "custody_controller_digest",
+        "import_request_digest",
+        "set_identity",
+        "stage",
+        "stage_aggregate_digest",
+        "task_count",
+        "payload_schema_version",
+    }
+)
+
+
+def catalog_task_source() -> dict[str, str]:
+    """``workload.task_source`` for a run whose tasks come from the public catalog."""
+    return {"kind": TASK_SOURCE_CATALOG}
+
+
+def task_source_kind(workload: dict) -> str:
+    """Resolve the task source of a manifest ``workload`` block (legacy = catalog)."""
+    source = workload.get("task_source")
+    if source is None:
+        return TASK_SOURCE_CATALOG
+    _check(isinstance(source, dict), "workload.task_source must be an object")
+    kind = source.get("kind")
+    _check(
+        kind in (TASK_SOURCE_CATALOG, TASK_SOURCE_SEALED),
+        "workload.task_source.kind must be catalog or sealed",
+    )
+    return str(kind)
 
 
 class ConfigError(ValueError):
@@ -227,27 +270,63 @@ def validate_result_semantics(
             f"{label} observation count does not match the result accounting",
         )
 
-    sealed = workload.get("sealed_set")
-    if sealed is not None:
-        _validate_sealed_semantics(workload, sealed, sample, observations, measured_observations)
+    validate_task_source_semantics(workload)
+    if task_source_kind(workload) == TASK_SOURCE_SEALED:
+        _validate_sealed_semantics(workload, sample, observations, measured_observations)
+
+
+def validate_task_source_semantics(workload: dict) -> None:
+    """Catalog and sealed provenance are mutually exclusive (decision D-0024).
+
+    A catalog run (``task_source`` absent or ``kind: catalog``) carries a
+    well-formed ``catalog_digest`` and no sealed provenance anywhere. A
+    sealed run carries ``task_source.digest`` equal to its
+    ``sealed_set.stage_aggregate_digest`` and **no** ``catalog_digest``;
+    the stage aggregate is never stored in ``catalog_digest``.
+    """
+    _check("sealed_set" not in workload, "workload.sealed_set is not a valid location")
+    kind = task_source_kind(workload)
+    source = workload.get("task_source")
+    if kind == TASK_SOURCE_CATALOG:
+        _check(
+            source is None or set(source) == {"kind"},
+            "catalog task_source carries no sealed provenance",
+        )
+        digest = workload.get("catalog_digest")
+        _check(
+            isinstance(digest, str) and _SHA256_PREFIXED.match(digest) is not None,
+            "catalog run must record a well-formed catalog_digest",
+        )
+        return
+    _check(
+        isinstance(source, dict) and set(source) == {"kind", "digest", "sealed_set"},
+        "sealed task_source must carry exactly kind, digest and sealed_set",
+    )
+    sealed = source["sealed_set"]
+    _check(
+        isinstance(sealed, dict) and set(sealed) == _SEALED_SET_FIELDS,
+        "sealed task_source.sealed_set must carry exactly the binding fields",
+    )
+    _check(
+        source["digest"] == sealed["stage_aggregate_digest"],
+        "sealed task_source.digest must equal sealed_set.stage_aggregate_digest",
+    )
+    _check(
+        "catalog_digest" not in workload,
+        "sealed run must not record a catalog_digest",
+    )
 
 
 def _validate_sealed_semantics(
     workload: dict,
-    sealed: dict,
     sample: dict,
     observations: dict,
     measured_observations: dict | None,
 ) -> None:
     """Invariants of a sealed-stage run (decision D-0024): the executed task
-    set is the bound custody stage, exactly once, with no warm-up and no
-    catalog content-address."""
-    _check(isinstance(sealed, dict), "workload.sealed_set must be an object")
+    set is the bound custody stage, exactly once, with no warm-up."""
+    sealed = workload["task_source"]["sealed_set"]
     task_count = sealed.get("task_count")
-    _check(
-        workload.get("catalog_digest") == sealed.get("stage_aggregate_digest"),
-        "sealed run catalog_digest must equal the bound stage aggregate digest",
-    )
     _check(
         workload.get("tasks_per_repetition") == task_count,
         "sealed run tasks_per_repetition must equal the bound task count",

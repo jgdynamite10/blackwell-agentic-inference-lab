@@ -191,6 +191,109 @@ class TestDigestValidation:
             validate_run_manifest(document)
 
 
+def _sealed_binding(aggregate: str) -> dict:
+    return {
+        "schema_version": "1.0.0",
+        "custody_manifest_sha256": "1" * 64,
+        "custody_controller_digest": "sha256:" + "2" * 64,
+        "import_request_digest": "sha256:" + "3" * 64,
+        "set_identity": "sha256:" + "4" * 64,
+        "stage": "development",
+        "stage_aggregate_digest": aggregate,
+        "task_count": 20,
+        "payload_schema_version": "1.0.0",
+    }
+
+
+class TestWorkloadTaskSource:
+    """Decision D-0024: catalog and sealed provenance are mutually exclusive.
+
+    ``workload.catalog_digest`` keeps its original public-catalog meaning;
+    a sealed run records the stage aggregate only under
+    ``workload.task_source.digest`` and carries no ``catalog_digest``.
+    """
+
+    AGGREGATE = "sha256:" + "a" * 64
+
+    @staticmethod
+    def _sealed_workload(document: dict) -> dict:
+        workload = document["workload"]
+        del workload["catalog_digest"]
+        workload["task_source"] = {
+            "kind": "sealed",
+            "digest": TestWorkloadTaskSource.AGGREGATE,
+            "sealed_set": _sealed_binding(TestWorkloadTaskSource.AGGREGATE),
+        }
+        return workload
+
+    def test_legacy_catalog_manifest_without_task_source_still_validates(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        assert "task_source" not in document["workload"]
+        validate_run_manifest(document)
+
+    def test_explicit_catalog_task_source_validates(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["workload"]["task_source"] = {"kind": "catalog"}
+        validate_run_manifest(document)
+
+    def test_catalog_task_source_carries_no_sealed_fields(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["workload"]["task_source"] = {"kind": "catalog", "digest": self.AGGREGATE}
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+        document["workload"]["task_source"] = {
+            "kind": "catalog",
+            "sealed_set": _sealed_binding(self.AGGREGATE),
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_sealed_task_source_validates_without_catalog_digest(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        self._sealed_workload(document)
+        validate_run_manifest(document)
+
+    def test_sealed_task_source_forbids_catalog_digest(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        original = document["workload"]["catalog_digest"]
+        workload = self._sealed_workload(document)
+        for value in (original, self.AGGREGATE):
+            workload["catalog_digest"] = value
+            with pytest.raises(jsonschema.ValidationError):
+                validate_run_manifest(document)
+
+    def test_sealed_provenance_requires_the_discriminator(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        workload = self._sealed_workload(document)
+        del workload["task_source"]["kind"]
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_sealed_provenance_outside_task_source_is_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["workload"]["sealed_set"] = _sealed_binding(self.AGGREGATE)
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_sealed_task_source_requires_every_binding_field(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        workload = self._sealed_workload(document)
+        for field in list(workload["task_source"]["sealed_set"]):
+            trial = json.loads(json.dumps(document))
+            del trial["workload"]["task_source"]["sealed_set"][field]
+            with pytest.raises(jsonschema.ValidationError):
+                validate_run_manifest(trial)
+        del workload["task_source"]["digest"]
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+    def test_unknown_task_source_kind_is_rejected(self):
+        document = load_json(EXAMPLE_MANIFEST)
+        document["workload"]["task_source"] = {"kind": "ledger"}
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+
+
 class TestControlledResourceMode:
     """controlled-resource manifests must record the applied resource limits."""
 
