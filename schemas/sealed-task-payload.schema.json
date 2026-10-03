@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/schemas/sealed-task-payload.schema.json",
+  "title": "Sealed qualification task payload",
+  "description": "Structural contract for ONE private opaque task body stored in a D-0023 custody set (decision D-0024). The custody tooling treats the body as opaque bytes; this schema is applied only by the local P2 execution adapter after custody integrity has been verified, and only to the selected stage. Private payloads are never committed, printed, or published. Everything here describes shape only; it carries no real identifiers or accepted answers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload_schema_version", "kind", "task_id", "instance", "scenario"],
+  "properties": {
+    "payload_schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "kind": {
+      "type": "string",
+      "const": "sealed-qualification-task"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{7,63}$",
+      "description": "Must equal the custody index task_id of the blob that carries this payload."
+    },
+    "instance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_seed", "tracking_id", "reported_minute"],
+      "properties": {
+        "instance_seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "tracking_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,63}$" },
+        "reported_minute": { "type": "integer", "minimum": 0, "maximum": 1440 }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_id",
+        "incident_class",
+        "title",
+        "description",
+        "affected_service",
+        "health",
+        "metrics",
+        "logs",
+        "runbooks",
+        "recent_changes",
+        "root_cause_id",
+        "root_cause_summary",
+        "accepted_diagnoses",
+        "distractor_diagnoses",
+        "accepted_remediations",
+        "distractor_remediations",
+        "evidence_predicates",
+        "reference_tool_sequence",
+        "alternative_tool_sequence"
+      ],
+      "properties": {
+        "scenario_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{3,63}$" },
+        "incident_class": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "affected_service": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "health": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "type": "string", "maxLength": 128 }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["unit", "points"],
+            "properties": {
+              "unit": { "type": "string", "maxLength": 32 },
+              "points": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["t_offset_s", "value"],
+                  "properties": {
+                    "t_offset_s": { "type": "integer" },
+                    "value": { "type": "number" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "logs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["t_offset_s", "host", "level", "message"],
+            "properties": {
+              "t_offset_s": { "type": "integer" },
+              "host": { "type": "string", "maxLength": 253 },
+              "level": { "type": "string", "maxLength": 16 },
+              "message": { "type": "string", "maxLength": 4096 }
+            }
+          }
+        },
+        "runbooks": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "steps", "remediation_ids"],
+            "properties": {
+              "title": { "type": "string", "maxLength": 512 },
+              "steps": { "type": "array", "items": { "type": "string", "maxLength": 2048 } },
+              "remediation_ids": {
+                "type": "array",
+                "items": { "type": "string", "maxLength": 128 }
+              }
+            }
+          }
+        },
+        "recent_changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["change_id", "t_offset_s", "kind", "service", "summary"],
+            "properties": {
+              "change_id": { "type": "string", "maxLength": 128 },
+              "t_offset_s": { "type": "integer" },
+              "kind": { "type": "string", "maxLength": 64 },
+              "service": { "type": "string", "maxLength": 128 },
+              "summary": { "type": "string", "maxLength": 2048 }
+            }
+          }
+        },
+        "root_cause_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "root_cause_summary": { "type": "string", "maxLength": 4096 },
+        "accepted_diagnoses": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "distractor_diagnoses": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "accepted_remediations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "distractor_remediations": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "evidence_predicates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["predicate_id", "description", "alternatives"],
+            "properties": {
+              "predicate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "description": { "type": "string", "maxLength": 2048 },
+              "alternatives": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["tool", "result", "argument_contains"],
+                  "properties": {
+                    "tool": { "type": "string", "minLength": 1, "maxLength": 64 },
+                    "result": {
+                      "type": "object",
+                      "required": ["kind"],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "log_line_contains",
+                            "change_id_equals",
+                            "runbook_has_remediation",
+                            "metric_available",
+                            "health_component_status"
+                          ]
+                        }
+                      },
+                      "additionalProperties": { "type": "string", "maxLength": 1024 }
+                    },
+                    "argument_contains": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": { "type": "string", "maxLength": 1024 }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "reference_tool_sequence": { "$ref": "#/$defs/tool_sequence" },
+        "alternative_tool_sequence": { "$ref": "#/$defs/tool_sequence" }
+      }
+    }
+  },
+  "$defs": {
+    "tool_sequence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tool", "arguments"],
+        "properties": {
+          "tool": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "arguments": { "type": "object" }
+        }
+      }
+    }
+  }
+}
