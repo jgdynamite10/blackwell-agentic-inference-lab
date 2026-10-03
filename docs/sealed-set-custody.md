@@ -226,6 +226,21 @@ the two counts, the two aggregate digests, the controller commit, the
 controller digest, the set identity, the import-request digest, the
 custody-manifest digest, and pass/fail status.
 
+## Execution binding (D-0024)
+
+The values returned by the import are the only things that enter the
+frozen P2 development and holdout configs, as a path-free `sealed_set`
+block (schema version, custody-manifest SHA-256, controller digest,
+import-request digest, set identity, stage, stage aggregate digest, task
+count, payload schema version). The custody directory itself is passed to
+`blackwell-cloud qualify-agent` as `--custody-dir` at run time; it is
+never printed, never persisted, and never committed. The runner opens
+only the selected stage's blobs, so a development run never reads holdout
+bodies. Each blob must satisfy the versioned payload contract in
+[sealed-task-payload.schema.json](../schemas/sealed-task-payload.schema.json).
+The binding, loading, provenance, and fail-closed rules are recorded as
+D-0024 in the [decision log](decision-log.md).
+
 ## Rebase after P2 merges
 
 This branch is file-disjoint from the P2 controller branch and was cut from
