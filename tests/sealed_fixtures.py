@@ -4,9 +4,12 @@ Everything here is artificial: task bodies are re-encodings of the public
 synthetic scenario catalog with invented instance surfaces, task ids are
 ``syn-…`` placeholders, and the custody tree is written to a pytest
 ``tmp_path`` outside every Git repository using the production custody
-writer so the on-disk layout, modes, index, manifest, and receipt are
-byte-for-byte what a real import would produce. No real sealed task,
-accepted answer, private result, or private path appears anywhere.
+writer so the on-disk layout (stage-separated, custody manifest 1.2.0),
+modes, stage indexes, manifest, and receipt are byte-for-byte what a real
+import would produce. A separate writer reproduces the retired 1.1.0
+combined-index layout only so tests can prove it is rejected. No real
+sealed task, accepted answer, private result, or private path appears
+anywhere.
 """
 
 from __future__ import annotations
@@ -19,9 +22,13 @@ from blackwell_lab.cloud.sealed_binding import BINDING_SCHEMA_VERSION
 from blackwell_lab.cloud.sealed_payload import PAYLOAD_SCHEMA_VERSION, encode_sealed_task
 from blackwell_lab.sealed_sets import custody
 from blackwell_lab.sealed_sets.model import (
+    INTEGRITY_STATEMENT,
     OpaqueTask,
     build_import_request,
+    canonical_bytes,
+    canonical_manifest_bytes,
     running_controller_digest,
+    sha256_digest,
     validate_bundles,
 )
 from blackwell_lab.workload.scenarios import catalog
@@ -115,13 +122,109 @@ def placeholder_binding(stage: str) -> dict:
     }
 
 
+def stage_dir(root: Path, stage: str) -> Path:
+    return root / "private" / stage
+
+
+def stage_index_file(root: Path, stage: str) -> Path:
+    return stage_dir(root, stage) / "index.json"
+
+
 def stage_blob_paths(root: Path, stage: str) -> set[Path]:
-    """Blob paths of one stage, read from the private index (test oracle only)."""
-    index = json.loads((root / "private" / "index.json").read_text(encoding="utf-8"))
+    """Blob paths of one stage, read from its stage-private index (test oracle only)."""
+    index = json.loads(stage_index_file(root, stage).read_text(encoding="utf-8"))
     return {
-        root / "private" / "blobs" / row["content_digest"].removeprefix("sha256:")
-        for row in index[stage]
+        stage_dir(root, stage) / "blobs" / row["content_digest"].removeprefix("sha256:")
+        for row in index["rows"]
     }
+
+
+def stage_task_ids(root: Path, stage: str) -> set[str]:
+    """Task ids of one stage from its private index (test oracle only; never printed)."""
+    index = json.loads(stage_index_file(root, stage).read_text(encoding="utf-8"))
+    return {row["task_id"] for row in index["rows"]}
+
+
+def other_stage(stage: str) -> str:
+    return "holdout" if stage == "development" else "development"
+
+
+def write_legacy_combined_custody(
+    root: Path,
+    *,
+    commit: str = SYNTHETIC_COMMIT,
+    development: tuple[OpaqueTask, ...] | None = None,
+    holdout: tuple[OpaqueTask, ...] | None = None,
+) -> dict:
+    """Write a synthetic package in the retired 1.1.0 combined-index layout.
+
+    Shape: ``private/index.json`` holding both stages and ``private/blobs/``
+    holding all forty blobs, with a schema-1.1.0 manifest whose digest is
+    recomputed over its own canonical bytes. Used only to prove that such a
+    package is rejected for P2 execution with a stable, content-free reason.
+    """
+    development = development if development is not None else synthetic_stage("development")
+    holdout = holdout if holdout is not None else synthetic_stage("holdout")
+    controller_digest = running_controller_digest()
+    request = build_import_request(
+        commit=commit,
+        controller_digest=controller_digest,
+        development=development,
+        holdout=holdout,
+    )
+    validation = validate_bundles(development, holdout)
+    custody._mkdir(root)
+    private = root / "private"
+    blobs = private / "blobs"
+    custody._mkdir(private)
+    custody._mkdir(blobs)
+    index: dict[str, object] = {}
+    for stage, tasks in (("development", development), ("holdout", holdout)):
+        rows = []
+        order = []
+        for task in tasks:
+            digest = sha256_digest(task.content)
+            custody._write_bytes(blobs / digest.removeprefix("sha256:"), task.content)
+            rows.append({"task_id": task.task_id, "content_digest": digest})
+            order.append(digest)
+        rows.sort(key=lambda item: item["task_id"])
+        index[stage] = rows
+        index[f"{stage}_order"] = order
+    custody._write_bytes(private / "index.json", canonical_bytes(index))
+    manifest = {
+        "schema_version": "1.1.0",
+        "kind": "sealed-qualification-set",
+        "finalized": True,
+        "integrity_statement": INTEGRITY_STATEMENT,
+        "replay_scope": "selected-custody-location",
+        "request_version": request["request_version"],
+        "controller_commit": commit,
+        "controller_digest": controller_digest,
+        "set_identity": request["set_identity"],
+        "development_task_count": 20,
+        "holdout_task_count": 20,
+        "development_aggregate_digest": validation.development.aggregate_digest,
+        "holdout_aggregate_digest": validation.holdout.aggregate_digest,
+        "import_request_digest": request["import_request_digest"],
+        "file_digests": list(validation.file_digests),
+    }
+    manifest["custody_manifest_digest"] = sha256_digest(canonical_manifest_bytes(manifest))
+    custody._write_bytes(root / "manifest.json", canonical_bytes(manifest))
+    receipt = custody.CustodyReceipt(
+        status="pass",
+        operation="import",
+        development_task_count=20,
+        holdout_task_count=20,
+        development_aggregate_digest=manifest["development_aggregate_digest"],
+        holdout_aggregate_digest=manifest["holdout_aggregate_digest"],
+        controller_commit=commit,
+        controller_digest=controller_digest,
+        custody_manifest_digest=manifest["custody_manifest_digest"],
+        set_identity=manifest["set_identity"],
+        import_request_digest=manifest["import_request_digest"],
+    )
+    custody._write_bytes(root / "receipt.json", canonical_bytes(receipt.public_dict()))
+    return manifest
 
 
 def tree_snapshot(root: Path) -> dict[str, tuple[int, str]]:
