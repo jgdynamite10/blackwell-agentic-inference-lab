@@ -1145,6 +1145,8 @@ def _sealed_validation_report(
             {
                 "sealed_tasks_loaded": len(sealed.tasks),
                 "sealed_scenario_count": len(sealed.scenario_ids),
+                "custody_access": "stage-specific",
+                "other_stage_observed": False,
             }
             if binding is not None
             else {}

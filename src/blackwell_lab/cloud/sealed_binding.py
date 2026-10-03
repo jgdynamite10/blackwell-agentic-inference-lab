@@ -6,12 +6,19 @@ filesystem path, so the config digest is portable across machines. The
 custody directory is a separate runtime argument (``--custody-dir``) that
 is never printed and never persisted.
 
-The loader is **stage specific**. It verifies the public manifest, the
-receipt, and the private index structurally for both stages without
-opening any blob, then opens, hashes, and decodes **only the selected
-stage's** blobs. The other stage's bodies are never read, decoded, copied,
-or returned. Every failure is a :class:`SealedSetError` whose message is a
-short reason code — no paths, task ids, or payload content.
+The loader is **stage specific** over the stage-separated custody layout
+(custody manifest 1.2.0). It verifies the public manifest and receipt,
+then reads only ``private/<stage>/index.json`` and the twenty blobs that
+index names under ``private/<stage>/blobs/``. The other stage's private
+index, identifiers, digests, order, filenames, and bytes are never
+listed, stat'ed, opened, decoded, copied, or returned, and the private
+tree is never walked. Every failure is a :class:`SealedSetError` whose
+message is a short reason code — no paths, task ids, or payload content.
+
+Executed task provenance lives in ``workload.task_source`` of the run
+manifest (``kind: sealed``, the stage aggregate as ``digest``, and the
+binding as ``sealed_set``); ``workload.catalog_digest`` keeps its public
+catalog meaning and is absent from sealed runs.
 
 Digests here are SHA-256 integrity checks. They are not encryption and not
 a cryptographic seal; see :mod:`blackwell_lab.sealed_sets`.
@@ -36,21 +43,25 @@ from blackwell_lab.cloud.sealed_payload import (
     decode_sealed_task,
 )
 from blackwell_lab.sealed_sets.custody import (
+    MANIFEST_NAME,
+    RECEIPT_NAME,
     CustodyReceipt,
+    load_stage_index,
+    read_stage_blob,
     require_external_directory,
+    stage_blob_path,
     validate_public_manifest,
 )
 from blackwell_lab.sealed_sets.model import (
     STAGES,
     TASKS_PER_STAGE,
     CustodyError,
+    require_execution_layout,
     running_controller_digest,
-    set_identity_from_digests,
-    sha256_digest,
 )
 from blackwell_lab.workload.sampling import TaskInstance
 from blackwell_lab.workload.scenarios import Scenario
-from blackwell_lab.workload.validation import ConfigError
+from blackwell_lab.workload.validation import TASK_SOURCE_SEALED, ConfigError
 
 BINDING_SCHEMA_VERSION = "1.0.0"
 SEALED_STAGES = STAGES
@@ -73,11 +84,8 @@ _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
-_MANIFEST_NAME = "manifest.json"
-_RECEIPT_NAME = "receipt.json"
-_INDEX_NAME = "index.json"
-_PRIVATE_DIR = "private"
-_BLOB_DIR = "blobs"
+_MANIFEST_NAME = MANIFEST_NAME
+_RECEIPT_NAME = RECEIPT_NAME
 
 
 class SealedSetError(ConfigError):
@@ -144,6 +152,18 @@ class SealedSetBinding:
     def provenance(self) -> dict[str, Any]:
         """Content-free provenance recorded in manifests and receipts."""
         return {key: getattr(self, key) for key in BINDING_FIELDS}
+
+    def task_source(self) -> dict[str, Any]:
+        """``workload.task_source`` for a sealed run.
+
+        The stage aggregate is the content-address of the executed task
+        set and lives here, never in ``workload.catalog_digest``.
+        """
+        return {
+            "kind": TASK_SOURCE_SEALED,
+            "digest": self.stage_aggregate_digest,
+            "sealed_set": self.provenance(),
+        }
 
 
 @dataclass(frozen=True)
@@ -246,16 +266,30 @@ def _load(
     canonical_commit: str,
     opened: Callable[[Path], None] | None,
 ) -> SealedStageTasks:
-    root = require_external_directory(custody_dir, repo=repo)
-    if not root.is_dir():
-        raise SealedSetError("custody-missing")
-    _require_tree_modes(root)
+    """Stage-specific load. Touches, in order:
 
-    manifest_path = root / _MANIFEST_NAME
-    manifest_bytes = _read_regular(manifest_path, reason="manifest-invalid")
+    1. the custody root (``lstat``: directory, mode ``0700``);
+    2. ``manifest.json`` and ``receipt.json`` (public, content-free);
+    3. ``private/``, ``private/<stage>/``, ``private/<stage>/blobs/``
+       (``lstat`` only, never listed);
+    4. ``private/<stage>/index.json``;
+    5. the twenty blobs named by that index, each by exact path.
+
+    Nothing under ``private/<other stage>/`` is listed, walked, globbed,
+    stat'ed, opened, or decoded. The whole private tree is never walked.
+    """
+    root = require_external_directory(custody_dir, repo=repo)
+    _require_root_dir(root)
+
+    manifest_bytes = _read_regular(root / _MANIFEST_NAME, reason="manifest-invalid")
     if hashlib.sha256(manifest_bytes).hexdigest() != binding.custody_manifest_sha256:
         raise SealedSetError("manifest-hash-mismatch")
-    manifest = validate_public_manifest(_parse_json(manifest_bytes, reason="manifest-invalid"))
+    manifest_document = _parse_json(manifest_bytes, reason="manifest-invalid")
+    # Layout gate before any schema or digest reasoning: a 1.1.0
+    # combined-index package is a historical custody object, never
+    # execution input.
+    require_execution_layout(manifest_document)
+    manifest = validate_public_manifest(manifest_document)
     if _canonical_bytes(manifest) != manifest_bytes:
         raise SealedSetError("manifest-invalid")
     if not manifest.get("finalized"):
@@ -281,24 +315,20 @@ def _load(
 
     receipt_bytes = _read_regular(root / _RECEIPT_NAME, reason="receipt-invalid")
     receipt = _parse_json(receipt_bytes, reason="receipt-invalid")
-    expected_receipt = _receipt_from_manifest(manifest).public_dict()
-    if receipt != expected_receipt:
+    if receipt != _receipt_from_manifest(manifest).public_dict():
         raise SealedSetError("receipt-invalid")
 
-    private = root / _PRIVATE_DIR
-    index_bytes = _read_regular(private / _INDEX_NAME, reason="tamper")
-    index = _parse_json(index_bytes, reason="tamper")
-    rows_by_stage = _check_index_structure(index, manifest, private / _BLOB_DIR)
+    index = load_stage_index(root, manifest, stage)
+    if index.aggregate_digest != binding.stage_aggregate_digest:
+        raise SealedSetError("aggregate-mismatch")
+    if len(index.rows) != binding.task_count:
+        raise SealedSetError("task-count-mismatch")
 
     tasks: list[SealedTask] = []
-    blob_root = private / _BLOB_DIR
-    for task_id, digest in rows_by_stage[stage]:
-        blob = blob_root / digest.removeprefix("sha256:")
+    for task_id, digest in index.rows:
         if opened is not None:
-            opened(blob)
-        payload = _read_regular(blob, reason="tamper")
-        if sha256_digest(payload) != digest:
-            raise SealedSetError("tamper")
+            opened(stage_blob_path(root, stage, digest))
+        payload = read_stage_blob(root, stage, digest)
         tasks.append(decode_sealed_task(payload, expected_task_id=task_id))
 
     _require_consistent_tasks(tasks)
@@ -308,12 +338,18 @@ def _load(
 
 
 def require_manifest_provenance(manifest: dict, binding: SealedSetBinding) -> None:
-    """Fail unless ``manifest.workload.sealed_set`` equals the config binding exactly."""
+    """Fail unless ``manifest.workload.task_source`` is exactly this sealed binding.
+
+    The manifest must declare ``task_source.kind == "sealed"`` with the
+    stage aggregate as ``digest`` and the full binding as ``sealed_set``,
+    and must carry no ``catalog_digest`` and no legacy ``sealed_set`` block.
+    """
     workload = manifest.get("workload") if isinstance(manifest, dict) else None
-    recorded = workload.get("sealed_set") if isinstance(workload, dict) else None
-    if recorded != binding.provenance():
+    if not isinstance(workload, dict):
         raise SealedSetError("provenance-mismatch")
-    if workload.get("catalog_digest") != binding.stage_aggregate_digest:
+    if workload.get("task_source") != binding.task_source():
+        raise SealedSetError("provenance-mismatch")
+    if "catalog_digest" in workload or "sealed_set" in workload:
         raise SealedSetError("provenance-mismatch")
     if workload.get("tasks_per_repetition") != binding.task_count:
         raise SealedSetError("provenance-mismatch")
@@ -368,63 +404,6 @@ def _require_consistent_tasks(tasks: list[SealedTask]) -> None:
         surfaces.add(surface)
 
 
-def _check_index_structure(
-    index: object, manifest: dict, blob_root: Path
-) -> dict[str, list[tuple[str, str]]]:
-    """Validate both stages' index rows against the manifest without opening blobs."""
-    expected_keys = {"development", "holdout", "development_order", "holdout_order"}
-    if not isinstance(index, dict) or set(index) != expected_keys:
-        raise SealedSetError("tamper")
-    seen_ids: set[str] = set()
-    seen_digests: set[str] = set()
-    orders: dict[str, list[str]] = {}
-    rows_by_stage: dict[str, list[tuple[str, str]]] = {}
-    for stage in SEALED_STAGES:
-        rows = index[stage]
-        order = index[f"{stage}_order"]
-        if not isinstance(rows, list) or len(rows) != TASKS_PER_STAGE:
-            raise SealedSetError("tamper")
-        if not isinstance(order, list) or len(order) != TASKS_PER_STAGE:
-            raise SealedSetError("tamper")
-        if not all(isinstance(item, str) and _DIGEST_RE.fullmatch(item) for item in order):
-            raise SealedSetError("tamper")
-        orders[stage] = list(order)
-        parsed: list[tuple[str, str]] = []
-        for row in rows:
-            if not isinstance(row, dict) or set(row) != {"task_id", "content_digest"}:
-                raise SealedSetError("tamper")
-            task_id = row["task_id"]
-            digest = row["content_digest"]
-            if not isinstance(task_id, str) or not isinstance(digest, str):
-                raise SealedSetError("tamper")
-            if not _DIGEST_RE.fullmatch(digest):
-                raise SealedSetError("tamper")
-            if task_id in seen_ids or digest in seen_digests:
-                raise SealedSetError("tamper")
-            seen_ids.add(task_id)
-            seen_digests.add(digest)
-            blob = blob_root / digest.removeprefix("sha256:")
-            info = _lstat(blob, reason="tamper")
-            if not stat.S_ISREG(info.st_mode):
-                raise SealedSetError("tamper")
-            parsed.append((task_id, digest))
-        if parsed != sorted(parsed, key=lambda item: item[0]):
-            raise SealedSetError("tamper")
-        preimage = "".join(f"{task_id}\t{digest}\n" for task_id, digest in parsed).encode()
-        if sha256_digest(preimage) != manifest[f"{stage}_aggregate_digest"]:
-            raise SealedSetError("tamper")
-        if sorted(orders[stage]) != sorted(digest for _task_id, digest in parsed):
-            raise SealedSetError("tamper")
-        rows_by_stage[stage] = parsed
-    if set_identity_from_digests(orders["development"], orders["holdout"]) != manifest.get(
-        "set_identity"
-    ):
-        raise SealedSetError("tamper")
-    if tuple(sorted(seen_digests)) != tuple(manifest["file_digests"]):
-        raise SealedSetError("tamper")
-    return rows_by_stage
-
-
 def _receipt_from_manifest(manifest: dict) -> CustodyReceipt:
     return CustodyReceipt(
         status="pass",
@@ -441,46 +420,34 @@ def _receipt_from_manifest(manifest: dict) -> CustodyReceipt:
     )
 
 
-def _require_tree_modes(root: Path) -> None:
-    if root.is_symlink() or _mode(root) != _DIR_MODE:
-        raise SealedSetError("permissive-mode")
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        current = Path(dirpath)
-        if current.is_symlink() or _mode(current) != _DIR_MODE:
-            raise SealedSetError("permissive-mode")
-        for name in dirnames:
-            if (current / name).is_symlink():
-                raise SealedSetError("symlink-escape")
-        for name in filenames:
-            child = current / name
-            if child.is_symlink():
-                raise SealedSetError("symlink-escape")
-            if _mode(child) != _FILE_MODE:
-                raise SealedSetError("permissive-mode")
-
-
-def _lstat(path: Path, *, reason: str) -> os.stat_result:
+def _require_root_dir(root: Path) -> None:
     try:
-        return path.lstat()
+        info = root.lstat()
     except OSError:
-        raise SealedSetError(reason) from None
-
-
-def _mode(path: Path) -> int:
-    return stat.S_IMODE(path.lstat().st_mode)
+        raise SealedSetError("custody-missing") from None
+    if stat.S_ISLNK(info.st_mode):
+        raise SealedSetError("symlink-escape")
+    if not stat.S_ISDIR(info.st_mode):
+        raise SealedSetError("custody-missing")
+    if stat.S_IMODE(info.st_mode) != _DIR_MODE:
+        raise SealedSetError("permissive-mode")
 
 
 _OPEN_FLAGS = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
 
 
 def _read_regular(path: Path, *, reason: str) -> bytes:
-    info = _lstat(path, reason=reason)
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+    """Read one public ``0600`` file by exact path without following symlinks."""
+    try:
+        info = path.lstat()
+    except OSError:
+        raise SealedSetError(reason) from None
+    if stat.S_ISLNK(info.st_mode):
+        raise SealedSetError("symlink-escape")
+    if not stat.S_ISREG(info.st_mode):
         raise SealedSetError(reason)
     if stat.S_IMODE(info.st_mode) != _FILE_MODE:
         raise SealedSetError("permissive-mode")
-    # Open through os.open with O_NOFOLLOW and re-check the descriptor so the
-    # bytes hashed are the regular file that was inspected, not a swap-in.
     try:
         fd = os.open(path, _OPEN_FLAGS)
     except OSError:
