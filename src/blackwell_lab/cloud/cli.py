@@ -1112,13 +1112,64 @@ def _qualify_stop(message: str, *, results_dir: Path | None, run_label: str) -> 
     return 1
 
 
+def _sealed_validation_report(
+    *,
+    candidate_id: str,
+    stage: str,
+    config_sha256: str,
+    sealed: object,
+) -> dict:
+    """Content-free ``--validate-only`` report. No paths, ids, or payload content."""
+    from blackwell_lab.cloud import qualification
+
+    binding = getattr(sealed, "binding", None)
+    return {
+        "workflow": qualification.QUALIFICATION_WORKFLOW,
+        "mode": "validate-only",
+        "executed": False,
+        "approval_checked": False,
+        "model_client_constructed": False,
+        "endpoint_contacted": False,
+        "candidate_id": candidate_id,
+        "stage": stage,
+        "config_sha256": config_sha256,
+        "candidate_identity_sha256": qualification.candidate_identity_digest(candidate_id),
+        "workload_version": qualification.candidate_workload_version(candidate_id),
+        "controller": qualification.candidate_controller(candidate_id),
+        "sealed_input": binding is not None,
+        **({"sealed_set": binding.provenance()} if binding is not None else {}),
+        **(
+            {
+                "sealed_tasks_loaded": len(sealed.tasks),
+                "sealed_scenario_count": len(sealed.scenario_ids),
+            }
+            if binding is not None
+            else {}
+        ),
+        "note": (
+            "Offline validation only: the config, candidate binding, and (for "
+            "sealed cells) the selected custody stage were verified. Nothing "
+            "was executed, no model client was constructed, no endpoint was "
+            "contacted, and no credentials were used."
+        ),
+    }
+
+
 def cmd_qualify_agent(args: argparse.Namespace) -> int:
     from blackwell_lab.cloud import lifecycle, provenance, qualification, realbench, telemetry
+    from blackwell_lab.cloud.sealed_binding import (
+        require_manifest_provenance,
+        require_sealed_stage_evidence,
+        resolve_sealed_stage,
+    )
     from blackwell_lab.workload.evidence import require_controller_binding
     from blackwell_lab.workload.model_client import GenerationSettings
     from blackwell_lab.workload.openai_client import OpenAICompatibleClient
 
-    lifecycle.refuse_hosted_execution()
+    validate_only = bool(getattr(args, "validate_only", False))
+    custody_dir = getattr(args, "custody_dir", None)
+    if not validate_only:
+        lifecycle.refuse_hosted_execution()
     try:
         run_label = qualification.require_safe_run_label(args.run_label)
         candidate_id = args.candidate
@@ -1144,19 +1195,51 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             config=config,
             artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
         )
-        qualification.require_approval(
-            args.approve,
-            run_tag=args.run_tag,
-            run_label=run_label,
+        if not validate_only:
+            qualification.require_approval(
+                args.approve,
+                run_tag=args.run_tag,
+                run_label=run_label,
+                candidate_id=candidate_id,
+                config_sha256=config_sha256,
+            )
+            qualification.require_clean_canonical_commit(
+                config, git_head=_git_head(), tree_clean=_tree_clean()
+            )
+        # Sealed input (D-0024): P2 development/holdout load exactly the bound
+        # custody stage here — before the results directory, ledger, live
+        # provenance, or any model client exists. Every custody failure
+        # (path, modes, manifest, receipt, digests, identity, stage, count,
+        # payload) stops the command at this point with a content-free
+        # reason. Catalog cells refuse --custody-dir and a sealed_set section.
+        sealed = resolve_sealed_stage(
+            config,
             candidate_id=candidate_id,
-            config_sha256=config_sha256,
+            stage=stage,
+            custody_dir=custody_dir,
+            repo=_repo_root(),
         )
-        qualification.require_clean_canonical_commit(
-            config, git_head=_git_head(), tree_clean=_tree_clean()
+        require_controller_binding(
+            qualification.candidate_workload_version(candidate_id),
+            qualification.candidate_controller(candidate_id),
         )
     except (ConfigError, qualification.QualificationError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 1
+
+    if validate_only:
+        print(
+            json.dumps(
+                _sealed_validation_report(
+                    candidate_id=candidate_id,
+                    stage=stage,
+                    config_sha256=config_sha256,
+                    sealed=sealed,
+                ),
+                indent=2,
+            )
+        )
+        return 0
 
     results_dir = _resolve_real_results_dir()
     paths = lifecycle.lifecycle_paths(results_dir, args.run_tag)
@@ -1246,10 +1329,11 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 reasoning_mode=qualification.FROZEN_REASONING_MODE,
                 workload_version=qualification.candidate_workload_version(candidate_id),
             ),
-            template_ids=spec["template_ids"],
+            template_ids=None if sealed is not None else spec["template_ids"],
             artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
             workload_version=qualification.candidate_workload_version(candidate_id),
             controller=qualification.candidate_controller(candidate_id),
+            sealed_set=sealed.binding if sealed is not None else None,
         )
         # The workload/controller binding is re-checked against the
         # assembled spec before any client exists (fail closed, no inference).
@@ -1265,19 +1349,29 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             host=host,
             sampler_factory=telemetry.GpuSamplerThread,
             results_dir=results_dir,
+            sealed_tasks=sealed,
         )
         if len(records) != spec["repetitions"]:
             raise qualification.QualificationError(
                 "qualification must persist exactly one measured repetition"
             )
         outcomes = qualification.outcomes_from_records(records)
-        qualification.require_complete_stage_evidence(stage, outcomes)
+        if sealed is not None:
+            require_sealed_stage_evidence(sealed, outcomes)
+            expected_template_ids = sealed.scenario_ids
+        else:
+            qualification.require_complete_stage_evidence(stage, outcomes)
+            expected_template_ids = spec["template_ids"]
         verification_ok = True
         for record in records:
             result = getattr(record, "result", None)
             manifest = getattr(record, "manifest", None)
             measured = getattr(record, "measured_observations", None)
             if result is None or manifest is None:
+                if sealed is not None:
+                    raise qualification.QualificationError(
+                        "sealed qualification must persist a manifest and result"
+                    )
                 continue
             validate_benchmark_result(result)
             validate_run_manifest(manifest)
@@ -1289,11 +1383,13 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 measured_observations=measured if isinstance(measured, dict) else None,
                 warmup_observations=getattr(record, "warmup_observations", None),
             )
+            if sealed is not None:
+                require_manifest_provenance(manifest, sealed.binding)
         metrics = qualification.compute_qualification_metrics(
             outcomes,
             provenance_ok=True,
             verification_ok=verification_ok,
-            expected_template_ids=spec["template_ids"],
+            expected_template_ids=expected_template_ids,
         )
         gates = qualification.evaluate_stage_thresholds(stage, metrics)
         files = [name for record in records for name in getattr(record, "written_files", ())]
@@ -1306,6 +1402,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             gates=gates,
             files=files,
             stopped=bool(gates["stopped"]),
+            sealed_set=sealed.binding if sealed is not None else None,
         )
         from blackwell_lab.cloud.artifacts import write_private_json
 
@@ -1572,6 +1669,28 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser.add_argument(
         "--approve",
         help="The exact qualification approval phrase naming run, candidate, and config digest.",
+    )
+    qualify_parser.add_argument(
+        "--custody-dir",
+        help=(
+            "Absolute path to the external D-0023 custody directory that holds "
+            "the sealed stage bound by the config's sealed_set section "
+            "(decision D-0024). Required for P2 development and holdout; "
+            "refused for every other candidate/stage. It must lie outside "
+            "every Git repository, contain no symlink component, and keep "
+            "0700/0600 modes. Only the requested stage is opened. The path "
+            "is never printed and never persisted in receipts, manifests, or Git."
+        ),
+    )
+    qualify_parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help=(
+            "Offline validation of the config, candidate binding, and (for "
+            "P2 development/holdout) the selected custody stage. Constructs no "
+            "model client, contacts no endpoint, touches no ledger, and uses "
+            "no credentials. The approval phrase is not checked in this mode."
+        ),
     )
 
     sub.add_parser(

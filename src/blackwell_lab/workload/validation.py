@@ -226,3 +226,56 @@ def validate_result_semantics(
             len(document.get("observations", [])) == expected_count,
             f"{label} observation count does not match the result accounting",
         )
+
+    sealed = workload.get("sealed_set")
+    if sealed is not None:
+        _validate_sealed_semantics(workload, sealed, sample, observations, measured_observations)
+
+
+def _validate_sealed_semantics(
+    workload: dict,
+    sealed: dict,
+    sample: dict,
+    observations: dict,
+    measured_observations: dict | None,
+) -> None:
+    """Invariants of a sealed-stage run (decision D-0024): the executed task
+    set is the bound custody stage, exactly once, with no warm-up and no
+    catalog content-address."""
+    _check(isinstance(sealed, dict), "workload.sealed_set must be an object")
+    task_count = sealed.get("task_count")
+    _check(
+        workload.get("catalog_digest") == sealed.get("stage_aggregate_digest"),
+        "sealed run catalog_digest must equal the bound stage aggregate digest",
+    )
+    _check(
+        workload.get("tasks_per_repetition") == task_count,
+        "sealed run tasks_per_repetition must equal the bound task count",
+    )
+    _check(
+        sample["total_attempts"] == task_count,
+        "sealed run must attempt exactly the bound task count",
+    )
+    _check(
+        sample["unique_instance_count"] == task_count,
+        "sealed run instances must be distinct",
+    )
+    scenario_count = workload.get("scenario_count")
+    if scenario_count is not None:
+        _check(
+            scenario_count == sample["unique_template_count"],
+            "sealed run scenario_count must equal the distinct scenarios observed",
+        )
+    _check(observations["warmup_count"] == 0, "sealed runs record no warm-up observations")
+    if measured_observations is not None:
+        instance_ids = [
+            item.get("instance_id") for item in measured_observations.get("observations", [])
+        ]
+        _check(
+            len(instance_ids) == task_count and len(set(instance_ids)) == task_count,
+            "sealed run observations must cover each sealed task exactly once",
+        )
+        _check(
+            all(isinstance(value, str) and value for value in instance_ids),
+            "sealed run observations must carry non-empty instance ids",
+        )
