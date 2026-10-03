@@ -24,7 +24,10 @@ Subcommands map one-to-one to the separated workflows required by Phase 3A:
                       (C1/C2 on workload 2.4.0, P1 on workload 2.4.1,
                       P2 on workload 2.5.0 with the evidence-grounding-v1
                       controller; frozen dev/holdout/freeze; fail-closed;
-                      no infrastructure changes).
+                      no infrastructure changes). P2 development/holdout
+                      cells bind to a D-0023 sealed custody stage through
+                      ``--custody-dir`` (external, never printed) and
+                      ``--validate-only`` checks the binding offline.
 - ``full-baseline``   DISABLED: the research-grade 12-cell baseline is not
                       part of the MVL.
 - ``verify-results``  external verification of persisted genuine results;
