@@ -14,8 +14,9 @@ be claimed, and this track does not claim one.
 
 The public manifest schema is
 [sealed-set-manifest.schema.json](../schemas/sealed-set-manifest.schema.json),
-version 1.1.0. The decision record is
-[D-0023](decision-log.md).
+version 1.2.0 (`private_layout: stage-separated`). The decision record is
+[D-0023](decision-log.md); the stage-separated layout and the execution
+binding are recorded as D-0024.
 
 ## Invocation
 
@@ -200,10 +201,60 @@ digest is refused.
   failure rejects the set and does not rewrite it.
 - Hashes bind bytes. They do not conceal those bytes.
 
-The public manifest is `manifest.json`. A private index and
-content-addressed blobs live under `private/` so the aggregate and the
-set identity can be recomputed. That index is mode `0600` and is never
-printed. The content-free receipt is `receipt.json`.
+The public manifest is `manifest.json`. The content-free receipt is
+`receipt.json`. Private material is stage-separated:
+
+```text
+manifest.json
+receipt.json
+private/
+  development/
+    index.json
+    blobs/<64-lowercase-hex>   (twenty files)
+  holdout/
+    index.json
+    blobs/<64-lowercase-hex>   (twenty files)
+```
+
+Each stage index records that stage's `stage`, `task_count`,
+`aggregate_digest`, identifier-sorted `(task_id, content_digest)` rows, and
+the content-digest order. It contains nothing about the other stage. The
+public manifest carries `development_index_digest` and
+`holdout_index_digest`, the SHA-256 of each stage index's canonical bytes,
+so a stage reader can authenticate its own index against the manifest
+without touching the other stage. Indexes and blobs are mode `0600` and
+are never printed. Blob paths are derived only from the selected stage's
+index, never from a directory listing.
+
+Full-custody `verify` and `receipt` read both stages: they recompute both
+aggregates, check cross-stage identifier and digest disjointness, the set
+identity, `file_digests`, and the exact directory contents. The execution
+adapter (`blackwell-cloud qualify-agent`, including `--validate-only`)
+never calls full-custody verification; see the execution binding below.
+
+### Combined-index packages (schema 1.1.0)
+
+Packages written under schema version 1.1.0 used one combined
+`private/index.json` and one shared `private/blobs/` directory, so a
+development reader necessarily decoded holdout identifiers, digests, order,
+and blob filenames. That layout is no longer written and is not accepted
+for execution. `validate_public_manifest` rejects a 1.1.0 manifest as
+`layout-version-unsupported` before any private file is opened, and the
+execution adapter fails before the model client is constructed.
+
+Existing 1.1.0 packages are **not** migrated or rewritten in place. Any
+previously finalized real package remains an immutable historical custody
+object. Before any P2 execution, the real development and holdout bundles
+must be re-prepared and re-imported into a **new, empty external
+directory** under the stage-separated layout from a frozen canonical
+commit that contains this change. That produces a new commit-bound
+controller digest, a new import-request digest, a new custody-manifest
+digest, and therefore requires a new owner approval phrase bound to the
+new request digest. The task source bundles themselves are unchanged, and
+the stage aggregate and set-identity algorithms are unchanged, so the two
+stage aggregates and the set identity of a faithful re-import equal those
+of the historical package; only the layout, the index digests, and the
+digests derived from the controller source differ.
 
 ## Later sequence
 
@@ -234,12 +285,30 @@ block (schema version, custody-manifest SHA-256, controller digest,
 import-request digest, set identity, stage, stage aggregate digest, task
 count, payload schema version). The custody directory itself is passed to
 `blackwell-cloud qualify-agent` as `--custody-dir` at run time; it is
-never printed, never persisted, and never committed. The runner opens
-only the selected stage's blobs, so a development run never reads holdout
-bodies. Each blob must satisfy the versioned payload contract in
+never printed, never persisted, and never committed.
+
+The adapter is stage-specific. It reads `manifest.json`, `receipt.json`,
+`private/<stage>/index.json`, and the twenty blobs named by that index,
+each at an exact path, with `lstat` and `open` only. It never lists,
+walks, globs, or scans any directory, and it never constructs a path under
+the other stage's directory, so a development run does not observe
+holdout-private identifiers, digests, order, blob filenames, or bytes, and
+vice versa. Damage to the other stage (missing, corrupt, unreadable, or
+mode-invalid index or blob, or a missing or unreadable stage directory)
+has no effect on the selected stage. The adapter does not call
+full-custody verification. Each blob must satisfy the versioned payload
+contract in
 [sealed-task-payload.schema.json](../schemas/sealed-task-payload.schema.json).
-The binding, loading, provenance, and fail-closed rules are recorded as
-D-0024 in the [decision log](decision-log.md).
+
+A sealed run records `workload.task_source =
+{"kind": "sealed", "digest": <stage aggregate>, "sealed_set": {...}}` in
+its private run manifest and carries no `workload.catalog_digest`; a
+catalog run records `task_source = {"kind": "catalog"}` together with the
+in-repository `catalog_digest`. The run-manifest schema and semantic
+validation make the two mutually exclusive, so a stage aggregate can never
+pose as a catalog digest or the reverse. The binding, loading, provenance,
+and fail-closed rules are recorded as D-0024 in the
+[decision log](decision-log.md).
 
 ## Rebase after P2 merges
 
