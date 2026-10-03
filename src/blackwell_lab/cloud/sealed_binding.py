@@ -470,16 +470,35 @@ def _mode(path: Path) -> int:
     return stat.S_IMODE(path.lstat().st_mode)
 
 
+_OPEN_FLAGS = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+
+
 def _read_regular(path: Path, *, reason: str) -> bytes:
     info = _lstat(path, reason=reason)
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
         raise SealedSetError(reason)
     if stat.S_IMODE(info.st_mode) != _FILE_MODE:
         raise SealedSetError("permissive-mode")
+    # Open through os.open with O_NOFOLLOW and re-check the descriptor so the
+    # bytes hashed are the regular file that was inspected, not a swap-in.
     try:
-        return path.read_bytes()
+        fd = os.open(path, _OPEN_FLAGS)
     except OSError:
         raise SealedSetError(reason) from None
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise SealedSetError(reason)
+        if stat.S_IMODE(opened.st_mode) != _FILE_MODE:
+            raise SealedSetError("permissive-mode")
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            return handle.read()
+    except OSError:
+        raise SealedSetError(reason) from None
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def _parse_json(payload: bytes, *, reason: str) -> Any:

@@ -27,6 +27,7 @@ import hashlib
 import io
 import json
 import os
+import pathlib
 import shutil
 from pathlib import Path
 
@@ -157,6 +158,10 @@ class _OpenRecorder:
         monkeypatch.setattr(io, "open", io_open)
         monkeypatch.setattr(builtins, "open", io_open)
         monkeypatch.setattr(os, "open", os_open)
+        # Python 3.10 pathlib binds io.open at import time on its accessor.
+        accessor = getattr(pathlib, "_NormalAccessor", None)
+        if accessor is not None and hasattr(accessor, "open"):
+            monkeypatch.setattr(accessor, "open", staticmethod(io_open))
 
     def under(self, directory: Path) -> set[Path]:
         return {p for p in self.paths if directory == p or directory in p.parents}
