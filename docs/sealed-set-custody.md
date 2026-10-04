@@ -310,6 +310,57 @@ pose as a catalog digest or the reverse. The binding, loading, provenance,
 and fail-closed rules are recorded as D-0024 in the
 [decision log](decision-log.md).
 
+## Materialization of historical source entries (D-0025)
+
+Historical external source entries carry a `task_id` and a scenario
+document but no D-0024 `instance` object. The offline materializer adds
+exactly the payload envelope and the instance object that the production
+generator `blackwell_lab.workload.sampling.generate_task_instances`
+produces, and writes ordinary bundle directories for the unchanged custody
+tool above. It is not a custody operation and is not part of the
+commit-bound controller digest.
+
+```bash
+python -m blackwell_lab.cloud.sealed_materialize approval-phrase
+python -m blackwell_lab.cloud.sealed_materialize prepare-materialization \
+  --repo /absolute/canonical/checkout \
+  --commit <40-lowercase-hex> \
+  --development /absolute/external/development-source \
+  --holdout /absolute/external/holdout-source
+python -m blackwell_lab.cloud.sealed_materialize materialize-bundles \
+  --repo /absolute/canonical/checkout \
+  --commit <40-lowercase-hex> \
+  --implementation-digest sha256:<64-lowercase-hex> \
+  --request-digest sha256:<64-lowercase-hex> \
+  --development /absolute/external/development-source \
+  --holdout /absolute/external/holdout-source \
+  --output /absolute/external/new-empty-path \
+  --approve 'I approve sealed qualification-task materialization using request sha256:<64-lowercase-hex>'
+```
+
+- Seed: `qualification.MEASURED_REPETITION_SEED` (`FROZEN_SEED + 1`), the
+  seed the runner hands the generator for the single measured repetition.
+- Occurrence: the zero-based count of earlier same-scenario tasks in
+  task-identifier order, the D-0024 execution order
+  (`task-id-sorted-per-template-counter`).
+- Preserved: task identifiers, scenario content, stage membership,
+  task-identifier ordering, per-scenario distribution.
+- Source shape: exactly `{"task_id": ..., "scenario": {...}}` per file,
+  filename equal to `task_id`; anything else is `source-shape` or
+  `source-invalid`.
+- Output: `<output>/development/`, `<output>/holdout/` (twenty `0600`
+  files each, filename = task id) and a content-free
+  `<output>/materialization.json`. The output path must not exist.
+- Approval binds the request digest over commit, implementation digest,
+  generator, seed, occurrence rule, source and predicted output
+  aggregates, counts, set identities and distribution summaries. The
+  D-0023 import phrase does not authorize materialization.
+- The materialized bundles then go through the unchanged `prepare` and
+  `import-bundles` flow into a new custody directory; the P2 adapter is
+  unchanged.
+
+Decision record: D-0025 in the [decision log](decision-log.md).
+
 ## Rebase after P2 merges
 
 This branch is file-disjoint from the P2 controller branch and was cut from

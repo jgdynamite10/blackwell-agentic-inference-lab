@@ -1293,3 +1293,103 @@ recorded under a field whose meaning is the public catalog digest. Items 3,
 had read a combined private index covering both stages and had recorded the
 stage aggregate as `workload.catalog_digest`; no sealed run predates that
 correction. Tested only with synthetic custody fixtures.
+
+## 2026-10-04 — D-0025: Offline materialization of sealed qualification tasks
+
+**No real bundle is read, materialized, imported, or executed by this
+decision.** No qualification result predates it. The evaluator, scenario
+catalog, thresholds, prompts, sampling rules, model, engine, precision,
+infrastructure, P2 behavior, the D-0023 custody tool, and the D-0024
+execution adapter are unchanged. D-0022, D-0023, and D-0024 are not
+edited. Live materialization, live import, live `qualify-agent`, and
+Phase 4 remain unauthorized and keep their separate digest-bearing
+approval phrases.
+
+**Problem.** The historical external source entries carry a `task_id` and a
+scenario document but not the D-0024 `instance` object (`instance_seed`,
+`tracking_id`, `reported_minute`) that the payload contract requires, so
+they cannot be imported as execution-eligible sealed tasks as they stand.
+
+**Decision.** A narrowly scoped offline workflow,
+`python -m blackwell_lab.cloud.sealed_materialize`, adds exactly the
+D-0024 payload envelope and the instance object to each source entry. Its
+contract is:
+
+1. **One generator, reused exactly.** The instance object is produced only
+   by the existing production generator
+   `blackwell_lab.workload.sampling.generate_task_instances`. No second
+   derivation, placeholder, timestamp, random value, or task-body-derived
+   value exists. For each scenario that appears `k` times in a stage, one
+   call `generate_task_instances((scenario_id,), k, seed)` yields the
+   instances for occurrences `0..k-1`, and the task with occurrence `i`
+   receives the `i`-th instance's `instance_seed`, `tracking_id`, and
+   `reported_minute`.
+2. **Seed.** `seed` is
+   `blackwell_lab.cloud.qualification.MEASURED_REPETITION_SEED`
+   (`FROZEN_SEED + 1`): the qualification runner builds the stage spec
+   with `seed = FROZEN_SEED` and derives the generator seed of the single
+   measured repetition as `spec.seed + repetition_index` with
+   `repetition_index == 1` (`STAGE_REPETITIONS == 1`, no warm-up pass).
+   The repository determines this value uniquely; the same constant drives
+   `expected_stage_distribution`.
+3. **Occurrence.** The production convention is the zero-based count of
+   earlier same-template tasks in schedule order. For sealed cells the
+   schedule order is task-identifier order (D-0024 item 4), which is also
+   the row order of the stage aggregate. A task's occurrence is therefore
+   the number of tasks in its stage with a smaller task identifier and the
+   same `scenario_id` (`occurrence_rule: task-id-sorted-per-template-counter`).
+   The import-time sequence of a bundle directory is not an execution
+   order and is not used.
+4. **Preservation.** Task identifiers, scenario content (byte-identical
+   after canonical re-serialization), stage membership, task-identifier
+   ordering, and the per-scenario distribution are preserved. A source
+   stage whose distribution equals the frozen catalog distribution yields
+   exactly the instance surfaces the catalog runner would generate for
+   that stage. A distribution that differs is preserved, not rebalanced.
+5. **Source shape.** A source entry is a JSON object with exactly
+   `task_id` (equal to its filename) and `scenario`. Entries that already
+   carry an envelope or an `instance` object, and scenarios that fail the
+   D-0024 payload contract, are refused (`source-shape`,
+   `source-invalid`). Every materialized payload must decode with the
+   production decoder and re-encode byte for byte.
+6. **Operations and approval.** `prepare-materialization` prints a
+   content-free request and writes nothing. `materialize-bundles` writes
+   `development/` and `holdout/` bundle directories (filename = task id,
+   `0600` files, `0700` directories) plus a content-free
+   `materialization.json` record into a **new** external directory; an
+   existing destination, even empty, is `destination-exists` and is never
+   overwritten. The request (schema
+   [sealed-materialization-request.schema.json](../schemas/sealed-materialization-request.schema.json))
+   binds the frozen commit (clean worktree required), the
+   implementation digest (committed and running bytes of
+   `sealed_materialize.py`, `sealed_payload.py`, `sampling.py`, and the
+   payload schema, which must be the worktree files), the generator name,
+   seed, seed rule, occurrence rule, payload version, source and predicted
+   output aggregates, counts, task-id-ordered set identities, and
+   per-stage distribution summaries (template count, sorted counts, and a
+   digest of the scenario-id→count mapping, without scenario names). The
+   approval phrase is exactly
+   `I approve sealed qualification-task materialization using request sha256:{digest}`;
+   the D-0023 import phrase does not authorize materialization and vice
+   versa. Written bundles are re-read with the production bundle loader
+   and re-derived before the record is written; any difference scrubs the
+   new directory.
+7. **Content-free output.** Requests, records, console output, and errors
+   never contain task bodies, task identifiers, scenario identifiers,
+   accepted answers, blob names, or paths. Failures print
+   `BLOCKED: <reason>` only.
+8. **Downstream unchanged.** The materialized bundles are ordinary D-0023
+   input: the unchanged custody tool prepares and imports them into a new
+   custody directory, and the unchanged D-0024 adapter decodes the stage.
+   The materializer is not part of `CONTROLLER_SOURCE_PATHS`, so the
+   custody controller digest is unaffected by this decision.
+9. **Integrity, not confidentiality.** As under D-0023 and D-0024, SHA-256
+   digests bind bytes and do not conceal them.
+
+**Rationale.** Owner authorization to make the historical source entries
+execution-eligible without inventing instance semantics: the only
+instance generator in the repository is reused unchanged under the seed
+and occurrence convention the production runner already applies, so a
+materialized stage is indistinguishable at the instance surface from the
+schedule production would have generated for the same scenarios. Tested
+only with synthetic source entries built from the public scenario catalog.
