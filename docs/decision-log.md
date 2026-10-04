@@ -1154,3 +1154,142 @@ at version 1.1.0, and the credential-free custody tool documented in
 **Rationale.** Owner authorization to record the custody schema and the
 fail-closed import binding before any real development or holdout set
 exists. The entry is limited to that contract.
+
+## 2026-10-03 — D-0024: Bind sealed qualification sets to P2 execution
+
+**No sealed set is imported, opened, or executed by this decision.** No
+qualification result predates it. The P2 prompt, controller, evaluator,
+thresholds, sampling rules, model, engine, precision, and infrastructure
+are unchanged. C1, C2, P1, and the P2 freeze stage are unchanged. Live
+`qualify-agent` execution, live import under D-0023, and Phase 4 remain
+unauthorized and keep their separate digest-bearing approval phrases.
+
+**Decision.** `blackwell-cloud qualify-agent` executes the P2 development
+and P2 holdout cells only from a D-0023 custody stage, never from the
+in-repository scenario catalog. The contract is:
+
+1. **Path-free binding in the frozen config.** P2 development and holdout
+   configs carry a `sealed_set` object with exactly `schema_version`
+   (`1.0.0`), `custody_manifest_sha256`, `custody_controller_digest`,
+   `import_request_digest`, `set_identity`, `stage`,
+   `stage_aggregate_digest`, `task_count` (exactly 20), and
+   `payload_schema_version` (`1.0.0`). The binding stage must equal the
+   config stage. The binding carries no filesystem path, so the config
+   digest is portable across machines. A `sealed_set` block on any other
+   candidate or stage is rejected. The C1, C2, and P1 identity digests
+   are unchanged.
+2. **Separate runtime custody location.** The custody directory is the
+   `--custody-dir` argument: an absolute path outside every Git
+   repository, with no symlink escape, holding `0700` directories and
+   `0600` files as required by D-0023. It is rejected for non-sealed
+   cells, required for sealed cells, and never printed, never written to
+   receipts or manifests, and never committed. No new transport mechanism
+   is introduced: the qualification runner already executes locally in
+   the owner's environment and only the model is remote, so the sealed
+   stage is read on the same machine that holds custody.
+3. **Stage-separated custody layout (custody manifest 1.2.0).** The
+   D-0023 custody tool now writes `private_layout: stage-separated`:
+   `private/<stage>/index.json` and `private/<stage>/blobs/<hex>` for
+   each stage, with no combined index and no shared blob directory. Each
+   stage index names only its own stage's identifiers, content digests,
+   order, count, and aggregate; the public manifest carries
+   `development_index_digest` and `holdout_index_digest` so a stage
+   reader authenticates its own index without reading the other stage's.
+   The stage aggregate, set identity, import-request, and
+   custody-manifest digest algorithms are unchanged. Full-custody
+   `verify` and `receipt` still verify both stages (disjointness, set
+   identity, `file_digests`, exact directory contents); the execution
+   adapter never calls them. Packages written under the 1.1.0
+   combined-index layout are immutable historical custody objects: they
+   are not migrated or rewritten, and the adapter rejects them as
+   `layout-version-unsupported` at the manifest gate before any private
+   file is opened. **This supersedes the D-0023 private layout for any
+   package used in execution; D-0023's other terms are unchanged.**
+4. **Stage-specific loading.** The loader verifies the manifest layout
+   version, the custody manifest SHA-256 and schema, the manifest's
+   controller digest, the running commit-bound controller digest, the
+   import-request digest, the set identity, the selected stage's count
+   and aggregate, and the receipt, then reads `private/<stage>/index.json`
+   by exact path, verifies it against the manifest's stage index digest,
+   and opens, hashes, and decodes **only the selected stage's** twenty
+   blobs at the exact paths that index names, under the versioned payload
+   contract
+   [sealed-task-payload.schema.json](../schemas/sealed-task-payload.schema.json).
+   It performs no `listdir`, `scandir`, `walk`, `glob`, or `iterdir`
+   anywhere in the custody directory and builds no path under the other
+   stage, so a development run does not open, decode, list, stat, or
+   otherwise observe holdout-private identifiers, digests, order, blob
+   filenames, or bytes, and vice versa. The selected stage completes
+   unaffected when the other stage's index, blobs, or directory are
+   missing, corrupt, unreadable, or mode-invalid; the same damage to the
+   selected stage fails closed. Duplicate task identifiers, inconsistent
+   scenario copies, and malformed payloads are rejected. Tasks execute in
+   task-identifier order; `sample_design.seed` remains the recorded
+   generation seed and no longer selects the schedule for sealed cells.
+5. **Explicit task source; no catalog-digest overload.** The run manifest
+   `workload` block carries a `task_source` discriminator. Catalog runs
+   (C1, C2, P1, P2 freeze, every mock run) record
+   `task_source = {"kind": "catalog"}` and `catalog_digest` with its
+   original meaning, and carry no sealed provenance. Sealed runs record
+   `task_source = {"kind": "sealed", "digest": <stage aggregate>,
+   "sealed_set": {<nine binding fields>}}` and carry **no**
+   `catalog_digest`. The run-manifest schema (3.1.0, additive) requires
+   `catalog_digest` when and only when the source is not sealed, forbids
+   `sealed_set` outside `task_source`, and requires `task_source.digest`
+   to equal `sealed_set.stage_aggregate_digest`; manifests written before
+   this decision carry no `task_source` and validate as catalog runs.
+   Verification fails if a stage aggregate is substituted for a catalog
+   digest, if a catalog digest is substituted for a stage aggregate, if a
+   catalog manifest carries sealed provenance, if a sealed manifest lacks
+   the discriminator, if any sealed field differs from the executed
+   binding, if the per-task evidence does not cover exactly the sealed
+   task identifiers and scenario set, or if the aggregate or counts
+   disagree. The public receipt records the same nine-field `sealed_set`.
+   Receipts, manifests, console output, and errors never contain task
+   bodies, accepted answers, prompts, completions, task identifiers,
+   private filenames, or the custody path.
+6. **Fail closed before the model client.** Every binding and custody
+   failure (missing or malformed binding, stage or count mismatch,
+   missing or misplaced custody directory, unsupported layout version,
+   permissive modes, manifest hash, controller, import-request, identity,
+   aggregate, index digest, receipt, tamper, malformed task, duplicate
+   task, task-source or provenance mismatch) aborts before the model
+   client is constructed, before the endpoint is contacted, and before
+   the results directory or ledger is touched. There is no fallback to
+   the catalog, to config copies, to the ledger, or to the provider.
+   Failures report a short reason code only.
+7. **Offline validation.** `qualify-agent --validate-only --custody-dir
+   <dir>` performs the same stage-specific binding and stage load with
+   zero model calls, zero endpoint contact, no approval check, and no
+   `LAB_RESULTS_DIR` access, and prints a content-free report (counts,
+   digests, identity, stage, `custody_access: stage-specific`,
+   `other_stage_observed: false`, and `model_client_constructed: false`).
+   It does not perform full-custody verification.
+8. **Re-import requirement for any previously imported package.** A real
+   package finalized under the 1.1.0 combined-index layout is not
+   eligible for P2 execution and is not altered. Before any P2
+   development or holdout execution, the unchanged real task source
+   bundles must be re-prepared and re-imported under the stage-separated
+   layout into a new, empty external directory from a frozen canonical
+   commit that contains this change. That yields a new commit-bound
+   controller digest, a new import-request digest, and a new
+   custody-manifest digest, and requires a new owner approval phrase
+   bound to the new request digest; the resulting frozen P2 configs must
+   carry those new values. Because the aggregate and set-identity
+   algorithms are unchanged, a faithful re-import of the same bundles
+   reproduces the historical stage aggregates and set identity.
+9. **Integrity, not confidentiality.** As under D-0023, SHA-256 digests
+   bind bytes and do not conceal them. This decision adds no encryption,
+   no cryptographic seal, and no global anti-replay; replay protection
+   remains local to the selected custody directory.
+
+**Rationale.** Owner authorization to make the sealed custody stage the
+only input to P2 development and holdout execution before any real set
+exists, so that the qualification cannot silently fall back to public
+catalog tasks, so that holdout-private metadata and bodies are never
+observed by a development run, and so that a stage aggregate is never
+recorded under a field whose meaning is the public catalog digest. Items 3,
+4, 5, and 8 were corrected in review of the first implementation, which
+had read a combined private index covering both stages and had recorded the
+stage aggregate as `workload.catalog_digest`; no sealed run predates that
+correction. Tested only with synthetic custody fixtures.

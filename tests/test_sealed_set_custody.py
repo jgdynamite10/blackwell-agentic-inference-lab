@@ -43,12 +43,14 @@ from blackwell_lab.sealed_sets.model import (
     approval_phrase,
     build_import_request,
     build_public_manifest,
+    build_stage_index,
     canonical_document_bytes,
     canonical_manifest_bytes,
     controller_digest_from_sources,
     running_controller_digest,
     running_controller_parts,
     sha256_digest,
+    stage_index_digest,
     synthetic_placeholders,
     validate_bundles,
 )
@@ -342,13 +344,18 @@ def test_synthetic_validation_is_in_memory_and_content_free() -> None:
         controller_digest=running_controller_digest(),
         validation=validation,
         request=request,
+        index_digests={
+            "development": stage_index_digest(build_stage_index("development", development)),
+            "holdout": stage_index_digest(build_stage_index("holdout", holdout)),
+        },
     )
     validate_public_manifest(manifest)
     encoded = json.dumps(manifest)
     assert "synthetic-placeholder" not in encoded
     assert "ph00devplaceholder" not in encoded
     assert "ph00holdplaceholder" not in encoded
-    assert manifest["schema_version"] == "1.1.0"
+    assert manifest["schema_version"] == "1.2.0"
+    assert manifest["private_layout"] == "stage-separated"
     assert manifest["request_version"] == REQUEST_VERSION
     assert manifest["replay_scope"] == "selected-custody-location"
     assert manifest["development_task_count"] == 20
@@ -412,7 +419,10 @@ def test_successful_import_binds_counts_modes_and_digests(fixture: Fixture) -> N
     validate_public_manifest(manifest)
     public = (fixture.output / "manifest.json").read_text(encoding="utf-8")
     receipt_text = (fixture.output / "receipt.json").read_text(encoding="utf-8")
-    index = json.loads((fixture.output / "private" / "index.json").read_text(encoding="utf-8"))
+    assert sorted(p.name for p in (fixture.output / "private").iterdir()) == [
+        "development",
+        "holdout",
+    ]
     dev_ids = set()
     hold_ids = set()
     dev_digests = set()
@@ -421,15 +431,24 @@ def test_successful_import_binds_counts_modes_and_digests(fixture: Fixture) -> N
         ("development", dev_ids, dev_digests),
         ("holdout", hold_ids, hold_digests),
     ):
-        rows = index[stage]
+        stage_dir = fixture.output / "private" / stage
+        assert sorted(p.name for p in stage_dir.iterdir()) == ["blobs", "index.json"]
+        index = json.loads((stage_dir / "index.json").read_text(encoding="utf-8"))
+        assert index["stage"] == stage
+        assert index["private_layout"] == "stage-separated"
+        assert stage_index_digest(index) == manifest[f"{stage}_index_digest"]
+        rows = index["rows"]
         assert len(rows) == 20
+        assert sorted(p.name for p in (stage_dir / "blobs").iterdir()) == sorted(
+            row["content_digest"].removeprefix("sha256:") for row in rows
+        )
         lines = []
         for row in rows:
             task_id = row["task_id"]
             digest = row["content_digest"]
             id_set.add(task_id)
             digest_set.add(digest)
-            blob = fixture.output / "private" / "blobs" / digest.removeprefix("sha256:")
+            blob = stage_dir / "blobs" / digest.removeprefix("sha256:")
             payload = blob.read_bytes()
             assert sha256_digest(payload) == digest
             assert task_id not in public
@@ -794,9 +813,10 @@ def test_interrupted_writes_leave_no_manifest(fixture: Fixture) -> None:
 
 def test_tamper_after_finalization_is_rejected(fixture: Fixture) -> None:
     receipt = attempt(fixture)
-    index = json.loads((fixture.output / "private" / "index.json").read_text(encoding="utf-8"))
-    digest = index["development"][0]["content_digest"]
-    blob = fixture.output / "private" / "blobs" / digest.removeprefix("sha256:")
+    index_path = fixture.output / "private" / "development" / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    digest = index["rows"][0]["content_digest"]
+    blob = fixture.output / "private" / "development" / "blobs" / digest.removeprefix("sha256:")
     blob.write_bytes(b"tampered-artificial\n")
     os.chmod(blob, 0o600)
     with pytest.raises(CustodyError) as blob_error:

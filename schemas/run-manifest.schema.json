@@ -386,8 +386,27 @@
         "version",
         "profile",
         "concurrency",
-        "tasks_per_repetition",
-        "catalog_digest"
+        "tasks_per_repetition"
+      ],
+      "allOf": [
+        {
+          "$comment": "Decision D-0024: catalog and sealed provenance are mutually exclusive. A sealed run (task_source.kind == sealed) records the executed stage aggregate only under task_source.digest and must not carry catalog_digest. Every other manifest (task_source absent or kind == catalog) is a catalog run and must carry catalog_digest with its original public-catalog meaning. Historical catalog manifests, which predate task_source, stay valid unchanged.",
+          "if": {
+            "required": ["task_source"],
+            "properties": {
+              "task_source": {
+                "required": ["kind"],
+                "properties": { "kind": { "const": "sealed" } }
+              }
+            }
+          },
+          "then": {
+            "not": { "required": ["catalog_digest"] }
+          },
+          "else": {
+            "required": ["catalog_digest"]
+          }
+        }
       ],
       "properties": {
         "name": {
@@ -406,7 +425,67 @@
         "catalog_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "Content-address of the exact scenario catalog used (canonical JSON, SHA-256). This is a WORKLOAD digest \u2014 it is never a model artifact hash."
+          "description": "Content-address of the exact public scenario catalog used (canonical JSON, SHA-256). This is a WORKLOAD digest \u2014 it is never a model artifact hash. Present only for catalog runs; a sealed run (task_source.kind == sealed) must omit it and records its stage aggregate under task_source.digest instead."
+        },
+        "task_source": {
+          "type": "object",
+          "description": "Explicit task-source discriminator (decision D-0024). kind == catalog: tasks came from the public scenario catalog identified by catalog_digest and no sealed provenance is present. kind == sealed: every task came from one D-0023 custody stage; digest is that stage's aggregate (content-address of its task identifiers and content digests) and sealed_set is the content-free binding frozen in the qualification config. Absent in manifests that predate the discriminator (catalog runs). It never carries task bodies, identifiers, accepted answers, or filesystem paths.",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["catalog", "sealed"] }
+          },
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "required": ["kind"],
+              "properties": {
+                "kind": { "const": "catalog" }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": ["kind", "digest", "sealed_set"],
+              "properties": {
+                "kind": { "const": "sealed" },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$",
+                  "description": "Aggregate digest of the executed custody stage. Equals sealed_set.stage_aggregate_digest."
+                },
+                "sealed_set": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "Content-free binding of the executed stage, identical to the sealed_set section of the frozen qualification config.",
+                  "required": [
+                    "schema_version",
+                    "custody_manifest_sha256",
+                    "custody_controller_digest",
+                    "import_request_digest",
+                    "set_identity",
+                    "stage",
+                    "stage_aggregate_digest",
+                    "task_count",
+                    "payload_schema_version"
+                  ],
+                  "properties": {
+                    "schema_version": { "type": "string", "const": "1.0.0" },
+                    "custody_manifest_sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$",
+                      "description": "SHA-256 (hex) of the custody manifest.json file bytes."
+                    },
+                    "custody_controller_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+                    "import_request_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+                    "set_identity": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+                    "stage": { "type": "string", "enum": ["development", "holdout"] },
+                    "stage_aggregate_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+                    "task_count": { "type": "integer", "const": 20 },
+                    "payload_schema_version": { "type": "string", "const": "1.0.0" }
+                  }
+                }
+              }
+            }
+          ]
         },
         "profile": {
           "type": "string",

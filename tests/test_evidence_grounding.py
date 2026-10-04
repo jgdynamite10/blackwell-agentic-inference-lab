@@ -29,7 +29,6 @@ from blackwell_lab.cloud.qualification import (
     CANDIDATE_WORKLOAD_VERSIONS,
     DEVELOPMENT_QUALITY_FLOOR,
     DEVELOPMENT_TASKS,
-    DEVELOPMENT_TEMPLATE_IDS,
     FREEZE_TASKS,
     HOLDOUT_QUALITY_FLOOR,
     HOLDOUT_TASKS,
@@ -1402,15 +1401,27 @@ class TestBackwardCompatibility:
 # --- P2 candidate identity, configuration, CLI, manifest ---------------------------
 
 
-def qualification_config_dict(candidate_id="P2", stage="development"):
+def qualification_config_dict(candidate_id="P2", stage="development", sealed_set=None):
+    from sealed_fixtures import placeholder_binding
+
     from blackwell_lab.cloud.mvl import (
         FROZEN_MODEL_ARTIFACT,
         FROZEN_MODEL_ARTIFACT_HASH,
         FROZEN_MODEL_REVISION,
     )
+    from blackwell_lab.cloud.sealed_binding import requires_sealed_set
 
     spec = stage_spec(stage)
+    # P2 development/holdout must bind a sealed custody stage (D-0024). A
+    # shape-valid artificial binding satisfies config validation; CLI tests
+    # that execute pass a binding derived from a synthetic custody fixture.
+    sealed_section = (
+        {"sealed_set": sealed_set or placeholder_binding(stage)}
+        if requires_sealed_set(candidate_id, stage)
+        else {}
+    )
     return {
+        **sealed_section,
         "workflow": "qualify-agent",
         "candidate_id": candidate_id,
         "workload_version": candidate_workload_version(candidate_id),
@@ -1462,9 +1473,9 @@ def _config_sha256(path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _qual_argv(config_path, *, candidate="P2", stage="development", approve=None):
+def _qual_argv(config_path, *, candidate="P2", stage="development", approve=None, custody_dir=None):
     phrase = approve or approval_phrase(RUN_TAG, "qual-a", candidate, _config_sha256(config_path))
-    return [
+    argv = [
         "qualify-agent",
         "--run-tag",
         RUN_TAG,
@@ -1479,6 +1490,9 @@ def _qual_argv(config_path, *, candidate="P2", stage="development", approve=None
         "--approve",
         phrase,
     ]
+    if custody_dir is not None:
+        argv += ["--custody-dir", str(custody_dir)]
+    return argv
 
 
 def _ready_ledger():
@@ -1502,10 +1516,30 @@ def _ready_ledger():
     }
 
 
-def _observed():
+def _observed(*, full_host: bool = False):
     from blackwell_lab.cloud.mvl import FROZEN_MODEL_ARTIFACT_HASH
     from blackwell_lab.cloud.provenance import ObservedProvenance
 
+    if full_host:
+        # A complete gpu-mode host block so the real run_real_cell can
+        # assemble a schema-valid manifest offline.
+        return ObservedProvenance(
+            container_digest=(
+                "docker.io/vllm/vllm-openai:v0.27.1@"
+                "sha256:c2f3b1b964e47809b722b5e75b61b1e7b39a50f70388cf2bf2418f16a9f31da2"
+            ),
+            model_artifact_hash=FROZEN_MODEL_ARTIFACT_HASH,
+            engine_version="0.27.1",
+            instance={
+                "provider_id": "42",
+                "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
+                "region": "us-sea",
+                "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
+            },
+            host_facts=dict(_HOST),
+            gpu_facts={},
+            container_cuda_runtime_version="13.0",
+        )
     return ObservedProvenance(
         container_digest=(
             "docker.io/vllm/vllm-openai:v0.27.1@"
@@ -1526,6 +1560,30 @@ def _observed():
         gpu_facts={"gpu_model": "RTX PRO 6000 Blackwell", "driver_version": "580"},
         container_cuda_runtime_version="13.0",
     )
+
+
+def _install_offline_endpoint(monkeypatch):
+    """Swap the production client and GPU sampler for offline stand-ins.
+
+    The CLI still constructs ``OpenAICompatibleClient`` (a subclass), but
+    every turn is answered by the deterministic mock with usage counts, and
+    telemetry comes from the fake sampler, so the real ``run_real_cell``
+    executes end to end with no network.
+    """
+    from blackwell_lab.cloud import telemetry
+    from blackwell_lab.workload import openai_client
+
+    class OfflineClient(OpenAICompatibleClient):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._mock = _UsageMockClient()
+
+        def stream_turn(self, messages, settings, *, deadline=None, clock=SYSTEM_CLOCK):
+            yield from self._mock.stream_turn(messages, settings, deadline=deadline, clock=clock)
+
+    monkeypatch.setattr(openai_client, "OpenAICompatibleClient", OfflineClient)
+    monkeypatch.setattr(telemetry, "GpuSamplerThread", _FakeSampler)
+    return OfflineClient
 
 
 class _FakeRecord:
@@ -1652,7 +1710,10 @@ class TestCandidateP2:
             candidate_controller("P1")
 
     def test_qualify_agent_binds_p2_before_inference(self, tmp_path, monkeypatch, capsys):
+        from sealed_fixtures import binding_for, write_synthetic_custody
+
         from blackwell_lab.cloud import provenance, realbench
+        from blackwell_lab.cloud.sealed_binding import SealedSetBinding, SealedStageTasks
 
         monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
         monkeypatch.setattr(cli, "_git_head", lambda: COMMIT)
@@ -1661,22 +1722,32 @@ class TestCandidateP2:
         monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
         paths = lifecycle.lifecycle_paths(external, RUN_TAG)
         lifecycle.write_private_json(paths.ledger_path, _ready_ledger())
+        custody_root = tmp_path / "custody"
+        manifest = write_synthetic_custody(custody_root, commit=COMMIT)
+        binding = binding_for(custody_root, manifest, "development")
         calls: list[object] = []
         clients: list[object] = []
+        sealed_seen: list[object] = []
+        real_run = realbench.run_real_cell
 
-        def fake_run(spec, client, *_args, **_kwargs):
+        def recording_run(spec, client, **kwargs):
             calls.append(spec)
             clients.append(client)
-            return [_FakeRecord(_stage_outcomes("development"))]
+            sealed_seen.append(kwargs.get("sealed_tasks"))
+            return real_run(spec, client, **kwargs)
 
-        monkeypatch.setattr(provenance, "verify_live_provenance", lambda **kwargs: _observed())
-        monkeypatch.setattr(realbench, "run_real_cell", fake_run)
-        config = qualification_config_dict("P2", "development")
+        monkeypatch.setattr(
+            provenance, "verify_live_provenance", lambda **kwargs: _observed(full_host=True)
+        )
+        monkeypatch.setattr(realbench, "run_real_cell", recording_run)
+        _install_offline_endpoint(monkeypatch)
+        config = qualification_config_dict("P2", "development", sealed_set=binding)
         path = tmp_path / "p2.json"
         path.write_text(json.dumps(config), encoding="utf-8")
         phrase = approval_phrase(RUN_TAG, "qual-a", "P2", _config_sha256(path))
         assert "candidate P2" in phrase
-        assert main(_qual_argv(path, approve=phrase)) == 0
+        assert main(_qual_argv(path, approve=phrase, custody_dir=custody_root)) == 0
+        assert len(calls) == 1
         spec = calls[0]
         assert isinstance(spec, RealRunSpec)
         assert spec.controller == "evidence-grounding-v1"
@@ -1689,22 +1760,28 @@ class TestCandidateP2:
         assert spec.run_label == "qual-a-p2-development"
         assert spec.tasks_per_repetition == 20
         assert spec.warmup_passes == 0
-        assert spec.template_ids == DEVELOPMENT_TEMPLATE_IDS
+        assert spec.template_ids is None
+        assert spec.sealed_set == SealedSetBinding.from_config(binding, stage="development")
+        assert isinstance(sealed_seen[0], SealedStageTasks)
+        assert len(sealed_seen[0].tasks) == 20
         assert isinstance(clients[0], OpenAICompatibleClient)
         report = json.loads(capsys.readouterr().out)
         assert report["candidate_id"] == "P2"
         assert report["workload_version"] == "2.5.0"
         assert report["controller"] == "evidence-grounding-v1"
         assert report["candidate_identity_sha256"] == candidate_identity_digest("P2")
+        assert report["sealed_set"] == binding
         on_disk = json.loads(
             (external / "qualification-runs" / "qual-a-p2-development-receipt.json").read_text(
                 encoding="utf-8"
             )
         )
         assert on_disk["controller"] == "evidence-grounding-v1"
+        assert on_disk["sealed_set"] == binding
         blob = json.dumps(on_disk)
-        for forbidden in ("127.0.0.1", "/opt/models/", "reasoning", "obs-"):
+        for forbidden in ("127.0.0.1", "/opt/models/", "reasoning", "obs-", str(custody_root)):
             assert forbidden not in blob
+        assert "syn-dev-task" not in blob
         # Running the bound settings reproduces the 2.5.0 contract end to end.
         scenario = catalog()[SCENARIO_ID]
         recording = ScriptedClient([health(), search("audit"), cite_all])
