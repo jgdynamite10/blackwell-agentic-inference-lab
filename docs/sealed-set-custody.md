@@ -313,12 +313,10 @@ and fail-closed rules are recorded as D-0024 in the
 ## Materialization of historical source entries (D-0025)
 
 Historical external source entries carry a `task_id` and a scenario
-document but no D-0024 `instance` object. The offline materializer adds
-exactly the payload envelope and the instance object that the production
-generator `blackwell_lab.workload.sampling.generate_task_instances`
-produces, and writes ordinary bundle directories for the unchanged custody
-tool above. It is not a custody operation and is not part of the
-commit-bound controller digest.
+document but no D-0024 `instance` object. The offline materializer
+produces the frozen qualification schedule as D-0024 payloads and writes
+ordinary bundle directories for the unchanged custody tool above. It is not
+a custody operation and is not part of the commit-bound controller digest.
 
 ```bash
 python -m blackwell_lab.cloud.sealed_materialize approval-phrase
@@ -336,28 +334,70 @@ python -m blackwell_lab.cloud.sealed_materialize materialize-bundles \
   --holdout /absolute/external/holdout-source \
   --output /absolute/external/new-empty-path \
   --approve 'I approve sealed qualification-task materialization using request sha256:<64-lowercase-hex>'
+python -m blackwell_lab.cloud.sealed_materialize prepare-import \
+  --repo /absolute/canonical/checkout \
+  --commit <40-lowercase-hex> \
+  --development /absolute/external/new-empty-path/development \
+  --holdout /absolute/external/new-empty-path/holdout
+python -m blackwell_lab.cloud.sealed_materialize import-materialized \
+  --repo /absolute/canonical/checkout \
+  --commit <40-lowercase-hex> \
+  --controller-digest sha256:<64-lowercase-hex> \
+  --request-digest sha256:<64-lowercase-hex> \
+  --development /absolute/external/new-empty-path/development \
+  --holdout /absolute/external/new-empty-path/holdout \
+  --output /absolute/external/new-custody-path \
+  --approve 'I approve sealed qualification-set import using request sha256:<64-lowercase-hex>'
 ```
 
-- Seed: `qualification.MEASURED_REPETITION_SEED` (`FROZEN_SEED + 1`), the
-  seed the runner hands the generator for the single measured repetition.
-- Occurrence: the zero-based count of earlier same-scenario tasks in
-  task-identifier order, the D-0024 execution order
-  (`task-id-sorted-per-template-counter`).
-- Preserved: task identifiers, scenario content, stage membership,
-  task-identifier ordering, per-scenario distribution.
-- Source shape: exactly `{"task_id": ..., "scenario": {...}}` per file,
-  filename equal to `task_id`; anything else is `source-shape` or
-  `source-invalid`.
+- Schedule: exactly one production call per stage,
+  `generate_task_instances(stage_spec(stage)["template_ids"],
+  stage_spec(stage)["tasks"], MEASURED_REPETITION_SEED)`, the call the
+  qualification runner makes for the measured repetition. Its twenty-element
+  round-robin result is the only execution schedule; templates are never
+  generated separately and occurrence is never derived from source ids.
+- Seed: `qualification.MEASURED_REPETITION_SEED` = `20260907`
+  (`FROZEN_SEED + 1`), pinned as a schema constant.
+- Output ids: the fixed values `sealed-development-0000` …
+  `sealed-development-0019` and `sealed-holdout-0000` … `sealed-holdout-0019`;
+  the suffix is the slot's zero-based position in the generator sequence, so
+  task-id order equals materializer output order, custody index order,
+  sealed runtime order, and the P1 catalog measured order. Historical
+  source ids are not preserved as executable ids and influence nothing but
+  the request's source aggregate.
+- Frozen source gate (per stage, all required before a request exists):
+  exactly twenty entries of shape `{"task_id": ..., "scenario": {...}}`
+  with filename equal to `task_id` (`source-shape`); unique ids
+  (`duplicate-id`); scenario ids drawn only from the stage's frozen template
+  list (`scenario-set-mismatch`); every scenario document, repeated copies
+  included, canonically deep-equal to `catalog()[scenario_id]`
+  (`scenario-mismatch`); per-template multiset equal to the generator
+  schedule, 4/4/3/3/3/3 for development and 5/5/5/5 for holdout
+  (`distribution-mismatch`). Any other distribution is rejected; nothing is
+  preserved or rebalanced.
+- Payloads: encoded only by `encode_sealed_task` from the slot's instance
+  surface, the catalog scenario, and the fixed id; decoded with
+  `decode_sealed_task`; byte-identical on re-encode; and the ordered
+  `(scenario_id, instance_seed, tracking_id, reported_minute)` tuples must
+  equal the one-call generator result exactly.
 - Output: `<output>/development/`, `<output>/holdout/` (twenty `0600`
-  files each, filename = task id) and a content-free
-  `<output>/materialization.json`. The output path must not exist.
+  files each, filename = fixed task id) and a content-free
+  `<output>/materialization.json`. The output path must not exist. Written
+  bundles are re-read with the production bundle loader and compared with
+  the schedule and the request before the record is written.
 - Approval binds the request digest over commit, implementation digest,
-  generator, seed, occurrence rule, source and predicted output
-  aggregates, counts, set identities and distribution summaries. The
-  D-0023 import phrase does not authorize materialization.
-- The materialized bundles then go through the unchanged `prepare` and
-  `import-bundles` flow into a new custody directory; the P2 adapter is
-  unchanged.
+  generator, seed, schedule rule, task-id rule, catalog digest, frozen
+  template lists, source and predicted output aggregates, counts, set
+  identities and frozen distribution summaries. The D-0023 import phrase
+  does not authorize materialization and vice versa.
+- Import: `prepare-import` and `import-materialized` load the materialized
+  directories with the production bundle loader, order the tasks by their
+  fixed ids, require exactly the fixed id set of each stage
+  (`materialized-ids`), and hand them to the unchanged `prepare_import_request`
+  and `import_authorized_set`. The predicted output set identity in the
+  materialization request equals the set identity the importer records; no
+  step depends on directory iteration or file creation order. The P2 adapter
+  then loads the stage in task-id order, which is the generator order.
 
 Decision record: D-0025 in the [decision log](decision-log.md).
 
