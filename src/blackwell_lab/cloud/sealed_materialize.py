@@ -1,39 +1,41 @@
 """Offline materialization of sealed qualification tasks (decision D-0025).
 
 Historical external source entries carry a ``task_id`` and a scenario
-document but no D-0024 ``instance`` object. This module adds exactly the
-D-0024 payload envelope and the instance object that the **existing
-production generator** produces, and nothing else. It is invoked as
-``python -m blackwell_lab.cloud.sealed_materialize``.
+document but no D-0024 ``instance`` object. This module turns an exact
+frozen source set into the frozen ordered qualification schedule that the
+**existing production generator** defines, and nothing else. It is invoked
+as ``python -m blackwell_lab.cloud.sealed_materialize``.
 
 Reused production surfaces, unchanged:
 
-* :func:`blackwell_lab.workload.sampling.generate_task_instances` is the
-  only source of ``instance_seed``, ``tracking_id`` and ``reported_minute``.
-  No second derivation, placeholder, timestamp, random value, or
-  task-body-derived value exists here.
-* The seed is :data:`blackwell_lab.cloud.qualification.MEASURED_REPETITION_SEED`,
-  the seed the qualification runner hands the generator for the single
-  measured repetition of a development or holdout stage
-  (``generation.seed + repetition_index`` with ``repetition_index == 1``).
-* The occurrence of a task is the production convention applied to the
-  frozen stage ordering: tasks execute in task-identifier order
-  (D-0024), and a task's occurrence is the zero-based count of earlier
-  tasks in that order that share its ``scenario_id`` — exactly the
-  per-template counter ``generate_task_instances`` keeps over a schedule.
-* :func:`blackwell_lab.cloud.sealed_payload.decode_sealed_task` and
-  :func:`blackwell_lab.cloud.sealed_payload.encode_sealed_task` are the
-  payload contract. Every materialized payload must decode strictly and
-  re-encode byte for byte.
+* The schedule of a stage is **one call** to
+  :func:`blackwell_lab.workload.sampling.generate_task_instances` with
+  ``stage_spec(stage)["template_ids"]``, ``stage_spec(stage)["tasks"]`` and
+  :data:`blackwell_lab.cloud.qualification.MEASURED_REPETITION_SEED` — the
+  same call, arguments and seed the qualification runner uses for the single
+  measured repetition of a catalog cell. Its 20-element return value is the
+  sole authoritative execution order. Nothing here derives occurrences, and
+  no second generator, placeholder, timestamp, random value, or
+  task-body-derived value exists.
+* The scenario of every slot is the public catalog scenario
+  ``catalog()[instance.template_id]``. Every source entry must be
+  deep-equal to that catalog scenario; the source set must have exactly
+  the frozen stage templates and the frozen per-template distribution.
+* :func:`blackwell_lab.cloud.sealed_payload.encode_sealed_task` and
+  :func:`blackwell_lab.cloud.sealed_payload.decode_sealed_task` are the
+  payload contract. Every payload is encoded only through the encoder, must
+  decode strictly and must re-encode byte for byte.
 
-Task identifiers, scenario content, stage membership, task-identifier
-ordering and the per-scenario distribution are preserved. Output bundles
-are ordinary D-0023 bundle directories (filename = task id, ``0600``
-files in a ``0700`` directory) that the unchanged custody tool can later
-``prepare`` and ``import-bundles``.
+Output task identifiers are fixed: ``sealed-<stage>-<slot:04d>`` where
+``slot`` is the zero-based position in the generator sequence. Their
+lexicographic order equals materializer output order, custody index order,
+sealed runtime order and the catalog cell's measured order. Historical
+source identifiers are bound through the source aggregate and must be
+valid and unique, but they never control occurrence, output identity,
+prompt surface or runtime order.
 
-Nothing here prints task bodies, task identifiers, private paths, blob
-names, scenario identifiers, or accepted answers. Failures are a
+Nothing here prints task bodies, source identifiers, private paths, blob
+names or accepted answers. Failures are a
 :class:`~blackwell_lab.sealed_sets.model.CustodyError` with a short reason
 code. SHA-256 digests are integrity checks, not encryption and not a seal.
 """
@@ -55,18 +57,22 @@ from typing import Any
 import jsonschema
 
 from blackwell_lab.cloud import sealed_payload
-from blackwell_lab.cloud.qualification import MEASURED_REPETITION_SEED
+from blackwell_lab.cloud.qualification import MEASURED_REPETITION_SEED, stage_spec
 from blackwell_lab.cloud.sealed_payload import (
     PAYLOAD_KIND,
     PAYLOAD_SCHEMA_VERSION,
     SealedPayloadError,
     decode_sealed_task,
     encode_sealed_task,
+    scenario_document,
 )
 from blackwell_lab.paths import repository_root
 from blackwell_lab.sealed_sets import custody
 from blackwell_lab.sealed_sets.custody import (
+    CustodyReceipt,
+    import_authorized_set,
     load_bundle_directory,
+    prepare_import_request,
     require_external_directory,
     verify_clean_checkout,
 )
@@ -87,7 +93,8 @@ from blackwell_lab.sealed_sets.model import (
     validate_bundles,
 )
 from blackwell_lab.workload import sampling
-from blackwell_lab.workload.sampling import generate_task_instances
+from blackwell_lab.workload.sampling import TaskInstance, generate_task_instances
+from blackwell_lab.workload.scenarios import Scenario, catalog, catalog_digest
 
 MATERIALIZATION_VERSION = "1.0.0"
 MATERIALIZATION_KIND = "sealed-qualification-task-materialization"
@@ -98,8 +105,13 @@ SEED_RULE = (
     "blackwell_lab.cloud.qualification.MEASURED_REPETITION_SEED: the frozen "
     "generation seed plus measured repetition index 1 (one repetition, no warm-up)"
 )
-OCCURRENCE_RULE = "task-id-sorted-per-template-counter"
-ORDERING = "task-id-sorted"
+#: One generator call per stage with the frozen stage template ids, the
+#: frozen task count and the measured-repetition seed; the returned
+#: sequence is the schedule.
+SCHEDULE_RULE = "one-call-round-robin-generator-schedule"
+TASK_ID_RULE = "sealed-<stage>-<slot:04d>"
+SOURCE_ORDERING = "task-id-sorted"
+OUTPUT_ORDERING = "generator-schedule"
 APPROVAL_TEMPLATE = (
     "I approve sealed qualification-task materialization using request sha256:{request_digest}"
 )
@@ -231,7 +243,50 @@ def require_bound_implementation(repo: Path, commit: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Source entries and stage materialization
+# Frozen schedule and fixed identifiers
+# --------------------------------------------------------------------------
+
+
+def frozen_schedule(stage: str) -> tuple[TaskInstance, ...]:
+    """The stage's execution schedule: exactly one production generator call.
+
+    Identical to the schedule the qualification runner generates for the
+    measured repetition of a catalog cell of this stage.
+    """
+    if stage not in STAGES:
+        raise CustodyError("stage-separation")
+    spec = stage_spec(stage)
+    schedule = generate_task_instances(
+        spec["template_ids"],
+        spec["tasks"],
+        MEASURED_REPETITION_SEED,
+    )
+    if len(schedule) != TASKS_PER_STAGE:
+        raise CustodyError("generator-mismatch")
+    return tuple(schedule)
+
+
+def fixed_task_id(stage: str, slot: int) -> str:
+    """``sealed-<stage>-<slot:04d>``: the custody id of one generator slot."""
+    if stage not in STAGES or not isinstance(slot, int) or not 0 <= slot < TASKS_PER_STAGE:
+        raise CustodyError("generator-mismatch")
+    return f"sealed-{stage}-{slot:04d}"
+
+
+def fixed_task_ids(stage: str) -> tuple[str, ...]:
+    return tuple(fixed_task_id(stage, slot) for slot in range(TASKS_PER_STAGE))
+
+
+def schedule_tuples(instances: Sequence[TaskInstance]) -> tuple[tuple[str, int, str, int], ...]:
+    """Ordered ``(scenario_id, instance_seed, tracking_id, reported_minute)`` tuples."""
+    return tuple(
+        (item.template_id, item.instance_seed, item.tracking_id, item.reported_minute)
+        for item in instances
+    )
+
+
+# --------------------------------------------------------------------------
+# Source entries and the frozen source gate
 # --------------------------------------------------------------------------
 
 
@@ -246,11 +301,19 @@ class SourceEntry:
 
 @dataclass(frozen=True)
 class MaterializedStage:
-    """One materialized stage in task-identifier order. Private; never printed."""
+    """One materialized stage in generator-schedule order. Private; never printed."""
 
     stage: str
     tasks: tuple[OpaqueTask, ...]
-    distribution: dict[str, int]
+    schedule: tuple[TaskInstance, ...]
+
+    @property
+    def task_ids(self) -> tuple[str, ...]:
+        return tuple(task.task_id for task in self.tasks)
+
+    @property
+    def distribution(self) -> dict[str, int]:
+        return dict(Counter(item.template_id for item in self.schedule))
 
 
 def _reject_constant(_name: str) -> None:
@@ -295,88 +358,101 @@ def parse_source_entry(task: OpaqueTask) -> SourceEntry:
     return SourceEntry(task_id=task.task_id, scenario_id=scenario_id, scenario=scenario)
 
 
-def frozen_stage_order(entries: Sequence[SourceEntry]) -> tuple[SourceEntry, ...]:
-    """The frozen stage ordering: ascending task identifier (D-0024 execution order)."""
-    ordered = tuple(sorted(entries, key=lambda entry: entry.task_id))
-    if len({entry.task_id for entry in ordered}) != len(ordered):
-        raise CustodyError("duplicate-id")
-    return ordered
+def canonical_scenario_bytes(scenario: Scenario | Mapping[str, Any]) -> bytes:
+    """Canonical JSON of a scenario document (tuples and lists compare equal)."""
+    document = scenario_document(scenario) if isinstance(scenario, Scenario) else dict(scenario)
+    return canonical_bytes(document)
 
 
-def occurrences(entries: Sequence[SourceEntry]) -> tuple[int, ...]:
-    """Zero-based per-scenario occurrence of each entry, in the supplied order.
+def require_frozen_sources(
+    stage: str,
+    sources: Sequence[OpaqueTask],
+    schedule: Sequence[TaskInstance] | None = None,
+) -> tuple[SourceEntry, ...]:
+    """The exact frozen source gate for one stage.
 
-    This is the counter :func:`generate_task_instances` keeps over a
-    schedule, applied to the frozen stage ordering.
+    Requires exactly twenty entries with valid unique ids, every scenario
+    deep-equal to ``catalog()[scenario_id]``, scenario ids drawn only from
+    the frozen stage templates, and a per-template distribution equal to the
+    one-call generator schedule. Any other source set is refused.
     """
-    seen: Counter[str] = Counter()
-    result: list[int] = []
-    for entry in entries:
-        result.append(seen[entry.scenario_id])
-        seen[entry.scenario_id] += 1
-    return tuple(result)
-
-
-def materialize_stage(
-    stage: str, sources: Sequence[OpaqueTask], *, seed: int = MEASURED_REPETITION_SEED
-) -> MaterializedStage:
-    """Add the D-0024 envelope and generator-produced instance to each source entry."""
-    if stage not in STAGES:
+    if schedule is None:
+        schedule = frozen_schedule(stage)
+    elif stage not in STAGES:
         raise CustodyError("stage-separation")
     if len(sources) != TASKS_PER_STAGE:
         raise CustodyError("task-count")
-    ordered = frozen_stage_order([parse_source_entry(task) for task in sources])
-    distribution = Counter(entry.scenario_id for entry in ordered)
-    # One production generator call per scenario yields exactly the
-    # instances for occurrences 0..count-1 of that scenario under ``seed``.
-    schedules = {
-        scenario_id: generate_task_instances((scenario_id,), count, seed)
-        for scenario_id, count in distribution.items()
-    }
+    entries = tuple(parse_source_entry(task) for task in sources)
+    seen: set[str] = set()
+    for entry in entries:
+        if entry.task_id in seen:
+            raise CustodyError("duplicate-id")
+        seen.add(entry.task_id)
+    expected_templates = set(stage_spec(stage)["template_ids"])
+    scenarios = catalog()
+    for entry in entries:
+        if entry.scenario_id not in expected_templates or entry.scenario_id not in scenarios:
+            raise CustodyError("scenario-set-mismatch")
+        if canonical_scenario_bytes(entry.scenario) != canonical_scenario_bytes(
+            scenarios[entry.scenario_id]
+        ):
+            raise CustodyError("scenario-mismatch")
+    observed = Counter(entry.scenario_id for entry in entries)
+    if observed != Counter(item.template_id for item in schedule):
+        raise CustodyError("distribution-mismatch")
+    return entries
+
+
+def materialize_stage(stage: str, sources: Sequence[OpaqueTask]) -> MaterializedStage:
+    """Produce the stage's frozen schedule as D-0024 payloads with fixed ids.
+
+    The source set only has to pass :func:`require_frozen_sources`; it does
+    not influence the schedule, the surfaces, the ids or the order.
+    """
+    schedule = frozen_schedule(stage)
+    require_frozen_sources(stage, sources, schedule)
+    scenarios = catalog()
     tasks: list[OpaqueTask] = []
-    for entry, occurrence in zip(ordered, occurrences(ordered), strict=True):
-        instance = schedules[entry.scenario_id][occurrence]
-        if instance.template_id != entry.scenario_id:
-            raise CustodyError("generator-mismatch")
-        if instance.instance_id != f"{entry.scenario_id}#{occurrence:04d}":
-            raise CustodyError("generator-mismatch")
-        document = {
-            "payload_schema_version": PAYLOAD_SCHEMA_VERSION,
-            "kind": PAYLOAD_KIND,
-            "task_id": entry.task_id,
-            "instance": {
-                "instance_seed": instance.instance_seed,
-                "tracking_id": instance.tracking_id,
-                "reported_minute": instance.reported_minute,
-            },
-            "scenario": entry.scenario,
-        }
-        payload = canonical_bytes(document)
+    for slot, instance in enumerate(schedule):
+        task_id = fixed_task_id(stage, slot)
+        scenario = scenarios[instance.template_id]
+        payload = encode_sealed_task(
+            task_id=task_id,
+            scenario=scenario,
+            instance_seed=instance.instance_seed,
+            tracking_id=instance.tracking_id,
+            reported_minute=instance.reported_minute,
+        )
         try:
-            decoded = decode_sealed_task(payload, expected_task_id=entry.task_id)
+            decoded = decode_sealed_task(payload, expected_task_id=task_id)
         except SealedPayloadError:
-            raise CustodyError("source-invalid") from None
+            raise CustodyError("generator-mismatch") from None
         re_encoded = encode_sealed_task(
-            task_id=entry.task_id,
+            task_id=task_id,
             scenario=decoded.scenario,
             instance_seed=decoded.instance.instance_seed,
             tracking_id=decoded.instance.tracking_id,
             reported_minute=decoded.instance.reported_minute,
         )
-        if re_encoded != payload or decoded.instance.template_id != entry.scenario_id:
-            raise CustodyError("source-invalid")
-        if (
-            decoded.instance.instance_seed,
-            decoded.instance.tracking_id,
-            decoded.instance.reported_minute,
-        ) != (instance.instance_seed, instance.tracking_id, instance.reported_minute):
+        if re_encoded != payload:
             raise CustodyError("generator-mismatch")
-        tasks.append(OpaqueTask(entry.task_id, payload))
-    return MaterializedStage(stage=stage, tasks=tuple(tasks), distribution=dict(distribution))
+        if canonical_scenario_bytes(decoded.scenario) != canonical_scenario_bytes(scenario):
+            raise CustodyError("generator-mismatch")
+        if schedule_tuples([decoded.instance]) != schedule_tuples([instance]):
+            raise CustodyError("generator-mismatch")
+        if decoded.instance.instance_id != task_id:
+            raise CustodyError("generator-mismatch")
+        tasks.append(OpaqueTask(task_id, payload))
+    materialized = MaterializedStage(stage=stage, tasks=tuple(tasks), schedule=schedule)
+    if materialized.task_ids != fixed_task_ids(stage):
+        raise CustodyError("generator-mismatch")
+    if list(materialized.task_ids) != sorted(materialized.task_ids):
+        raise CustodyError("generator-mismatch")
+    return materialized
 
 
 def distribution_summary(distribution: Mapping[str, int]) -> dict[str, Any]:
-    """Content-free distribution binding: sizes and a digest, no scenario names."""
+    """Frozen per-template distribution: template ids are public catalog ids."""
     ordered = {key: int(distribution[key]) for key in sorted(distribution)}
     return {
         "template_count": len(ordered),
@@ -385,7 +461,7 @@ def distribution_summary(distribution: Mapping[str, int]) -> dict[str, Any]:
     }
 
 
-def _stage_summary(development: Sequence[OpaqueTask], holdout: Sequence[OpaqueTask]) -> dict:
+def _source_summary(development: Sequence[OpaqueTask], holdout: Sequence[OpaqueTask]) -> dict:
     validation = validate_bundles(development, holdout)
     sorted_dev = sorted(development, key=lambda task: task.task_id)
     sorted_hold = sorted(holdout, key=lambda task: task.task_id)
@@ -395,7 +471,21 @@ def _stage_summary(development: Sequence[OpaqueTask], holdout: Sequence[OpaqueTa
         "development_aggregate_digest": validation.development.aggregate_digest,
         "holdout_aggregate_digest": validation.holdout.aggregate_digest,
         "set_identity": set_identity_for(sorted_dev, sorted_hold),
-        "ordering": ORDERING,
+        "ordering": SOURCE_ORDERING,
+    }
+
+
+def _output_summary(dev: MaterializedStage, hold: MaterializedStage) -> dict:
+    validation = validate_bundles(dev.tasks, hold.tasks)
+    return {
+        "development_task_count": validation.development.task_count,
+        "holdout_task_count": validation.holdout.task_count,
+        "development_aggregate_digest": validation.development.aggregate_digest,
+        "holdout_aggregate_digest": validation.holdout.aggregate_digest,
+        # Generator-schedule order equals fixed-id order; this is the identity
+        # the unchanged D-0023 importer records when fed in that order.
+        "set_identity": set_identity_for(dev.tasks, hold.tasks),
+        "ordering": OUTPUT_ORDERING,
     }
 
 
@@ -412,10 +502,9 @@ def build_materialization_request(
     the two materialized stages so the approved write path reuses exactly
     the bytes the request predicted.
     """
-    source = _stage_summary(development, holdout)
+    source = _source_summary(development, holdout)
     dev = materialize_stage(DEVELOPMENT_STAGE, development)
     hold = materialize_stage(HOLDOUT_STAGE, holdout)
-    output = _stage_summary(dev.tasks, hold.tasks)
     request: dict[str, Any] = {
         "request_version": MATERIALIZATION_VERSION,
         "kind": MATERIALIZATION_KIND,
@@ -425,7 +514,12 @@ def build_materialization_request(
             "generator": GENERATOR,
             "seed": MEASURED_REPETITION_SEED,
             "seed_rule": SEED_RULE,
-            "occurrence_rule": OCCURRENCE_RULE,
+            "schedule_rule": SCHEDULE_RULE,
+            "task_id_rule": TASK_ID_RULE,
+            "tasks_per_stage": TASKS_PER_STAGE,
+            "catalog_digest": catalog_digest(),
+            "development_template_ids": list(stage_spec(DEVELOPMENT_STAGE)["template_ids"]),
+            "holdout_template_ids": list(stage_spec(HOLDOUT_STAGE)["template_ids"]),
             "payload_schema_version": PAYLOAD_SCHEMA_VERSION,
             "payload_kind": PAYLOAD_KIND,
         },
@@ -434,7 +528,7 @@ def build_materialization_request(
             DEVELOPMENT_STAGE: distribution_summary(dev.distribution),
             HOLDOUT_STAGE: distribution_summary(hold.distribution),
         },
-        "output": output,
+        "output": _output_summary(dev, hold),
     }
     request[_DIGEST_FIELD] = sha256_digest(canonical_document_bytes(request, exclude=_DIGEST_FIELD))
     validate_request(request)
@@ -555,27 +649,103 @@ def _verify_written(
     dev: MaterializedStage,
     hold: MaterializedStage,
 ) -> None:
-    """Re-read the written bundles with the production loader and re-derive."""
-    written_dev = load_bundle_directory(destination / DEVELOPMENT_STAGE, repo=repo)
-    written_hold = load_bundle_directory(destination / HOLDOUT_STAGE, repo=repo)
-    if _stage_summary(written_dev, written_hold) != request["output"]:
-        raise CustodyError("tamper")
-    for stage, written, expected in (
-        (DEVELOPMENT_STAGE, written_dev, dev),
-        (HOLDOUT_STAGE, written_hold, hold),
-    ):
-        by_id = {task.task_id: task.content for task in written}
-        if by_id != {task.task_id: task.content for task in expected.tasks}:
+    """Re-read the written bundles in fixed order and re-derive everything."""
+    written_dev = load_materialized_bundle(destination / DEVELOPMENT_STAGE, repo=repo)
+    written_hold = load_materialized_bundle(destination / HOLDOUT_STAGE, repo=repo)
+    for written, expected in ((written_dev, dev), (written_hold, hold)):
+        if written != expected.tasks:
             raise CustodyError("tamper")
-        observed: Counter[str] = Counter()
+        decoded = []
         for task in written:
             try:
-                decoded = decode_sealed_task(task.content, expected_task_id=task.task_id)
+                decoded.append(decode_sealed_task(task.content, expected_task_id=task.task_id))
             except SealedPayloadError:
                 raise CustodyError("tamper") from None
-            observed[decoded.scenario.scenario_id] += 1
-        if distribution_summary(observed) != request["distribution"][stage]:
+        if schedule_tuples([item.instance for item in decoded]) != schedule_tuples(
+            frozen_schedule(expected.stage)
+        ):
             raise CustodyError("tamper")
+    validation = validate_bundles(written_dev, written_hold)
+    if (
+        validation.development.aggregate_digest != request["output"]["development_aggregate_digest"]
+        or validation.holdout.aggregate_digest != request["output"]["holdout_aggregate_digest"]
+        or set_identity_for(written_dev, written_hold) != request["output"]["set_identity"]
+    ):
+        raise CustodyError("tamper")
+
+
+# --------------------------------------------------------------------------
+# Handing materialized bundles to the unchanged D-0023 importer
+# --------------------------------------------------------------------------
+
+
+def load_materialized_bundle(raw: str | Path, *, repo: Path) -> tuple[OpaqueTask, ...]:
+    """Load one materialized bundle in fixed task-id order.
+
+    Uses the production bundle loader, then orders by task id so the
+    sequence handed to the importer never depends on directory iteration,
+    creation order or filesystem. The ids must be exactly the fixed ids of
+    one stage.
+    """
+    tasks = tuple(sorted(load_bundle_directory(raw, repo=repo), key=lambda task: task.task_id))
+    ids = tuple(task.task_id for task in tasks)
+    if ids not in {fixed_task_ids(stage) for stage in STAGES}:
+        raise CustodyError("materialized-ids")
+    return tasks
+
+
+def prepare_materialized_import(
+    *,
+    repo: Path,
+    expected_commit: str,
+    development: str | Path,
+    holdout: str | Path,
+) -> dict:
+    """The unchanged D-0023 import request over the bundles in fixed order."""
+    dev = load_materialized_bundle(development, repo=repo)
+    hold = load_materialized_bundle(holdout, repo=repo)
+    _require_stage_ids(dev, hold)
+    return prepare_import_request(
+        repo=repo, expected_commit=expected_commit, development=dev, holdout=hold
+    )
+
+
+def import_materialized_bundles(
+    *,
+    repo: Path,
+    output_root: str | Path,
+    expected_commit: str,
+    expected_controller_digest: str,
+    expected_request_digest: str,
+    approval: str,
+    development: str | Path,
+    holdout: str | Path,
+) -> CustodyReceipt:
+    """The unchanged D-0023 import, fed the bundles in fixed task-id order.
+
+    The approval is the D-0023 import phrase bound to the import-request
+    digest; custody behavior, layout, and verification are untouched.
+    """
+    dev = load_materialized_bundle(development, repo=repo)
+    hold = load_materialized_bundle(holdout, repo=repo)
+    _require_stage_ids(dev, hold)
+    return import_authorized_set(
+        repo=repo,
+        output_root=output_root,
+        expected_commit=expected_commit,
+        expected_controller_digest=expected_controller_digest,
+        expected_request_digest=expected_request_digest,
+        approval=approval,
+        development=dev,
+        holdout=hold,
+    )
+
+
+def _require_stage_ids(dev: Sequence[OpaqueTask], hold: Sequence[OpaqueTask]) -> None:
+    if tuple(task.task_id for task in dev) != fixed_task_ids(DEVELOPMENT_STAGE):
+        raise CustodyError("materialized-ids")
+    if tuple(task.task_id for task in hold) != fixed_task_ids(HOLDOUT_STAGE):
+        raise CustodyError("materialized-ids")
 
 
 # --------------------------------------------------------------------------
@@ -588,8 +758,8 @@ def _parser() -> argparse.ArgumentParser:
         prog="python -m blackwell_lab.cloud.sealed_materialize",
         description=(
             "Offline materialization of sealed qualification tasks (D-0025). "
-            "Adds only the D-0024 envelope and the production-generated "
-            "instance object to externally supplied source entries. " + INTEGRITY_STATEMENT
+            "Produces the frozen one-call generator schedule as D-0024 payloads "
+            "from an exact frozen source set. " + INTEGRITY_STATEMENT
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -605,19 +775,29 @@ def _parser() -> argparse.ArgumentParser:
         "materialize-bundles",
         help="Write the two materialized bundles after the exact approval phrase.",
     )
-    for target in (preparer, writer):
+    import_preparer = sub.add_parser(
+        "prepare-import",
+        help="Print the unchanged D-0023 import request for materialized bundles in fixed order.",
+    )
+    importer = sub.add_parser(
+        "import-materialized",
+        help="Run the unchanged D-0023 import over materialized bundles in fixed order.",
+    )
+    for target in (preparer, writer, import_preparer, importer):
         target.add_argument("--repo", required=True)
         target.add_argument("--commit", required=True)
         target.add_argument("--development", required=True)
         target.add_argument("--holdout", required=True)
-    writer.add_argument("--output", required=True)
+    for target in (writer, importer):
+        target.add_argument("--output", required=True)
+        target.add_argument("--request-digest", required=True)
+        target.add_argument("--approve", required=True)
     writer.add_argument("--implementation-digest", required=True)
-    writer.add_argument("--request-digest", required=True)
-    writer.add_argument("--approve", required=True)
+    importer.add_argument("--controller-digest", required=True)
     return parser
 
 
-def _emit(document: dict[str, Any]) -> None:
+def _emit(document: Mapping[str, Any]) -> None:
     print(json.dumps(document, sort_keys=True, separators=(",", ":")))
 
 
@@ -629,6 +809,29 @@ def main(argv: list[str] | None = None) -> int:
             print(APPROVAL_TEMPLATE)
             return 0
         repo = Path(args.repo)
+        if args.command == "prepare-import":
+            _emit(
+                prepare_materialized_import(
+                    repo=repo,
+                    expected_commit=args.commit,
+                    development=args.development,
+                    holdout=args.holdout,
+                )
+            )
+            return 0
+        if args.command == "import-materialized":
+            receipt = import_materialized_bundles(
+                repo=repo,
+                output_root=args.output,
+                expected_commit=args.commit,
+                expected_controller_digest=args.controller_digest,
+                expected_request_digest=args.request_digest,
+                approval=args.approve,
+                development=args.development,
+                holdout=args.holdout,
+            )
+            _emit(receipt.public_dict())
+            return 0
         development = load_bundle_directory(args.development, repo=repo)
         holdout = load_bundle_directory(args.holdout, repo=repo)
         if args.command == "prepare-materialization":
