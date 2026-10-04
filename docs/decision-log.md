@@ -1293,3 +1293,144 @@ recorded under a field whose meaning is the public catalog digest. Items 3,
 had read a combined private index covering both stages and had recorded the
 stage aggregate as `workload.catalog_digest`; no sealed run predates that
 correction. Tested only with synthetic custody fixtures.
+
+## 2026-10-04 — D-0025: Offline materialization of sealed qualification tasks
+
+**No real bundle is read, materialized, imported, or executed by this
+decision.** No qualification result predates it. The evaluator, scenario
+catalog, thresholds, prompts, sampling rules (`sampling.py` and
+`generate_task_instances`), model, engine, precision, infrastructure, P2
+behavior, the D-0024 payload schema and decoder, the D-0023 custody
+controller, and the D-0024 execution adapter are unchanged. D-0022,
+D-0023, and D-0024 are not edited. Live materialization, live import, live
+`qualify-agent`, and Phase 4 remain unauthorized and keep their separate
+digest-bearing approval phrases.
+
+**Problem.** The historical external source entries carry a `task_id` and a
+scenario document but not the D-0024 `instance` object (`instance_seed`,
+`tracking_id`, `reported_minute`) that the payload contract requires, so
+they cannot be imported as execution-eligible sealed tasks as they stand.
+A first implementation derived each task's occurrence from the order of the
+historical source task identifiers and preserved whatever per-scenario
+distribution the sources carried. That preserved only the per-template
+surface multiset, not the frozen ordered qualification schedule, and was
+rejected in review. This decision replaces it; no bundle was materialized
+under the rejected design.
+
+**Decision.** A narrowly scoped offline workflow,
+`python -m blackwell_lab.cloud.sealed_materialize`, produces the frozen
+qualification schedule as D-0024 payloads. Its contract is:
+
+1. **The one-call production generator defines the schedule.** For each
+   stage the materializer makes exactly one call
+   `generate_task_instances(stage_spec(stage)["template_ids"],
+   stage_spec(stage)["tasks"], MEASURED_REPETITION_SEED)` — the call the
+   qualification runner makes for the measured repetition of a catalog
+   cell of that stage. The returned twenty-element round-robin sequence is
+   the sole authoritative execution schedule: its order, its scenarios,
+   and its `(scenario_id, instance_seed, tracking_id, reported_minute)`
+   tuples. Templates are never generated separately, occurrence is never
+   calculated from source task identifiers, and no second derivation,
+   placeholder, timestamp, random value, or task-body-derived value
+   exists.
+2. **Seed.** `MEASURED_REPETITION_SEED` is `20260907`
+   (`FROZEN_SEED + 1`): the runner builds the stage spec with
+   `seed = FROZEN_SEED` and derives the generator seed of the single
+   measured repetition as `spec.seed + repetition_index` with
+   `repetition_index == 1` (`STAGE_REPETITIONS == 1`, no warm-up pass).
+   The request schema pins the seed as a constant.
+3. **Task-identifier order is not the catalog occurrence rule.** D-0024
+   executes a sealed stage in task-identifier order; that order carries no
+   occurrence semantics of its own. Output identifiers are therefore
+   chosen so that task-identifier order *is* the generator order: the
+   fixed values `sealed-development-0000` … `sealed-development-0019` and
+   `sealed-holdout-0000` … `sealed-holdout-0019`, where the suffix is the
+   zero-based position of the slot in the full round-robin generator
+   sequence. Lexicographic order of these identifiers equals materializer
+   output order, custody index order, sealed runtime order, and the
+   measured order of a P1 catalog cell. Each payload's `instance_id` is
+   its fixed identifier.
+4. **Source identifiers do not influence materialized execution.**
+   Historical source task identifiers are not preserved as executable
+   identifiers and do not control occurrence, output identity, prompt
+   surface, or runtime order. They remain bound only through the source
+   aggregate (task-identifier-ordered set identity) of the request, and
+   must be valid and unique for the request to exist.
+5. **Exact frozen source gate.** Before a request is approvable the source
+   set must satisfy, per stage: exactly twenty entries; each entry is a
+   JSON object with exactly `task_id` (equal to its filename) and
+   `scenario`, carrying no envelope or `instance` object (`source-shape`);
+   unique identifiers (`duplicate-id`); every `scenario_id` a member of
+   `DEVELOPMENT_TEMPLATE_IDS` for development and `HOLDOUT_TEMPLATE_IDS`
+   for holdout, with no unknown, missing, substituted, or swapped scenario
+   (`scenario-set-mismatch`); every scenario document, including repeated
+   copies, canonically deep-equal to `catalog()[scenario_id]`
+   (`scenario-mismatch`); and a per-template multiset equal to the
+   one-call generator schedule — 4/4/3/3/3/3 for development and 5/5/5/5
+   for holdout (`distribution-mismatch`). Stage disjointness and task
+   count are enforced by the unchanged custody validator. **Arbitrary and
+   non-frozen distributions are rejected**; nothing is preserved or
+   rebalanced.
+6. **Payload construction.** For each slot the payload is encoded only by
+   the production `encode_sealed_task` from the slot's `TaskInstance`
+   surface, the canonical equality-verified catalog scenario, and the
+   fixed identifier; it is decoded with `decode_sealed_task`, must
+   re-encode byte for byte, and the ordered tuples of the decoded sequence
+   must equal the one-call generator result exactly. A sorted multiset
+   comparison is not accepted anywhere in the implementation or its tests.
+7. **Set identity and import order.** The predicted output set identity is
+   computed over the payload digests in fixed identifier order, which is
+   the identity the unchanged D-0023 importer records when the bundles
+   are handed to it in that order. The `prepare-import` and
+   `import-materialized` operations load the materialized directories
+   with the production bundle loader, order the tasks by their fixed
+   identifiers, require exactly the fixed identifier set of each stage
+   (`materialized-ids`), and delegate to the unchanged
+   `prepare_import_request` and `import_authorized_set`. No step depends
+   on `Path.iterdir()`, filesystem creation order, or directory iteration
+   order. The D-0023 loader was not modified.
+8. **Operations and approval.** `prepare-materialization` prints a
+   content-free request and writes nothing. `materialize-bundles` writes
+   `development/` and `holdout/` bundle directories (filename = fixed
+   task id, `0600` files, `0700` directories) plus a content-free
+   `materialization.json` record into a **new** external directory; an
+   existing destination, even empty, is `destination-exists` and is never
+   overwritten. The request (schema
+   [sealed-materialization-request.schema.json](../schemas/sealed-materialization-request.schema.json))
+   binds the frozen commit (clean worktree required), the implementation
+   digest (committed and running bytes of `sealed_materialize.py`,
+   `sealed_payload.py`, `sampling.py`, and the payload schema, which must
+   be the worktree files), the generator name, seed, seed rule, schedule
+   rule, task-identifier rule, tasks per stage, catalog digest, the frozen
+   template lists, payload version, source and predicted output
+   aggregates, counts, set identities, and frozen distribution summaries.
+   The approval phrase is exactly
+   `I approve sealed qualification-task materialization using request sha256:{digest}`;
+   the D-0023 import phrase does not authorize materialization and vice
+   versa. Written bundles are re-read with the production bundle loader
+   and compared with the schedule and the request before the record is
+   written; any difference scrubs the new directory.
+9. **Content-free output.** Requests, records, console output, and errors
+   never contain task bodies, task identifiers, accepted answers, blob
+   names, or paths. Failures print `BLOCKED: <reason>` only. Scenario
+   template identifiers are public catalog identifiers and appear in the
+   request only as the frozen template lists.
+10. **Downstream unchanged.** The materialized bundles are ordinary D-0023
+    input, imported into a new custody directory by the unchanged custody
+    tool, and decoded by the unchanged D-0024 adapter. The materializer
+    is not part of `CONTROLLER_SOURCE_PATHS`, so the custody controller
+    digest is unaffected.
+11. **Integrity, not confidentiality.** As under D-0023 and D-0024,
+    SHA-256 digests bind bytes and do not conceal them.
+
+**Rationale.** A sealed stage must execute the same schedule a P1 catalog
+cell executes, so the only acceptable source of that schedule is the
+unchanged production generator called exactly as the runner calls it. The
+historical sources prove that the owner holds the frozen set, through the
+exact gate and the source aggregate, but they cannot define the schedule,
+because their identifier order carries no occurrence semantics. Tested
+only with synthetic source entries built from the public scenario catalog,
+including adversarial rejection tests for scrambled identifiers, swapped
+stages, modified or substituted scenarios, grouped input, 20 copies of one
+scenario, unknown identifiers, 11/9 and shifted distributions, 19 and 21
+entries, duplicate identifiers, and reversed directory iteration.

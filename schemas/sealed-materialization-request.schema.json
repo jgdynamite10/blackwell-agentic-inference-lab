@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jgdynamite10/blackwell-agentic-inference-lab/schemas/sealed-materialization-request.schema.json",
+  "title": "Sealed qualification-task materialization request",
+  "description": "Content-free request that the owner approval phrase binds for one offline materialization of sealed qualification tasks (decision D-0025). It names the frozen commit, the implementation digest, the one-call production generator schedule (generator, seed, frozen stage template ids, task count, catalog digest, fixed task-id rule), the source and predicted output aggregates, counts, set identities and the frozen per-stage distribution. It must not contain task bodies, source task identifiers, private filenames, or paths. SHA-256 digests provide integrity, not confidentiality.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_version",
+    "kind",
+    "controller_commit",
+    "implementation_digest",
+    "algorithm",
+    "source",
+    "distribution",
+    "output",
+    "materialization_request_digest"
+  ],
+  "properties": {
+    "request_version": { "type": "string", "const": "1.0.0" },
+    "kind": { "type": "string", "const": "sealed-qualification-task-materialization" },
+    "controller_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "implementation_digest": { "$ref": "#/$defs/digest" },
+    "algorithm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generator",
+        "seed",
+        "seed_rule",
+        "schedule_rule",
+        "task_id_rule",
+        "tasks_per_stage",
+        "catalog_digest",
+        "development_template_ids",
+        "holdout_template_ids",
+        "payload_schema_version",
+        "payload_kind"
+      ],
+      "properties": {
+        "generator": {
+          "type": "string",
+          "const": "blackwell_lab.workload.sampling.generate_task_instances"
+        },
+        "seed": { "type": "integer", "const": 20260907 },
+        "seed_rule": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "schedule_rule": { "type": "string", "const": "one-call-round-robin-generator-schedule" },
+        "task_id_rule": { "type": "string", "const": "sealed-<stage>-<slot:04d>" },
+        "tasks_per_stage": { "type": "integer", "const": 20 },
+        "catalog_digest": { "$ref": "#/$defs/digest" },
+        "development_template_ids": { "$ref": "#/$defs/template_ids" },
+        "holdout_template_ids": { "$ref": "#/$defs/template_ids" },
+        "payload_schema_version": { "type": "string", "const": "1.0.0" },
+        "payload_kind": { "type": "string", "const": "sealed-qualification-task" }
+      }
+    },
+    "source": {
+      "allOf": [
+        { "$ref": "#/$defs/stage_summary" },
+        { "properties": { "ordering": { "const": "task-id-sorted" } } }
+      ]
+    },
+    "output": {
+      "allOf": [
+        { "$ref": "#/$defs/stage_summary" },
+        { "properties": { "ordering": { "const": "generator-schedule" } } }
+      ]
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["development", "holdout"],
+      "properties": {
+        "development": {
+          "allOf": [
+            { "$ref": "#/$defs/distribution_summary" },
+            {
+              "properties": {
+                "template_count": { "const": 6 },
+                "counts": { "const": [4, 4, 3, 3, 3, 3] }
+              }
+            }
+          ]
+        },
+        "holdout": {
+          "allOf": [
+            { "$ref": "#/$defs/distribution_summary" },
+            {
+              "properties": {
+                "template_count": { "const": 4 },
+                "counts": { "const": [5, 5, 5, 5] }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "materialization_request_digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "template_ids": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{3,63}$" }
+    },
+    "stage_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "development_task_count",
+        "holdout_task_count",
+        "development_aggregate_digest",
+        "holdout_aggregate_digest",
+        "set_identity",
+        "ordering"
+      ],
+      "properties": {
+        "development_task_count": { "type": "integer", "const": 20 },
+        "holdout_task_count": { "type": "integer", "const": 20 },
+        "development_aggregate_digest": { "$ref": "#/$defs/digest" },
+        "holdout_aggregate_digest": { "$ref": "#/$defs/digest" },
+        "set_identity": { "$ref": "#/$defs/digest" },
+        "ordering": { "type": "string", "enum": ["task-id-sorted", "generator-schedule"] }
+      }
+    },
+    "distribution_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["template_count", "counts", "digest"],
+      "properties": {
+        "template_count": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "counts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "type": "integer", "minimum": 1, "maximum": 20 }
+        },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    }
+  }
+}
