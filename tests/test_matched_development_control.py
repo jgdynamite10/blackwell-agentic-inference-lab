@@ -471,7 +471,7 @@ class TestProductionLedgerAndPins:
             constructed,
             streamed,
             fetches,
-            "not a completed non-stopped P1",
+            "terminal event does not match",
         )
         receipt_path.unlink()
         assert _run(tmp_path, config) == 1
@@ -567,3 +567,280 @@ class TestVerifyResultsRelationship:
         rendered = json.dumps(report)
         assert "not a completed non-stopped P1" in rendered
         assert str(external) not in rendered
+
+    def test_changed_resource_identity_is_rejected_when_the_ledger_is_unchanged(
+        self, bound, capsys
+    ):
+        external, _config, _fetches = bound
+        receipt_path = self._plant_p2c(external, _config)
+        record_path = control_record_path(external, P1_LABEL)
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        record["resource_identity_sha256"] = "ab" * 32
+        control_digest = write_private_json(record_path, record)
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt["matched_control"]["resource_identity_sha256"] = "ab" * 32
+        receipt["matched_control"]["control_record_sha256"] = control_digest
+        write_private_json(receipt_path, receipt)
+        failures = audit_matched_controls(external)
+        assert any("resource identity does not match" in item["error"] for item in failures)
+        assert all(str(external) not in json.dumps(item) for item in failures)
+        assert main(["verify-results", "--subdirectory", "qualification-runs"]) == 1
+        rendered = json.dumps(json.loads(capsys.readouterr().out))
+        assert "resource identity does not match" in rendered
+        assert str(external) not in rendered
+
+
+def _session(external: Path) -> tuple[Path, dict]:
+    path = external / "infra-lifecycle" / RUN_TAG / "session.json"
+    return path, json.loads(path.read_text(encoding="utf-8"))
+
+
+def _rebind_receipt(external: Path, config: dict, mutate) -> None:
+    path = external / "qualification-runs" / f"{P1_LABEL}-p1-development-receipt.json"
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    mutate(receipt)
+    digest = write_private_json(path, receipt)
+
+    def _store(record):
+        record["receipt_sha256"] = digest
+
+    _rewrite(external, config, _store)
+
+
+class TestPreInferenceSession:
+    def test_bad_ledger_never_reaches_inference(self, tmp_path, monkeypatch, capsys):
+        from test_qualification import qual_argv
+
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        monkeypatch.setattr(cli, "_git_head", lambda: COMMIT)
+        monkeypatch.setattr(cli, "_tree_clean", lambda: True)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        provenance_calls: list[object] = []
+
+        def boom(**kwargs):
+            provenance_calls.append(kwargs)
+            raise AssertionError("live provenance")
+
+        monkeypatch.setattr("blackwell_lab.cloud.provenance.verify_live_provenance", boom)
+        fetches: list[object] = []
+
+        def refuse_fetch(*args, **kwargs):
+            fetches.append(args)
+            raise AssertionError("provider fetch")
+
+        monkeypatch.setattr("blackwell_lab.cloud.preflight.get_json", refuse_fetch)
+        constructed, streamed = _spy(monkeypatch)
+        config = qualification_config_dict("P1", "development")
+        path = tmp_path / "p1.json"
+        path.write_text(json.dumps(config), encoding="utf-8")
+        argv = qual_argv(path, candidate="P1")
+
+        def run(mutate) -> None:
+            ledger = _ready_ledger()
+            mutate(ledger)
+            write_private_json(paths.ledger_path, ledger)
+            assert main(argv) == 1
+            err = capsys.readouterr().err
+            assert "P1 development session" in err
+            assert str(external) not in err
+            assert '"42"' not in err
+            family = external / "qualification-runs"
+            assert not list(family.glob("*.result.json"))
+            assert not list(family.glob("*-receipt.json"))
+            assert not list(family.glob("*-control.json"))
+            assert not list(family.glob("*/*.result.json"))
+
+        def wrong_firewall_region(ledger):
+            for resource in ledger["resources"]:
+                if resource["type"] == "linode_firewall":
+                    resource["region"] = "us-sea"
+
+        def missing_provider_id(ledger):
+            ledger["resources"][0].pop("provider_id")
+
+        def wrong_address_and_type(ledger):
+            ledger["resources"][1]["address"] = "linode_firewall.other"
+            ledger["resources"][1]["type"] = "linode_volume"
+
+        def malformed_identity(ledger):
+            ledger["resources"][0]["label"] = 12
+
+        for mutate in (
+            wrong_firewall_region,
+            missing_provider_id,
+            wrong_address_and_type,
+            malformed_identity,
+        ):
+            run(mutate)
+        assert provenance_calls == [] and constructed == [] and streamed == [] and fetches == []
+
+
+class TestExactBinding:
+    def test_duplicate_cross_label_cross_config_and_cross_session_events(
+        self, bound, tmp_path, monkeypatch, capsys
+    ):
+        external, config, fetches = bound
+        constructed, streamed = _spy(monkeypatch)
+        path, session = _session(external)
+        event = session["events"][0]
+        original_config = event["detail"]["config_sha256"]
+        session["events"].append(json.loads(json.dumps(event)))
+        write_private_json(path, session)
+        assert _run(tmp_path, config) == 1
+        _assert_refused(
+            capsys, external, constructed, streamed, fetches, "terminal event does not match"
+        )
+
+        path, session = _session(external)
+        session["events"] = [event]
+        session["events"][0]["detail"]["run_label"] = "qual-b"
+        write_private_json(path, session)
+        assert _run(tmp_path, config) == 1
+        _assert_refused(
+            capsys, external, constructed, streamed, fetches, "terminal event does not match"
+        )
+
+        path, session = _session(external)
+        session["events"][0]["detail"]["run_label"] = P1_LABEL
+        session["events"][0]["detail"]["config_sha256"] = "ab" * 32
+        write_private_json(path, session)
+        assert _run(tmp_path, config) == 1
+        _assert_refused(
+            capsys, external, constructed, streamed, fetches, "terminal event does not match"
+        )
+
+        path, session = _session(external)
+        session["events"][0]["detail"]["config_sha256"] = original_config
+        session["run_tag"] = "p3-qual-20260918b"
+        write_private_json(path, session)
+        assert _run(tmp_path, config) == 1
+        _assert_refused(
+            capsys, external, constructed, streamed, fetches, "terminal event does not match"
+        )
+
+        path, session = _session(external)
+        session["run_tag"] = RUN_TAG
+        session["events"].append(
+            {
+                "event": "qualification_stopped",
+                "detail": {
+                    "stage": "development",
+                    "candidate_id": "P1",
+                    "run_label": P1_LABEL,
+                    "config_sha256": original_config,
+                    "stopped": True,
+                },
+            }
+        )
+        write_private_json(path, session)
+        assert _run(tmp_path, config) == 1
+        _assert_refused(
+            capsys,
+            external,
+            constructed,
+            streamed,
+            fetches,
+            "not a completed non-stopped P1",
+        )
+
+    def test_receipt_claims_must_match_the_selected_control(
+        self, bound, tmp_path, monkeypatch, capsys
+    ):
+        external, config, fetches = bound
+        constructed, streamed = _spy(monkeypatch)
+        _rebind_receipt(
+            external,
+            config,
+            lambda receipt: receipt.__setitem__("run_label", "qual-b-p1-development"),
+        )
+        assert _run(tmp_path, config) == 1
+        _assert_refused(capsys, external, constructed, streamed, fetches, "label does not match")
+        _rebind_receipt(
+            external,
+            config,
+            lambda receipt: receipt.__setitem__("run_label", f"{P1_LABEL}-p1-development"),
+        )
+        _rebind_receipt(
+            external,
+            config,
+            lambda receipt: receipt.__setitem__("config_sha256", "cd" * 32),
+        )
+        assert _run(tmp_path, config) == 1
+        _assert_refused(capsys, external, constructed, streamed, fetches, "digest mismatch")
+        original = config["development_control"]["config_sha256"]
+        _rebind_receipt(
+            external,
+            config,
+            lambda receipt: receipt.__setitem__("config_sha256", original),
+        )
+        _rebind_receipt(
+            external,
+            config,
+            lambda receipt: receipt.__setitem__("candidate_identity_sha256", "ef" * 32),
+        )
+        assert _run(tmp_path, config) == 1
+        _assert_refused(capsys, external, constructed, streamed, fetches, "digest mismatch")
+        _rebind_receipt(
+            external,
+            config,
+            lambda receipt: receipt.__setitem__(
+                "candidate_identity_sha256",
+                json.loads(
+                    (
+                        external / "qualification-runs" / f"{P1_LABEL}-p1-development-control.json"
+                    ).read_text(encoding="utf-8")
+                )["identity_sha256"],
+            ),
+        )
+        _rebind_receipt(
+            external,
+            config,
+            lambda receipt: receipt.__setitem__("workload_version", "9.9.9"),
+        )
+        assert _run(tmp_path, config) == 1
+        _assert_refused(capsys, external, constructed, streamed, fetches, "pins do not match")
+
+
+class TestSafeLabel:
+    def test_unsafe_label_does_not_read_outside_qualification_runs(self, tmp_path, monkeypatch):
+        family = tmp_path / "qualification-runs"
+        family.mkdir()
+        receipt = family / "qual-a-p2c-development-receipt.json"
+        reads: list[Path] = []
+        real_text = Path.read_text
+        real_bytes = Path.read_bytes
+        real_open = Path.open
+
+        def spy_text(self, *args, **kwargs):
+            reads.append(self)
+            return real_text(self, *args, **kwargs)
+
+        def spy_bytes(self, *args, **kwargs):
+            reads.append(self)
+            return real_bytes(self, *args, **kwargs)
+
+        def spy_open(self, *args, **kwargs):
+            reads.append(self)
+            return real_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", spy_text)
+        monkeypatch.setattr(Path, "read_bytes", spy_bytes)
+        monkeypatch.setattr(Path, "open", spy_open)
+        for label in ("/etc/passwd", "../outside", "qual/p1", "..", "Qual-P1", "a" * 80, ""):
+            write_private_json(
+                receipt,
+                {
+                    "candidate_id": "P2C",
+                    "stage": "development",
+                    "matched_control": {"p1_run_label": label},
+                },
+            )
+            reads.clear()
+            failures = audit_matched_controls(tmp_path)
+            assert any("label is unsafe" in item["error"] for item in failures)
+            root = family.resolve()
+            for accessed in reads:
+                resolved = accessed.resolve()
+                assert resolved == root or root in resolved.parents

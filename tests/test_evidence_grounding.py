@@ -1522,12 +1522,14 @@ def _ready_ledger():
                 "type": "linode_instance",
                 "provider_id": "42",
                 "region": "us-iad-2",
+                "label": "bwlab-gpu-baseline",
             },
             {
                 "address": "linode_firewall.gpu_baseline",
                 "type": "linode_firewall",
                 "provider_id": "555",
                 "region": "",
+                "label": "bwlab-gpu-baseline",
             },
         ],
     }

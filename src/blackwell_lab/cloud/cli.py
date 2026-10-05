@@ -1256,6 +1256,14 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 run_tag=args.run_tag,
                 p2c_run_label=run_label,
             )
+        if (
+            not validate_only
+            and candidate_id == qualification.CANDIDATE_P1
+            and stage == qualification.STAGE_DEVELOPMENT
+        ):
+            from blackwell_lab.cloud.matched_control import validate_p1_development_session
+
+            validate_p1_development_session(_resolve_real_results_dir(), run_tag=args.run_tag)
     except (ConfigError, qualification.QualificationError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 1
@@ -1463,6 +1471,8 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             {
                 "stage": stage,
                 "candidate_id": candidate_id,
+                "run_label": run_label,
+                "config_sha256": config_sha256,
                 "stopped": bool(gates["stopped"]),
             },
         )

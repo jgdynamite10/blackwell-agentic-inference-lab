@@ -1583,6 +1583,13 @@ project quality-floor stop, a failure record, or a missing result may not.
 The control binds the P1 receipt, the terminal `qualification_completed`
 event, and the frozen precision. A production firewall ledger entry may
 omit region; the region binding is the authenticated instance region.
+Before live provenance, P1 development validates that reconciled session:
+run tag, provider check, the expected instance and firewall, provider
+ids, labels, the `us-iad-2` instance region, and a valid resource
+identity. The `qualification_completed` event carries the P1 run label
+and config digest. Exactly one such event is authenticated with the
+receipt. `verify-results` recomputes the resource identity from the
+ledger.
 
 Candidate identity digests include `region`. Moving the lock from
 `us-sea` to `us-iad-2` is the only serialization change. Digests at the
