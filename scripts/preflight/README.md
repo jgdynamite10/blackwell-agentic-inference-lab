@@ -22,7 +22,7 @@ Usage (local machine):
 ```bash
 python3 scripts/preflight/check_akamai.py --help
 python3 scripts/preflight/check_akamai.py --public-only   # catalog only, no token needed
-python3 scripts/preflight/check_akamai.py --region us-sea   # full check, requires LINODE_TOKEN
+python3 scripts/preflight/check_akamai.py --region us-iad-2   # full check, requires LINODE_TOKEN
 python3 scripts/preflight/check_gcp.py
 python3 scripts/preflight/check_aws.py
 ```

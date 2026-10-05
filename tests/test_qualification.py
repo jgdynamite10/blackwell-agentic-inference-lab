@@ -105,8 +105,8 @@ from blackwell_lab.workload.validation import ConfigError
 COMMIT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 RUN_TAG = "p3-qual-20260918a"
 FROZEN_ACCEPTED_ANSWERS_SHA256 = "2edb7134040af2e8e9e9fec4c068bbc0dfaf6bfa55cbd4284b8bf6045c7aea2a"
-FROZEN_C1_IDENTITY_SHA256 = "76510b8d3829f69ee8406680f7861ec38ab9d831052506c69819cf90cc3b1969"
-FROZEN_C2_IDENTITY_SHA256 = "79cd85134d8c662b65e082bb3203b68e862f89f6083b69a0882022306ae01145"
+FROZEN_C1_IDENTITY_SHA256 = "ce95fe585d24bd427aa8cd470f089c051eed6af3ce42ded7bea21bd3c93f7f7c"
+FROZEN_C2_IDENTITY_SHA256 = "99ca5e56fd9dc37de069e23c48a08f6b95dd0256f05416eff12791092adfcba9"
 FROZEN_SYSTEM_PROMPT_V240 = (
     "You are a Cloud Operations Agent working a synthetic incident. "
     "Diagnose the incident using only the provided tools. "
@@ -202,7 +202,7 @@ def qualification_config_dict(candidate_id="C1", stage="development"):
         "endpoint": {"base_url": "http://127.0.0.1:8000/v1", "model": "m"},
         "cloud": {
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-            "region": "us-sea",
+            "region": "us-iad-2",
             "list_price_usd_per_hour": 3.0,
             "price_source_date": "2026-09-18",
         },
@@ -291,12 +291,13 @@ def ready_ledger(**overrides):
                 "address": "linode_instance.gpu_baseline",
                 "type": "linode_instance",
                 "provider_id": "42",
-                "region": "us-sea",
+                "region": "us-iad-2",
             },
             {
                 "address": "linode_firewall.gpu_baseline",
                 "type": "linode_firewall",
                 "provider_id": "555",
+                "region": "us-iad-2",
             },
         ],
     }
@@ -317,7 +318,7 @@ def _observed():
         instance={
             "provider_id": "42",
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-            "region": "us-sea",
+            "region": "us-iad-2",
             "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
         },
         host_facts={
@@ -1354,6 +1355,9 @@ class TestPromptVariantP1:
 
         def fake_run(spec, *_args, **_kwargs):
             calls.append(spec)
+            cell = external / "qualification-runs" / "qual-a-p1-development"
+            cell.mkdir(parents=True, exist_ok=True)
+            (cell / "p1.result.json").write_text("{}\n", encoding="utf-8")
             return [_FakeRecord(run_id="qual", outcomes=_stage_outcomes("development"))]
 
         monkeypatch.setattr(provenance, "verify_live_provenance", lambda **kwargs: _observed())
@@ -1388,6 +1392,18 @@ class TestPromptVariantP1:
         )
         assert on_disk["candidate_id"] == "P1"
         assert on_disk["workload_version"] == "2.4.1"
+        control = json.loads(
+            (external / "qualification-runs" / "qual-a-p1-development-control.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert control["region"] == "us-iad-2"
+        assert control["candidate_id"] == "P1"
+        assert control["failure_record"] is False
+        rendered = json.dumps(control)
+        assert str(external) not in rendered
+        assert "provider_id" not in rendered
+        assert '"42"' not in rendered
         scenario = catalog()["pod-failures-001"]
         recording = _RecordingClient()
         run_task(

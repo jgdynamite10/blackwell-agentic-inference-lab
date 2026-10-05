@@ -30,7 +30,7 @@ RUN_LABEL = "native-tool-pilot"
 ENGINE_VERSION = "0.27.1"
 CONTAINER_DIGEST = "docker.io/vllm/vllm-openai@sha256:" + "cd" * 32
 INSTANCE_TYPE = "g3-gpu-rtxpro6000-blackwell-1"
-REGION = "us-sea"
+REGION = "us-iad-2"
 PROVIDER_ID = "4242"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

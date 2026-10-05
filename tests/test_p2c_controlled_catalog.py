@@ -143,8 +143,8 @@ from blackwell_lab.workload.validation import ConfigError
 # Identity digests this change must not move (C1/C2/P1 from D-0021/D-0022,
 # P2 as serialized at the D-0025 base commit) and the new P2C identity
 # produced by the unchanged candidate serialization.
-FROZEN_P2_IDENTITY_SHA256 = "478a0ce881b22be8e5e747eafb63a6453b51540492dc1dba497bd8e28d160e44"
-FROZEN_P2C_IDENTITY_SHA256 = "49b279fb76dfa3ee3da2dbf8bdd15c7547441faa386c14c97f7787aeff1a069a"
+FROZEN_P2_IDENTITY_SHA256 = "20fe6cfbc084fb79d646b88a3c75ac490fad3040b1d58581b585988a9dac1ee6"
+FROZEN_P2C_IDENTITY_SHA256 = "f9f3bb323f675674b0e5cffa84518e1007882fced1e8e71fec9275dd40885e4b"
 P2C_MINUS_P1 = ["candidate_id", "controller", "workload_version"]
 _OBSERVATION_ID_RE = re.compile(r"^obs-[0-9a-f]{24}$")
 
@@ -173,6 +173,21 @@ def _scenario_bytes(scenarios_by_id: dict) -> dict[str, bytes]:
 
 def _write_config(tmp_path: Path, candidate: str, stage: str, name: str = "cfg") -> Path:
     config = qualification_config_dict(candidate, stage)
+    results = os.environ.get("LAB_RESULTS_DIR")
+    if candidate == "P2C" and stage == "development" and results:
+        ledger = Path(results) / "infra-lifecycle" / RUN_TAG / "ledger.json"
+        if ledger.is_file():
+            from blackwell_lab.cloud.matched_control import (
+                install_verified_p1_development_control,
+            )
+
+            install_verified_p1_development_control(
+                Path(results),
+                config,
+                run_tag=RUN_TAG,
+                p1_run_label="qual-p1",
+                canonical_commit=COMMIT,
+            )
     path = tmp_path / f"{name}-{candidate.lower()}-{stage}.json"
     path.write_text(json.dumps(config), encoding="utf-8")
     return path
@@ -282,6 +297,7 @@ class TestP2CContract:
 
     def test_p2c_identity_digest_comes_from_the_normal_serialization(self):
         fields = frozen_candidate_fields("P2C")
+        assert fields["region"] == "us-iad-2"
         assert fields["candidate_id"] == "P2C"
         assert fields["workload_version"] == "2.5.0"
         assert fields["controller"] == "evidence-grounding-v1"
@@ -301,7 +317,7 @@ class TestP2CContract:
         digests = {candidate_identity_digest(c) for c in AUTHORIZED_CANDIDATES}
         assert len(digests) == 5
 
-    def test_c1_c2_p1_p2_identities_are_unchanged(self):
+    def test_c1_c2_p1_p2_identities_match_the_region_lock(self):
         assert candidate_identity_digest("C1") == FROZEN_C1_IDENTITY_SHA256
         assert candidate_identity_digest("C2") == FROZEN_C2_IDENTITY_SHA256
         assert candidate_identity_digest("P1") == FROZEN_P1_IDENTITY_SHA256
@@ -622,6 +638,9 @@ class TestP2CZeroCustody:
         assert report["controlled_experiment"] == p2c_experiment_record()
         assert report["controlled_experiment"]["control_candidate"] == "P1"
         assert report["controlled_experiment"]["blind_generalization_evidence"] is False
+        assert report["matched_control"]["region"] == "us-iad-2"
+        assert report["matched_control"]["kind"] == "matched-p1-development-control"
+        assert report["matched_control"]["p1_run_label"] == "qual-p1"
         run_dir = external / "qualification-runs" / "qual-a-p2c-development"
         manifests = sorted(run_dir.glob("*.manifest.json"))
         assert len(manifests) == 1
@@ -1021,7 +1040,10 @@ class TestP2CCli:
         assert "P1 is its control" in help_text
         assert "P2 (temperature 0.2, workload 2.5.0, evidence-grounding-v1 controller)" in help_text
 
-    def test_validate_only_reports_p2c_without_custody(self, tmp_path, monkeypatch, capsys):
+    def test_validate_only_reports_p2c_without_custody(
+        self, ready_cli, tmp_path, monkeypatch, capsys
+    ):
+        assert ready_cli.is_dir()
         constructed, streamed = _spy_client(monkeypatch)
         for stage in AUTHORIZED_STAGES:
             path = _write_config(tmp_path, "P2C", stage)
@@ -1034,6 +1056,11 @@ class TestP2CCli:
             assert report["sealed_input"] is False and "sealed_set" not in report
             assert report["controlled_experiment"] == p2c_experiment_record()
             assert report["candidate_identity_sha256"] == FROZEN_P2C_IDENTITY_SHA256
+            if stage == "development":
+                assert report["matched_control"]["region"] == "us-iad-2"
+                assert report["matched_control"]["p1_run_label"] == "qual-p1"
+            else:
+                assert "matched_control" not in report
             argv_custody = [*argv, "--custody-dir", str(tmp_path)]
             assert main(argv_custody) == 1
             assert "--custody-dir is refused" in capsys.readouterr().err

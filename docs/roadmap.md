@@ -83,6 +83,10 @@ Decision D-0014 authorized **only one** Akamai compatibility/headroom pilot:
 - three diagnostic cells only (interactive/1, batch-heavy/4, batch-heavy/8),
   each with one warm-up pass, one measured repetition, and 20 tasks.
 
+Decision D-0027 sets the fixed qualification infrastructure region to
+`us-iad-2`. The D-0014 `us-sea` record above stays historical. There is
+no region fallback. Advertised availability is not capacity proof.
+
 Pilot observations are diagnostic and must not be represented as comparative
 benchmark findings. Apply, pilot, and destroy still require their separate
 exact local approval phrases. Teardown may target only ledger-recorded

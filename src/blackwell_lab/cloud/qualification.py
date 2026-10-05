@@ -826,6 +826,9 @@ def validate_authorized_qualification_config(
     # sealed or schedule-overriding key on P2C fails with a P2C reason.
     require_p2c_config(config, candidate_id=candidate_id)
     require_sealed_binding(config, candidate_id=candidate_id, stage=stage)
+    from blackwell_lab.cloud.matched_control import require_development_control_section
+
+    require_development_control_section(config, candidate_id=candidate_id, stage=stage)
 
 
 def require_sealed_binding(
@@ -1200,9 +1203,15 @@ def sanitized_receipt(
     stopped: bool,
     message: str | None = None,
     sealed_set: SealedSetBinding | None = None,
+    matched_control: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if requires_sealed_set(candidate_id, stage) != (sealed_set is not None):
         raise QualificationError("sealed-set provenance is required exactly for P2 dev/holdout")
+    development_binding = candidate_id == CANDIDATE_P2C and stage == STAGE_DEVELOPMENT
+    if development_binding and matched_control is None:
+        raise QualificationError("P2C development receipt requires matched-control provenance")
+    if matched_control is not None and not development_binding:
+        raise QualificationError("matched-control provenance is valid only for P2C development")
     return {
         "workflow": QUALIFICATION_WORKFLOW,
         "artifact_family": QUALIFICATION_ARTIFACT_FAMILY,
@@ -1227,6 +1236,7 @@ def sanitized_receipt(
             if candidate_id == CANDIDATE_P2C
             else {}
         ),
+        **({"matched_control": matched_control} if matched_control is not None else {}),
         "gates": gates,
         "stopped": stopped,
         "files": list(files),
