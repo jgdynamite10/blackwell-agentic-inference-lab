@@ -1434,19 +1434,6 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         )
         gates = qualification.evaluate_stage_thresholds(stage, metrics)
         files = [name for record in records for name in getattr(record, "written_files", ())]
-        if candidate_id == qualification.CANDIDATE_P1 and stage == qualification.STAGE_DEVELOPMENT:
-            from blackwell_lab.cloud.matched_control import (
-                persist_completed_p1_development_control,
-            )
-
-            persist_completed_p1_development_control(
-                results_dir=results_dir,
-                run_tag=args.run_tag,
-                p1_run_label=run_label,
-                canonical_commit=str(config["canonical_commit"]),
-                config_sha256=config_sha256,
-                ledger_path=paths.ledger_path,
-            )
         receipt = qualification.sanitized_receipt(
             run_label=cell_label,
             candidate_id=candidate_id,
@@ -1461,12 +1448,43 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         )
         from blackwell_lab.cloud.artifacts import write_private_json
 
-        write_private_json(
+        receipt_sha256 = write_private_json(
             results_dir
             / qualification.QUALIFICATION_ARTIFACT_FAMILY
             / f"{cell_label}-receipt.json",
             receipt,
         )
+        terminal_event = (
+            "qualification_completed" if not gates["stopped"] else "qualification_stopped"
+        )
+        lifecycle.record_session_event(
+            paths,
+            terminal_event,
+            {
+                "stage": stage,
+                "candidate_id": candidate_id,
+                "stopped": bool(gates["stopped"]),
+            },
+        )
+        if (
+            candidate_id == qualification.CANDIDATE_P1
+            and stage == qualification.STAGE_DEVELOPMENT
+            and not gates["stopped"]
+        ):
+            from blackwell_lab.cloud.matched_control import (
+                persist_completed_p1_development_control,
+            )
+
+            persist_completed_p1_development_control(
+                results_dir=results_dir,
+                run_tag=args.run_tag,
+                p1_run_label=run_label,
+                canonical_commit=str(config["canonical_commit"]),
+                config_sha256=config_sha256,
+                ledger_path=paths.ledger_path,
+                receipt_sha256=receipt_sha256,
+                session_path=paths.session_path,
+            )
     except Exception as exc:
         message = (
             str(exc)
@@ -1475,11 +1493,6 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         )
         return _qualify_stop(message, results_dir=results_dir, run_label=run_label)
 
-    lifecycle.record_session_event(
-        paths,
-        "qualification_completed" if not gates["stopped"] else "qualification_stopped",
-        {"stage": stage, "candidate_id": candidate_id, "stopped": gates["stopped"]},
-    )
     print(json.dumps(receipt, indent=2))
     return 1 if gates["stopped"] else 0
 

@@ -128,8 +128,14 @@ class TestPositiveBinding:
             p2c_run_label="qual-a",
         )
         assert summary["region"] == "us-iad-2"
+        assert summary["precision"] == "bf16"
+        assert summary["stopped"] is False
+        assert summary["terminal_event"] == "qualification_completed"
         assert summary["p1_run_label"] == P1_LABEL
         assert summary["canonical_commit"] == COMMIT
+        ledger = json.loads(ledger_path_for(external, RUN_TAG).read_text(encoding="utf-8"))
+        firewall = next(item for item in ledger["resources"] if item["type"] == "linode_firewall")
+        assert firewall["region"] == ""
         blob = json.dumps(summary)
         record = control_record_path(external, P1_LABEL).read_text(encoding="utf-8")
         for forbidden in (str(external), '"42"', '"555"', "/opt/", "provider_id"):
@@ -338,3 +344,226 @@ class TestRefusalsBeforeClient:
         assert all(str(external) not in json.dumps(item) for item in failures)
         assert any(item["error"] == "P2C development control digest mismatch" for item in failures)
         assert config["development_control"]["region"] == "us-iad-2"
+
+
+def _install_on(external: Path, ledger: dict) -> dict:
+    paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+    write_private_json(paths.ledger_path, ledger)
+    config = qualification_config_dict("P2C", "development")
+    install_verified_p1_development_control(
+        external,
+        config,
+        run_tag=RUN_TAG,
+        p1_run_label=P1_LABEL,
+        canonical_commit=COMMIT,
+    )
+    return config
+
+
+class TestProductionLedgerAndPins:
+    def test_firewall_without_a_region_uses_the_instance_region(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path / "external"))
+        external = tmp_path / "external"
+        ledger = _ready_ledger()
+        for resource in ledger["resources"]:
+            if resource["type"] == "linode_firewall":
+                resource.pop("region", None)
+        config = _install_on(external, ledger)
+        summary = authenticate_matched_development_control(
+            config,
+            results_dir=external,
+            run_tag=RUN_TAG,
+            p2c_run_label="qual-a",
+        )
+        assert summary["region"] == "us-iad-2"
+        assert "region" not in next(
+            item for item in ledger["resources"] if item["type"] == "linode_firewall"
+        )
+
+    def test_firewall_region_other_than_the_instance_is_cross_region(self, tmp_path, monkeypatch):
+        from blackwell_lab.cloud.qualification import QualificationError
+
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path / "external"))
+        external = tmp_path / "external"
+        ledger = _ready_ledger()
+        for resource in ledger["resources"]:
+            if resource["type"] == "linode_firewall":
+                resource["region"] = "us-sea"
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        write_private_json(paths.ledger_path, ledger)
+        config = qualification_config_dict("P2C", "development")
+        with pytest.raises(QualificationError, match="historical or cross-region"):
+            install_verified_p1_development_control(
+                external,
+                config,
+                run_tag=RUN_TAG,
+                p1_run_label=P1_LABEL,
+                canonical_commit=COMMIT,
+            )
+
+    def test_changed_precision_claim_is_rejected(self, bound, tmp_path, monkeypatch, capsys):
+        external, config, fetches = bound
+        constructed, streamed = _spy(monkeypatch)
+        _rewrite(external, config, lambda record: record.__setitem__("precision", "fp8"))
+        assert _run(tmp_path, config) == 1
+        _assert_refused(capsys, external, constructed, streamed, fetches, "pins do not match")
+
+    def test_stopped_or_unfinished_p1_cannot_authenticate(
+        self, bound, tmp_path, monkeypatch, capsys
+    ):
+        external, config, fetches = bound
+        constructed, streamed = _spy(monkeypatch)
+        family = external / "qualification-runs"
+        receipt_path = family / f"{P1_LABEL}-p1-development-receipt.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt["stopped"] = True
+        receipt["gates"] = {"stopped": True, "continue": False}
+        digest = write_private_json(receipt_path, receipt)
+        _rewrite(external, config, lambda record: record.__setitem__("receipt_sha256", digest))
+        assert _run(tmp_path, config) == 1
+        _assert_refused(
+            capsys,
+            external,
+            constructed,
+            streamed,
+            fetches,
+            "not a completed non-stopped P1",
+        )
+
+        def _restore_receipt(record):
+            body = json.loads(receipt_path.read_text(encoding="utf-8"))
+            body["stopped"] = False
+            body["gates"] = {"stopped": False, "continue": True}
+            record["receipt_sha256"] = write_private_json(receipt_path, body)
+
+        _rewrite(external, config, _restore_receipt)
+        session_path = external / "infra-lifecycle" / RUN_TAG / "session.json"
+        write_private_json(
+            session_path,
+            {
+                "run_tag": RUN_TAG,
+                "events": [
+                    {
+                        "event": "qualification_stopped",
+                        "detail": {
+                            "stage": "development",
+                            "candidate_id": "P1",
+                            "stopped": True,
+                        },
+                    }
+                ],
+            },
+        )
+        assert _run(tmp_path, config) == 1
+        _assert_refused(
+            capsys,
+            external,
+            constructed,
+            streamed,
+            fetches,
+            "not a completed non-stopped P1",
+        )
+        write_private_json(session_path, {"run_tag": RUN_TAG, "events": []})
+        assert _run(tmp_path, config) == 1
+        _assert_refused(
+            capsys,
+            external,
+            constructed,
+            streamed,
+            fetches,
+            "not a completed non-stopped P1",
+        )
+        receipt_path.unlink()
+        assert _run(tmp_path, config) == 1
+        _assert_refused(capsys, external, constructed, streamed, fetches, "failed or incomplete")
+
+
+class TestVerifyResultsRelationship:
+    def _plant_p2c(self, external: Path, config: dict) -> Path:
+        summary = authenticate_matched_development_control(
+            config,
+            results_dir=external,
+            run_tag=RUN_TAG,
+            p2c_run_label="qual-a",
+        )
+        family = external / "qualification-runs"
+        cell = family / "qual-a-p2c-development"
+        cell.mkdir()
+        (cell / "p2c.result.json").write_text("{}\n", encoding="utf-8")
+        receipt_path = family / "qual-a-p2c-development-receipt.json"
+        write_private_json(
+            receipt_path,
+            {
+                "candidate_id": "P2C",
+                "stage": "development",
+                "matched_control": summary,
+            },
+        )
+        return receipt_path
+
+    def test_complete_relationship_authenticates(self, bound):
+        external, config, _fetches = bound
+        self._plant_p2c(external, config)
+        assert audit_matched_controls(external) == []
+
+    def test_removed_tampered_substituted_and_stopped_provenance_fail(self, bound, capsys):
+        external, config, _fetches = bound
+        receipt_path = self._plant_p2c(external, config)
+        summary = json.loads(receipt_path.read_text(encoding="utf-8"))["matched_control"]
+
+        removed = {"candidate_id": "P2C", "stage": "development"}
+        write_private_json(receipt_path, removed)
+        failures = audit_matched_controls(external)
+        assert any("missing matched-control provenance" in item["error"] for item in failures)
+        assert all("/" not in item["file"] for item in failures)
+
+        tampered = {
+            "candidate_id": "P2C",
+            "stage": "development",
+            "matched_control": {**summary, "precision": "fp8"},
+        }
+        write_private_json(receipt_path, tampered)
+        failures = audit_matched_controls(external)
+        assert any("does not match the completed P1" in item["error"] for item in failures)
+
+        substituted = {
+            "candidate_id": "P2C",
+            "stage": "development",
+            "matched_control": {**summary, "control_record_sha256": "ab" * 32},
+        }
+        write_private_json(receipt_path, substituted)
+        failures = audit_matched_controls(external)
+        assert any("does not match the completed P1" in item["error"] for item in failures)
+
+        orphan = external / "qualification-runs" / "qual-b-p2c-development"
+        orphan.mkdir()
+        (orphan / "orphan.result.json").write_text("{}\n", encoding="utf-8")
+        failures = audit_matched_controls(external)
+        assert any(item["file"] == "qual-b-p2c-development-receipt.json" for item in failures)
+
+        family = external / "qualification-runs"
+        p1_receipt = family / f"{P1_LABEL}-p1-development-receipt.json"
+        body = json.loads(p1_receipt.read_text(encoding="utf-8"))
+        body["stopped"] = True
+        body["gates"] = {"stopped": True, "continue": False}
+        digest = write_private_json(p1_receipt, body)
+        record_path = control_record_path(external, P1_LABEL)
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        record["receipt_sha256"] = digest
+        write_private_json(record_path, record)
+        write_private_json(
+            receipt_path,
+            {
+                "candidate_id": "P2C",
+                "stage": "development",
+                "matched_control": summary,
+            },
+        )
+        failures = audit_matched_controls(external)
+        assert any("not a completed non-stopped P1" in item["error"] for item in failures)
+        assert all(str(external) not in json.dumps(item) for item in failures)
+        assert main(["verify-results", "--subdirectory", "qualification-runs"]) == 1
+        report = json.loads(capsys.readouterr().out)
+        rendered = json.dumps(report)
+        assert "not a completed non-stopped P1" in rendered
+        assert str(external) not in rendered

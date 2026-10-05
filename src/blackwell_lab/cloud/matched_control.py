@@ -1,10 +1,12 @@
 """Same-session P1 development control for P2C development (decision D-0027).
 
-P2C development may run only when a completed, verified P1 development
-control from the same run tag, lifecycle ledger, and resource identity is
-present. Authentication is read-only and fails closed before a model client
-exists. Records store digests only: no private paths, provider ids, addresses,
-prompts, completions, reasoning, or task bodies.
+P2C development may run only when a fully completed, non-stopped, verified
+P1 development control from the same run tag, lifecycle ledger, and resource
+identity is present. The control binds that P1 receipt, the terminal
+qualification_completed event, and the frozen precision. Authentication is
+read-only and fails closed before a model client exists. Records store
+digests only: no private paths, provider ids, addresses, prompts,
+completions, reasoning, or task bodies.
 """
 
 from __future__ import annotations
@@ -44,7 +46,10 @@ _COMMIT = "P2C development control canonical commit does not match"
 _RESOURCE = "P2C development control resource identity does not match this session"
 _DIGEST = "P2C development control digest mismatch"
 _FAILED = "P2C development control is failed or incomplete"
+_STOPPED = "P2C development control is not a completed non-stopped P1"
 _PINS = "P2C development control pins do not match the frozen contract"
+_PROVENANCE = "P2C development receipt is missing matched-control provenance"
+_RELATION = "P2C development matched-control provenance does not match the completed P1"
 _OWN_LABEL = "P2C cannot bind its own run label as the P1 control"
 _MALFORMED = "P2C development control record is malformed"
 _PRIVATE = "P2C development control record contains a private path"
@@ -92,11 +97,44 @@ def development_schedule_digest() -> str:
     return _sha256_bytes(_canonical(payload))
 
 
+def _stored_region(resource: dict) -> str:
+    """Region as the production ledger stores it. A firewall may omit it."""
+    region = resource.get("region", "")
+    if region is None:
+        region = ""
+    if not isinstance(region, str):
+        _fail(_RESOURCE)
+    return region
+
+
+def session_region(resources: list[dict]) -> str:
+    """Authenticated instance region. A firewall may carry an empty region."""
+    from blackwell_lab.cloud.mvl import FROZEN_REGION
+
+    instance = None
+    for resource in resources:
+        if not isinstance(resource, dict):
+            _fail(_RESOURCE)
+        address = resource.get("address")
+        region = _stored_region(resource)
+        if address == "linode_instance.gpu_baseline":
+            instance = resource
+            if region != FROZEN_REGION:
+                _fail(_HISTORICAL)
+        elif address == "linode_firewall.gpu_baseline" and region not in ("", FROZEN_REGION):
+            _fail(_HISTORICAL)
+    if instance is None:
+        _fail(_RESOURCE)
+    return FROZEN_REGION
+
+
 def resource_identity_sha256(resources: list[dict]) -> str:
     """Hash address, type, region, label, and the provider-id digest.
 
     The raw provider id is never stored in the preimage that leaves this
-    function's input: only its SHA-256 is hashed into the identity.
+    function's input: only its SHA-256 is hashed into the identity. Region
+    is required on the instance. A firewall may contribute an empty region,
+    which is still part of the digest.
     """
     if len(resources) != len(EXPECTED_RESOURCE_ADDRESSES):
         _fail(_RESOURCE)
@@ -110,10 +148,10 @@ def resource_identity_sha256(resources: list[dict]) -> str:
             _fail(_RESOURCE)
         seen.add(address)
         provider_id = resource.get("provider_id")
-        region = resource.get("region")
+        region = _stored_region(resource)
         if not isinstance(provider_id, str) or not provider_id:
             _fail(_RESOURCE)
-        if not isinstance(region, str) or not region:
+        if address == "linode_instance.gpu_baseline" and not region:
             _fail(_RESOURCE)
         if resource.get("type") != EXPECTED_RESOURCE_TYPES[address]:
             _fail(_RESOURCE)
@@ -147,6 +185,22 @@ def control_record_path(results_dir: Path, p1_run_label: str) -> Path:
 
     label = output_label(p1_run_label, STAGE_DEVELOPMENT, CANDIDATE_P1)
     return results_dir / QUALIFICATION_ARTIFACT_FAMILY / f"{label}-control.json"
+
+
+def p1_receipt_path(results_dir: Path, p1_run_label: str) -> Path:
+    from blackwell_lab.cloud.qualification import (
+        CANDIDATE_P1,
+        QUALIFICATION_ARTIFACT_FAMILY,
+        STAGE_DEVELOPMENT,
+        output_label,
+    )
+
+    label = output_label(p1_run_label, STAGE_DEVELOPMENT, CANDIDATE_P1)
+    return results_dir / QUALIFICATION_ARTIFACT_FAMILY / f"{label}-receipt.json"
+
+
+def session_path_for(results_dir: Path, run_tag: str) -> Path:
+    return results_dir / "infra-lifecycle" / run_tag / "session.json"
 
 
 def result_dir_for(results_dir: Path, p1_run_label: str) -> Path:
@@ -188,6 +242,7 @@ def _pin_record() -> dict[str, Any]:
         FROZEN_MODEL_ARTIFACT,
         FROZEN_MODEL_ARTIFACT_HASH,
         FROZEN_MODEL_REVISION,
+        FROZEN_PRECISION,
         FROZEN_REGION,
         FROZEN_SEED,
         FROZEN_TOP_P,
@@ -217,6 +272,7 @@ def _pin_record() -> dict[str, Any]:
         "served_model_name": APPROVED_SERVED_MODEL_NAME,
         "engine": FROZEN_ENGINE,
         "engine_version": FROZEN_ENGINE_VERSION,
+        "precision": FROZEN_PRECISION,
         "container_digest": FROZEN_CONTAINER_DIGEST,
         "workload_version": candidate_workload_version(CANDIDATE_P1),
         "temperature": candidate_temperature(CANDIDATE_P1),
@@ -333,6 +389,96 @@ def _load_ledger(results_dir: Path, run_tag: str) -> tuple[dict, bytes]:
     return ledger, payload
 
 
+def _require_completed_receipt(receipt: dict, *, config_sha256: str) -> None:
+    if not isinstance(receipt, dict):
+        _fail(_MALFORMED)
+    if receipt.get("candidate_id") != "P1" or receipt.get("stage") != "development":
+        _fail(_FAILED)
+    gates = receipt.get("gates")
+    if (
+        receipt.get("stopped") is not False
+        or not isinstance(gates, dict)
+        or gates.get("stopped") is not False
+        or gates.get("continue") is not True
+    ):
+        _fail(_STOPPED)
+    if receipt.get("config_sha256") != config_sha256:
+        _fail(_DIGEST)
+
+
+def _terminal_event_sha256(session: dict) -> str:
+    """Digest of the P1 development completion event. Later events do not change it."""
+    events = session.get("events") if isinstance(session, dict) else None
+    if not isinstance(events, list):
+        _fail(_FAILED)
+    completed: dict | None = None
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        detail = event.get("detail") if isinstance(event.get("detail"), dict) else {}
+        if detail.get("candidate_id") != "P1" or detail.get("stage") != "development":
+            continue
+        if event.get("event") == "qualification_stopped" or detail.get("stopped") is True:
+            _fail(_STOPPED)
+        if event.get("event") == "qualification_completed" and detail.get("stopped") is False:
+            completed = event
+    if completed is None:
+        _fail(_STOPPED)
+    return _sha256_bytes(_canonical(completed))
+
+
+def _require_bound_completion(results_dir: Path, run_tag: str, record: dict) -> None:
+    if (
+        record.get("stopped") is not False
+        or record.get("terminal_event") != "qualification_completed"
+    ):
+        _fail(_STOPPED)
+    label = record.get("run_label")
+    if not isinstance(label, str):
+        _fail(_MALFORMED)
+    receipt_bytes = _read_bytes(p1_receipt_path(results_dir, label), missing=_FAILED)
+    if _sha256_bytes(receipt_bytes) != record.get("receipt_sha256"):
+        _fail(_DIGEST)
+    try:
+        receipt = json.loads(receipt_bytes)
+    except json.JSONDecodeError:
+        _fail(_MALFORMED)
+    _require_completed_receipt(receipt, config_sha256=record.get("config_sha256", ""))
+    session_bytes = _read_bytes(session_path_for(results_dir, run_tag), missing=_FAILED)
+    try:
+        session = json.loads(session_bytes)
+    except json.JSONDecodeError:
+        _fail(_MALFORMED)
+    if _terminal_event_sha256(session) != record.get("terminal_event_sha256"):
+        _fail(_DIGEST)
+
+
+def _completed_receipt(*, config_sha256: str) -> dict[str, Any]:
+    return {
+        "candidate_id": "P1",
+        "stage": "development",
+        "config_sha256": config_sha256,
+        "stopped": False,
+        "gates": {"stopped": False, "continue": True},
+    }
+
+
+def _completed_session(run_tag: str) -> dict[str, Any]:
+    return {
+        "run_tag": run_tag,
+        "events": [
+            {
+                "event": "qualification_completed",
+                "detail": {
+                    "stage": "development",
+                    "candidate_id": "P1",
+                    "stopped": False,
+                },
+            }
+        ],
+    }
+
+
 def _compose_record(
     *,
     run_tag: str,
@@ -342,6 +488,8 @@ def _compose_record(
     result_sha256: str,
     ledger_sha256: str,
     resource_identity: str,
+    receipt_sha256: str,
+    terminal_event_sha256: str,
 ) -> dict[str, Any]:
     pins = _pin_record()
     if pins["evaluator_version"] != pins["expected_evaluator"]:
@@ -362,12 +510,15 @@ def _compose_record(
         "schedule_digest": pins["schedule_digest"],
         "resource_identity_sha256": resource_identity,
         "ledger_sha256": ledger_sha256,
+        "receipt_sha256": receipt_sha256,
+        "terminal_event_sha256": terminal_event_sha256,
         "model_artifact": pins["model_artifact"],
         "model_revision": pins["model_revision"],
         "model_artifact_sha256": pins["model_artifact_sha256"],
         "served_model_name": pins["served_model_name"],
         "engine": pins["engine"],
         "engine_version": pins["engine_version"],
+        "precision": pins["precision"],
         "container_digest": pins["container_digest"],
         "workload_version": pins["workload_version"],
         "temperature": pins["temperature"],
@@ -377,6 +528,8 @@ def _compose_record(
         "reasoning_mode": True,
         "completed": True,
         "verified": True,
+        "stopped": False,
+        "terminal_event": "qualification_completed",
         "failure_record": False,
         "identity_sha256": pins["identity_sha256"],
     }
@@ -396,8 +549,13 @@ def receipt_block(record: dict, control_record_sha256: str) -> dict[str, Any]:
         "ledger_sha256": record["ledger_sha256"],
         "catalog_digest": record["catalog_digest"],
         "schedule_digest": record["schedule_digest"],
+        "precision": record["precision"],
         "region": record["region"],
         "canonical_commit": record["canonical_commit"],
+        "p1_receipt_sha256": record["receipt_sha256"],
+        "terminal_event_sha256": record["terminal_event_sha256"],
+        "stopped": record["stopped"],
+        "terminal_event": record["terminal_event"],
     }
 
 
@@ -424,10 +582,10 @@ def persist_completed_p1_development_control(
     canonical_commit: str,
     config_sha256: str,
     ledger_path: Path,
+    receipt_sha256: str,
+    session_path: Path,
 ) -> None:
-    """Write the control after a completed P1 development measurement."""
-    from blackwell_lab.cloud.mvl import FROZEN_REGION
-
+    """Write the control only after a completed, non-stopped P1 receipt and event."""
     if not ledger_path.is_file():
         _fail(_FAILED)
     try:
@@ -438,9 +596,20 @@ def persist_completed_p1_development_control(
     resources = ledger.get("resources")
     if not isinstance(resources, list):
         _fail(_FAILED)
-    for resource in resources:
-        if isinstance(resource, dict) and resource.get("region") != FROZEN_REGION:
-            _fail(_HISTORICAL)
+    session_region(resources)
+    receipt_bytes = _read_bytes(p1_receipt_path(results_dir, p1_run_label), missing=_FAILED)
+    if _sha256_bytes(receipt_bytes) != receipt_sha256:
+        _fail(_DIGEST)
+    try:
+        receipt = json.loads(receipt_bytes)
+    except json.JSONDecodeError:
+        _fail(_MALFORMED)
+    _require_completed_receipt(receipt, config_sha256=config_sha256)
+    session_bytes = _read_bytes(session_path, missing=_FAILED)
+    try:
+        session = json.loads(session_bytes)
+    except json.JSONDecodeError:
+        _fail(_MALFORMED)
     result = _result_bytes(results_dir, p1_run_label)
     record = _compose_record(
         run_tag=run_tag,
@@ -450,7 +619,10 @@ def persist_completed_p1_development_control(
         result_sha256=_sha256_bytes(result),
         ledger_sha256=_sha256_bytes(ledger_bytes),
         resource_identity=resource_identity_sha256(resources),
+        receipt_sha256=receipt_sha256,
+        terminal_event_sha256=_terminal_event_sha256(session),
     )
+    _validate_record(record)
     write_private_json(control_record_path(results_dir, p1_run_label), record)
 
 
@@ -464,11 +636,13 @@ def install_verified_p1_development_control(
 ) -> dict[str, Any]:
     """Test helper path and offline fixture writer. Reads an existing ledger.
 
-    Writes one synthetic result and the control record, then returns the
+    Writes one synthetic result, a non-stopped P1 receipt, a terminal
+    qualification_completed event, and the control record, then returns the
     config section. It does not contact a provider or construct a client.
     """
     ledger, ledger_bytes = _load_ledger(results_dir, run_tag)
     resources = ledger["resources"]
+    session_region(resources)
     result_body = {
         "schema_version": "1.0.0",
         "kind": "synthetic-matched-control-result",
@@ -487,6 +661,12 @@ def install_verified_p1_development_control(
             }
         )
     )
+    receipt_digest = write_private_json(
+        p1_receipt_path(results_dir, p1_run_label),
+        _completed_receipt(config_sha256=config_digest),
+    )
+    session = _completed_session(run_tag)
+    write_private_json(session_path_for(results_dir, run_tag), session)
     record = _compose_record(
         run_tag=run_tag,
         p1_run_label=p1_run_label,
@@ -495,6 +675,8 @@ def install_verified_p1_development_control(
         result_sha256=result_digest,
         ledger_sha256=_sha256_bytes(ledger_bytes),
         resource_identity=resource_identity_sha256(resources),
+        receipt_sha256=receipt_digest,
+        terminal_event_sha256=_terminal_event_sha256(session),
     )
     control_digest = write_private_json(control_record_path(results_dir, p1_run_label), record)
     section = section_from_record(record, control_digest)
@@ -523,6 +705,7 @@ def _require_pins(record: dict) -> None:
         "served_model_name",
         "engine",
         "engine_version",
+        "precision",
         "container_digest",
         "workload_version",
         "temperature",
@@ -569,9 +752,8 @@ def authenticate_matched_development_control(
     resources = ledger.get("resources")
     if not isinstance(resources, list):
         _fail(_RESOURCE)
-    for resource in resources:
-        if not isinstance(resource, dict) or resource.get("region") != FROZEN_REGION:
-            _fail(_HISTORICAL)
+    if session_region(resources) != FROZEN_REGION:
+        _fail(_HISTORICAL)
     if _sha256_bytes(ledger_bytes) != section["ledger_sha256"]:
         _fail(_DIGEST)
     if resource_identity_sha256(resources) != section["resource_identity_sha256"]:
@@ -613,17 +795,74 @@ def authenticate_matched_development_control(
     result = _result_bytes(results_dir, section["p1_run_label"])
     if _sha256_bytes(result) != record["result_sha256"]:
         _fail(_DIGEST)
+    _require_bound_completion(results_dir, run_tag, record)
     return receipt_block(record, section["control_record_sha256"])
+
+
+def _is_p2c_development_receipt(name: str, receipt: object) -> bool:
+    if name.endswith("-p2c-development-receipt.json"):
+        return True
+    return (
+        isinstance(receipt, dict)
+        and receipt.get("candidate_id") == "P2C"
+        and receipt.get("stage") == "development"
+    )
+
+
+def _audit_p2c_relationship(family: Path, matched: object) -> str | None:
+    """Return a content-free error, or None when the P1/P2C relationship holds."""
+    from blackwell_lab.cloud.qualification import QualificationError
+
+    if not isinstance(matched, dict):
+        return _PROVENANCE
+    label = matched.get("p1_run_label")
+    if not isinstance(label, str):
+        return _RELATION
+    control_path = family / f"{label}-p1-development-control.json"
+    try:
+        payload = control_path.read_bytes()
+        record = json.loads(payload)
+    except (OSError, json.JSONDecodeError):
+        return _RELATION
+    if not isinstance(record, dict):
+        return _MALFORMED
+    try:
+        _validate_record(record)
+        _require_pins(record)
+        if (
+            record.get("completed") is not True
+            or record.get("verified") is not True
+            or record.get("failure_record") is not False
+        ):
+            return _FAILED
+        run_tag = record.get("run_tag")
+        if not isinstance(run_tag, str):
+            return _MALFORMED
+        _require_bound_completion(family.parent, run_tag, record)
+        expected = receipt_block(record, _sha256_bytes(payload))
+    except QualificationError as exc:
+        return str(exc)
+    if matched != expected:
+        return _RELATION
+    return None
 
 
 def audit_matched_controls(base: Path) -> list[dict[str, str]]:
     """Content-free checks for verify-results. Filenames only, never paths."""
+    from blackwell_lab.cloud.qualification import QualificationError
+
     if not base.is_dir():
         return []
     failures: list[dict[str, str]] = []
     family = base if base.name == "qualification-runs" else base / "qualification-runs"
     if not family.is_dir():
         return []
+    for result_dir in sorted(family.glob("*-p2c-development")):
+        if not result_dir.is_dir() or not any(result_dir.glob("*.result.json")):
+            continue
+        receipt_name = f"{result_dir.name}-receipt.json"
+        if not (family / receipt_name).is_file():
+            failures.append({"file": receipt_name, "error": _PROVENANCE})
     for control_path in sorted(family.glob("*-control.json")):
         name = control_path.name
         try:
@@ -635,8 +874,6 @@ def audit_matched_controls(base: Path) -> list[dict[str, str]]:
         if not isinstance(record, dict):
             failures.append({"file": name, "error": _MALFORMED})
             continue
-        from blackwell_lab.cloud.qualification import QualificationError
-
         try:
             _validate_record(record)
             _require_pins(record)
@@ -669,34 +906,33 @@ def audit_matched_controls(base: Path) -> list[dict[str, str]]:
         if result_hash != record.get("result_sha256"):
             failures.append({"file": name, "error": _DIGEST})
         run_tag = record.get("run_tag")
-        if isinstance(run_tag, str):
-            ledger = ledger_path_for(family.parent, run_tag)
-            try:
-                ledger_hash = _sha256_bytes(ledger.read_bytes()) if ledger.is_file() else ""
-            except OSError:
-                ledger_hash = ""
-            if ledger_hash != record.get("ledger_sha256"):
-                failures.append({"file": name, "error": _DIGEST})
+        if not isinstance(run_tag, str):
+            failures.append({"file": name, "error": _MALFORMED})
+            continue
+        ledger = ledger_path_for(family.parent, run_tag)
+        try:
+            ledger_hash = _sha256_bytes(ledger.read_bytes()) if ledger.is_file() else ""
+        except OSError:
+            ledger_hash = ""
+        if ledger_hash != record.get("ledger_sha256"):
+            failures.append({"file": name, "error": _DIGEST})
+            continue
+        try:
+            _require_bound_completion(family.parent, run_tag, record)
+        except QualificationError as exc:
+            failures.append({"file": name, "error": str(exc)})
     for receipt_path in sorted(family.glob("*-receipt.json")):
+        name = receipt_path.name
         try:
             receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            if name.endswith("-p2c-development-receipt.json"):
+                failures.append({"file": name, "error": _PROVENANCE})
+            continue
+        if not _is_p2c_development_receipt(name, receipt):
             continue
         matched = receipt.get("matched_control") if isinstance(receipt, dict) else None
-        if not isinstance(matched, dict):
-            continue
-        cited = matched.get("control_record_sha256")
-        label = matched.get("p1_run_label")
-        if not isinstance(cited, str) or not isinstance(label, str):
-            failures.append(
-                {"file": receipt_path.name, "error": "matched control provenance is malformed"}
-            )
-            continue
-        control_path = family / f"{label}-p1-development-control.json"
-        try:
-            actual = _sha256_bytes(control_path.read_bytes()) if control_path.is_file() else ""
-        except OSError:
-            actual = ""
-        if actual != cited:
-            failures.append({"file": receipt_path.name, "error": _DIGEST})
+        error = _audit_p2c_relationship(family, matched)
+        if error is not None:
+            failures.append({"file": name, "error": error})
     return failures

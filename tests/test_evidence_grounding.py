@@ -1527,7 +1527,7 @@ def _ready_ledger():
                 "address": "linode_firewall.gpu_baseline",
                 "type": "linode_firewall",
                 "provider_id": "555",
-                "region": "us-iad-2",
+                "region": "",
             },
         ],
     }

@@ -1577,9 +1577,12 @@ The P1/P2C experimental difference stays the D-0026 surface:
 `candidate_id`, `workload_version`, `controller`, and the version-bound
 `evidence_refs` schema. Prompts, catalog tasks, evaluator 3.1.0, accepted
 answers, thresholds, scheduling, model, engine, precision, and serving
-pins are unchanged. A completed verified P1 measurement may be the
-control when the project quality floor stops the stage. A failure record
-or a missing result may not.
+pins are unchanged. Only a fully completed, non-stopped, verified P1
+development measurement may be the control. A stopped gate, including a
+project quality-floor stop, a failure record, or a missing result may not.
+The control binds the P1 receipt, the terminal `qualification_completed`
+event, and the frozen precision. A production firewall ledger entry may
+omit region; the region binding is the authenticated instance region.
 
 Candidate identity digests include `region`. Moving the lock from
 `us-sea` to `us-iad-2` is the only serialization change. Digests at the
