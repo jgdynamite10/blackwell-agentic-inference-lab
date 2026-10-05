@@ -75,11 +75,19 @@ CANDIDATE_C1 = "C1"
 CANDIDATE_C2 = "C2"
 CANDIDATE_P1 = "P1"
 CANDIDATE_P2 = "P2"
-AUTHORIZED_CANDIDATES = (CANDIDATE_C1, CANDIDATE_C2, CANDIDATE_P1, CANDIDATE_P2)
+CANDIDATE_P2C = "P2C"
+AUTHORIZED_CANDIDATES = (
+    CANDIDATE_C1,
+    CANDIDATE_C2,
+    CANDIDATE_P1,
+    CANDIDATE_P2,
+    CANDIDATE_P2C,
+)
 C1_TEMPERATURE = 1.0
 C2_TEMPERATURE = 0.2
 P1_TEMPERATURE = C2_TEMPERATURE
 P2_TEMPERATURE = C2_TEMPERATURE
+P2C_TEMPERATURE = C2_TEMPERATURE
 FROZEN_MAX_TOKENS = 1024
 
 STAGE_DEVELOPMENT = "development"
@@ -261,11 +269,19 @@ def require_complete_stage_evidence(stage: str, outcomes: Sequence[object]) -> N
 P1_WORKLOAD_VERSION = "2.4.1"
 P2_WORKLOAD_VERSION = "2.5.0"
 P2_CONTROLLER = CONTROLLER_EVIDENCE_GROUNDING_V1
+#: P2C is the controlled public-catalog version of P2 (decision D-0026):
+#: the same workload 2.5.0 and ``evidence-grounding-v1`` treatment, but
+#: every stage executes the D-0019 catalog schedule that P1 executes. P1
+#: is its control; the sealed P2 variants are a different instrument.
+P2C_WORKLOAD_VERSION = P2_WORKLOAD_VERSION
+P2C_CONTROLLER = P2_CONTROLLER
+P2C_CONTROL_CANDIDATE = CANDIDATE_P1
 CANDIDATE_WORKLOAD_VERSIONS = {
     CANDIDATE_C1: QUALIFICATION_WORKLOAD_VERSION,
     CANDIDATE_C2: QUALIFICATION_WORKLOAD_VERSION,
     CANDIDATE_P1: P1_WORKLOAD_VERSION,
     CANDIDATE_P2: P2_WORKLOAD_VERSION,
+    CANDIDATE_P2C: P2C_WORKLOAD_VERSION,
 }
 #: Controller bound to each candidate. It must agree with the workload's
 #: own binding (:data:`blackwell_lab.workload.evidence.WORKLOAD_CONTROLLERS`).
@@ -274,8 +290,50 @@ CANDIDATE_CONTROLLERS: dict[str, str | None] = {
     CANDIDATE_C2: None,
     CANDIDATE_P1: None,
     CANDIDATE_P2: P2_CONTROLLER,
+    CANDIDATE_P2C: P2C_CONTROLLER,
 }
-_UNKNOWN_CANDIDATE = "qualification candidate must be C1, C2, P1, or P2"
+UNKNOWN_CANDIDATE_MESSAGE = "qualification candidate must be C1, C2, P1, P2, or P2C"
+_UNKNOWN_CANDIDATE = UNKNOWN_CANDIDATE_MESSAGE
+
+#: Candidates whose every stage executes the public catalog schedule.
+#: P2 is absent on purpose: its development and holdout are sealed.
+CATALOG_CANDIDATES = (CANDIDATE_C1, CANDIDATE_C2, CANDIDATE_P1, CANDIDATE_P2C)
+#: Config keys that would select, override, or privatize the P2C task
+#: schedule. No candidate supports a private scenario or a frozen template
+#: override; P2C refuses the keys explicitly so a config cannot even carry
+#: them.
+P2C_FORBIDDEN_CONFIG_KEYS = frozenset(
+    {
+        "sealed_set",
+        "custody_dir",
+        "template_ids",
+        "frozen_template_id",
+        "frozen_template_ids",
+        "private_scenarios",
+        "private_scenario",
+        "scenarios",
+        "scenario_ids",
+        "task_source",
+    }
+)
+P2C_SYSTEM_PROMPT_SHA256 = "37b3a4fb615dc21c8d39a5301dc4318870fea3498fbed196c50bfcbe67de1bd3"
+P2C_EVALUATOR_VERSION = "3.1.0"
+P2C_TASK_SOURCE = "catalog"
+#: The frozen P2C contract. Every value is re-derived from the running code
+#: by :func:`require_p2c_contract` before any model client exists.
+P2C_CONTRACT: dict[str, Any] = {
+    "candidate_id": CANDIDATE_P2C,
+    "workload_version": P2C_WORKLOAD_VERSION,
+    "controller": P2C_CONTROLLER,
+    "system_prompt_sha256": P2C_SYSTEM_PROMPT_SHA256,
+    "temperature": P2C_TEMPERATURE,
+    "top_p": FROZEN_TOP_P,
+    "seed": FROZEN_SEED,
+    "max_tokens": FROZEN_MAX_TOKENS,
+    "evaluator_version": P2C_EVALUATOR_VERSION,
+    "task_source": P2C_TASK_SOURCE,
+    "control_candidate": P2C_CONTROL_CANDIDATE,
+}
 
 
 def candidate_workload_version(candidate_id: str) -> str:
@@ -308,6 +366,8 @@ def candidate_temperature(candidate_id: str) -> float:
         return P1_TEMPERATURE
     if candidate_id == CANDIDATE_P2:
         return P2_TEMPERATURE
+    if candidate_id == CANDIDATE_P2C:
+        return P2C_TEMPERATURE
     raise ConfigError(_UNKNOWN_CANDIDATE)
 
 
@@ -392,6 +452,172 @@ def serialize_experimental_behavior(identity: str) -> bytes:
 
 def experimental_configuration_digest(identity: str) -> str:
     return hashlib.sha256(serialize_experimental_behavior(identity)).hexdigest()
+
+
+# --------------------------------------------------------------------------
+# P2C: controlled public-catalog qualification (decision D-0026)
+# --------------------------------------------------------------------------
+
+
+def stage_schedule(stage: str) -> dict[str, Any]:
+    """The ordered D-0019 catalog schedule of one stage, as the runner derives it.
+
+    Mirrors ``realbench.run_real_cell`` exactly: warm-up pass ``i`` uses
+    seed ``FROZEN_SEED - i - 1`` and the single measured repetition uses
+    ``FROZEN_SEED + 1``. The same function serves every catalog candidate,
+    so P1 and P2C cannot be scheduled differently.
+    """
+    spec = stage_spec(stage)
+    template_ids = tuple(spec["template_ids"])
+    tasks = int(spec["tasks"])
+    warmup = [
+        list(generate_task_instances(template_ids, tasks, FROZEN_SEED - index - 1))
+        for index in range(int(spec["warmup_passes"]))
+    ]
+    measured = [
+        list(generate_task_instances(template_ids, tasks, FROZEN_SEED + repetition))
+        for repetition in range(1, int(spec["repetitions"]) + 1)
+    ]
+    return {
+        "stage": stage,
+        "template_ids": template_ids,
+        "tasks": tasks,
+        "seed": FROZEN_SEED,
+        "warmup_seeds": tuple(FROZEN_SEED - index - 1 for index in range(len(warmup))),
+        "measured_seeds": tuple(
+            FROZEN_SEED + repetition for repetition in range(1, len(measured) + 1)
+        ),
+        "warmup": warmup,
+        "measured": measured,
+    }
+
+
+def p2c_experiment_record() -> dict[str, Any]:
+    """Content-free provenance of the controlled experiment (receipts, reports)."""
+    return {
+        "kind": "controlled-public-catalog",
+        "control_candidate": P2C_CONTROL_CANDIDATE,
+        "treatment": P2C_CONTROLLER,
+        "task_source": P2C_TASK_SOURCE,
+        "schedule": "d-0019-catalog",
+        "blind_generalization_evidence": False,
+        "comparable_with_private_sealed_scores": False,
+    }
+
+
+def require_p2c_contract() -> dict[str, Any]:
+    """Fail closed unless the running code still satisfies the frozen P2C contract.
+
+    Re-derives every contract value from the live candidate table, prompt
+    table, generation pins, evaluator, sealed-candidate table, and stage
+    specs. Called from config validation, so it runs before any model
+    client is constructed and before any turn is streamed.
+    """
+    from blackwell_lab.workload.agent import SYSTEM_PROMPT_V241, system_prompt
+    from blackwell_lab.workload.evaluator import EVALUATOR_VERSION
+
+    problems: list[str] = []
+    if CANDIDATE_P2C not in AUTHORIZED_CANDIDATES or CANDIDATE_P2C not in CATALOG_CANDIDATES:
+        problems.append("candidate table")
+    if candidate_workload_version(CANDIDATE_P2C) != P2C_CONTRACT["workload_version"]:
+        problems.append("workload_version")
+    if candidate_controller(CANDIDATE_P2C) != P2C_CONTRACT["controller"]:
+        problems.append("controller")
+    if candidate_controller(CANDIDATE_P2C) != CONTROLLER_EVIDENCE_GROUNDING_V1:
+        problems.append("controller")
+    if candidate_temperature(CANDIDATE_P2C) != P2C_CONTRACT["temperature"]:
+        problems.append("temperature")
+    if FROZEN_TOP_P != P2C_CONTRACT["top_p"]:
+        problems.append("top_p")
+    if FROZEN_SEED != P2C_CONTRACT["seed"]:
+        problems.append("seed")
+    if FROZEN_MAX_TOKENS != P2C_CONTRACT["max_tokens"]:
+        problems.append("max_tokens")
+    if EVALUATOR_VERSION != P2C_CONTRACT["evaluator_version"]:
+        problems.append("evaluator")
+    scenario = next(iter(catalog().values()))
+    prompt = system_prompt(scenario, candidate_workload_version(CANDIDATE_P2C))
+    control_prompt = system_prompt(scenario, candidate_workload_version(P2C_CONTROL_CANDIDATE))
+    if prompt != SYSTEM_PROMPT_V241 or prompt != control_prompt:
+        problems.append("system_prompt")
+    if hashlib.sha256(prompt.encode("utf-8")).hexdigest() != P2C_CONTRACT["system_prompt_sha256"]:
+        problems.append("system_prompt")
+    if CANDIDATE_P2C in SEALED_CANDIDATES or any(
+        requires_sealed_set(CANDIDATE_P2C, stage) for stage in AUTHORIZED_STAGES
+    ):
+        problems.append("task_source")
+    if candidate_temperature(P2C_CONTROL_CANDIDATE) != candidate_temperature(CANDIDATE_P2C):
+        problems.append("control temperature")
+    for stage in AUTHORIZED_STAGES:
+        spec = stage_spec(stage)
+        if spec["repetitions"] != STAGE_REPETITIONS or spec["concurrency"] != STAGE_CONCURRENCY:
+            problems.append(f"{stage} schedule")
+    if problems:
+        raise QualificationError(
+            "P2C contract drift: " + ", ".join(dict.fromkeys(problems)) + "; nothing was executed"
+        )
+    return dict(P2C_CONTRACT)
+
+
+def require_p2c_config(config: dict, *, candidate_id: str) -> None:
+    """P2C configs carry no sealed, custody, private-scenario, or schedule keys.
+
+    Also pins the workload, controller, and generation sections to the
+    contract when they are present (absence falls back to the frozen
+    values that the CLI assembles).
+    """
+    if candidate_id != CANDIDATE_P2C:
+        return
+    present = sorted(key for key in P2C_FORBIDDEN_CONFIG_KEYS if key in config)
+    if present:
+        raise ConfigError(
+            "P2C executes the public catalog schedule and refuses config keys: "
+            + ", ".join(present)
+        )
+    if config.get("workload_version") not in (None, P2C_CONTRACT["workload_version"]):
+        raise ConfigError("qualify-agent P2C workload_version must equal 2.5.0")
+    if config.get("controller") not in (None, P2C_CONTRACT["controller"]):
+        raise ConfigError("qualify-agent P2C controller must equal evidence-grounding-v1")
+    generation = config.get("generation") or {}
+    if generation.get("temperature") not in (None, P2C_CONTRACT["temperature"]):
+        raise ConfigError("qualify-agent P2C generation.temperature must equal 0.2")
+    if generation.get("seed") not in (None, P2C_CONTRACT["seed"]):
+        raise ConfigError("qualify-agent P2C generation.seed must equal 20260906")
+    if generation.get("max_tokens") not in (None, P2C_CONTRACT["max_tokens"]):
+        raise ConfigError("qualify-agent P2C generation.max_tokens must equal 1024")
+    if generation.get("top_p") not in (None, P2C_CONTRACT["top_p"]):
+        raise ConfigError("qualify-agent P2C generation.top_p must equal 0.95")
+    for key in ("system_prompt", "prompt", "evaluator_version", "evaluator"):
+        if key in config or key in generation:
+            raise ConfigError(f"qualify-agent P2C does not accept a {key} override")
+    require_p2c_contract()
+
+
+def require_p2c_runtime(candidate_id: str, *, custody_dir: str | None) -> None:
+    """``--custody-dir`` is refused for P2C before the config is even read."""
+    if candidate_id == CANDIDATE_P2C and custody_dir is not None:
+        raise ConfigError("P2C executes the public catalog schedule; --custody-dir is refused")
+
+
+def require_p2c_catalog_execution(
+    candidate_id: str,
+    *,
+    stage: str,
+    template_ids: Sequence[str] | None,
+    sealed_set: object,
+    sealed_tasks: object,
+) -> None:
+    """The assembled P2C cell must be exactly the catalog cell of its stage.
+
+    Called after the run specification is assembled and before the model
+    client is constructed.
+    """
+    if candidate_id != CANDIDATE_P2C:
+        return
+    if sealed_set is not None or sealed_tasks is not None:
+        raise ConfigError("P2C must not execute sealed input")
+    if template_ids is None or tuple(template_ids) != tuple(stage_spec(stage)["template_ids"]):
+        raise ConfigError(f"P2C {stage} must schedule exactly the frozen catalog templates")
 
 
 def require_safe_run_label(run_label: str) -> str:
@@ -596,6 +822,9 @@ def validate_authorized_qualification_config(
         config=config,
         artifact_family=QUALIFICATION_ARTIFACT_FAMILY,
     )
+    # P2C (D-0026) is checked before the generic sealed-binding rule so a
+    # sealed or schedule-overriding key on P2C fails with a P2C reason.
+    require_p2c_config(config, candidate_id=candidate_id)
     require_sealed_binding(config, candidate_id=candidate_id, stage=stage)
 
 
@@ -991,6 +1220,13 @@ def sanitized_receipt(
         # Content-free sealed-stage provenance (digests, identity, stage,
         # count). Present only for sealed cells so other receipts are unchanged.
         **({"sealed_set": sealed_set.provenance()} if sealed_set is not None else {}),
+        # Controlled-experiment provenance (D-0026). Present only for P2C so
+        # every other receipt is unchanged.
+        **(
+            {"controlled_experiment": p2c_experiment_record()}
+            if candidate_id == CANDIDATE_P2C
+            else {}
+        ),
         "gates": gates,
         "stopped": stopped,
         "files": list(files),

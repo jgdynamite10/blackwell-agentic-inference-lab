@@ -22,12 +22,15 @@ Subcommands map one-to-one to the separated workflows required by Phase 3A:
                       (provider-native, three cells; fail-closed).
 - ``qualify-agent``   owner-approved agent-quality qualification
                       (C1/C2 on workload 2.4.0, P1 on workload 2.4.1,
-                      P2 on workload 2.5.0 with the evidence-grounding-v1
-                      controller; frozen dev/holdout/freeze; fail-closed;
-                      no infrastructure changes). P2 development/holdout
-                      cells bind to a D-0023 sealed custody stage through
-                      ``--custody-dir`` (external, never printed) and
-                      ``--validate-only`` checks the binding offline.
+                      P2 and P2C on workload 2.5.0 with the
+                      evidence-grounding-v1 controller; frozen
+                      dev/holdout/freeze; fail-closed; no infrastructure
+                      changes). P2 development/holdout cells bind to a
+                      D-0023 sealed custody stage through ``--custody-dir``
+                      (external, never printed); P2C is the controlled
+                      public-catalog version of P2 and refuses custody
+                      input at every stage (D-0026). ``--validate-only``
+                      checks the binding offline.
 - ``full-baseline``   DISABLED: the research-grade 12-cell baseline is not
                       part of the MVL.
 - ``verify-results``  external verification of persisted genuine results;
@@ -1142,6 +1145,11 @@ def _sealed_validation_report(
         "sealed_input": binding is not None,
         **({"sealed_set": binding.provenance()} if binding is not None else {}),
         **(
+            {"controlled_experiment": qualification.p2c_experiment_record()}
+            if candidate_id == qualification.CANDIDATE_P2C
+            else {}
+        ),
+        **(
             {
                 "sealed_tasks_loaded": len(sealed.tasks),
                 "sealed_scenario_count": len(sealed.scenario_ids),
@@ -1180,9 +1188,12 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         candidate_id = args.candidate
         stage = args.stage
         if candidate_id not in qualification.AUTHORIZED_CANDIDATES:
-            raise ConfigError("qualification candidate must be C1, C2, P1, or P2")
+            raise ConfigError(qualification.UNKNOWN_CANDIDATE_MESSAGE)
         if stage not in qualification.AUTHORIZED_STAGES:
             raise ConfigError("qualification stage must be development, holdout, or freeze")
+        # P2C (D-0026) is a catalog cell at every stage: a custody directory
+        # is refused before the config is read.
+        qualification.require_p2c_runtime(candidate_id, custody_dir=custody_dir)
         qualification.require_frozen_split()
         qualification.refuse_mvl_identities(
             run_tag=args.run_tag,
@@ -1343,6 +1354,13 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         # The workload/controller binding is re-checked against the
         # assembled spec before any client exists (fail closed, no inference).
         require_controller_binding(run_spec.workload_version, run_spec.controller)
+        qualification.require_p2c_catalog_execution(
+            candidate_id,
+            stage=stage,
+            template_ids=run_spec.template_ids,
+            sealed_set=run_spec.sealed_set,
+            sealed_tasks=sealed,
+        )
         client = OpenAICompatibleClient(
             endpoint["base_url"],
             endpoint["model"],
@@ -1638,8 +1656,8 @@ def build_parser() -> argparse.ArgumentParser:
         "qualify-agent",
         help=(
             "Owner-approved agent-quality qualification "
-            "(C1/C2 on workload 2.4.0, P1 on workload 2.4.1, P2 on workload "
-            "2.5.0 with the evidence-grounding-v1 controller; "
+            "(C1/C2 on workload 2.4.0, P1 on workload 2.4.1, P2 and P2C on "
+            "workload 2.5.0 with the evidence-grounding-v1 controller; "
             "frozen development/holdout/freeze stages)."
         ),
     )
@@ -1648,12 +1666,15 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2"),
+        choices=("C1", "C2", "P1", "P2", "P2C"),
         help=(
             "C1 (temperature 1.0, workload 2.4.0), "
             "C2 (temperature 0.2, workload 2.4.0), "
             "P2 (temperature 0.2, workload 2.5.0, evidence-grounding-v1 "
-            "controller), or "
+            "controller), "
+            "P2C (the controlled public-catalog version of P2: same workload "
+            "2.5.0 and controller, every stage on the D-0019 catalog schedule "
+            "P1 uses; P1 is its control), or "
             "P1, the workload 2.4.1 prompt-only variant at temperature 0.2."
         ),
     )
@@ -1681,7 +1702,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Absolute path to the external D-0023 custody directory that holds "
             "the sealed stage bound by the config's sealed_set section "
             "(decision D-0024). Required for P2 development and holdout; "
-            "refused for every other candidate/stage. It must lie outside "
+            "refused for every other candidate/stage, including every P2C "
+            "stage (decision D-0026). It must lie outside "
             "every Git repository, contain no symlink component, and keep "
             "0700/0600 modes. Only the requested stage is opened. The path "
             "is never printed and never persisted in receipts, manifests, or Git."

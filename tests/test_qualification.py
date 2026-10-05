@@ -567,13 +567,13 @@ class TestCandidates:
         assert candidate_identity_digest("C1") != candidate_identity_digest("C2")
 
     def test_unknown_candidate_is_rejected(self):
-        with pytest.raises(ConfigError, match="C1, C2, P1, or P2"):
+        with pytest.raises(ConfigError, match="C1, C2, P1, P2, or P2C"):
             frozen_candidate_fields("C3")
-        with pytest.raises(ConfigError, match="C1, C2, P1, or P2"):
+        with pytest.raises(ConfigError, match="C1, C2, P1, P2, or P2C"):
             candidate_temperature("C3")
-        with pytest.raises(ConfigError, match="C1, C2, P1, or P2"):
+        with pytest.raises(ConfigError, match="C1, C2, P1, P2, or P2C"):
             candidate_workload_version("C3")
-        with pytest.raises(ConfigError, match="C1, C2, P1, or P2"):
+        with pytest.raises(ConfigError, match="C1, C2, P1, P2, or P2C"):
             candidate_controller("C3")
 
 
