@@ -1618,7 +1618,7 @@ def _stage_outcomes(stage: str) -> list[dict]:
 class TestCandidateP2:
     def test_p2_identity_binds_workload_250_and_the_controller(self):
         assert CANDIDATE_P2 == "P2" and CANDIDATE_P2 in AUTHORIZED_CANDIDATES
-        assert AUTHORIZED_CANDIDATES == ("C1", "C2", "P1", "P2")
+        assert AUTHORIZED_CANDIDATES == ("C1", "C2", "P1", "P2", "P2C")
         assert CANDIDATE_WORKLOAD_VERSIONS["P2"] == P2_WORKLOAD_VERSION == "2.5.0"
         assert P2_CONTROLLER == CANDIDATE_CONTROLLERS["P2"] == "evidence-grounding-v1"
         assert candidate_controller("P2") == "evidence-grounding-v1"
@@ -1631,7 +1631,7 @@ class TestCandidateP2:
         assert p2["system_prompt"] == SYSTEM_PROMPT_V241
         assert p2["system_prompt"] == experimental_behavior_fields("P1")["system_prompt"]
         digests = {candidate_identity_digest(c) for c in AUTHORIZED_CANDIDATES}
-        assert len(digests) == 4
+        assert len(digests) == 5
         assert candidate_identity_digest("P2") != experimental_configuration_digest("P2")
         assert experimental_configuration_digest("P2") != experimental_configuration_digest("P1")
 

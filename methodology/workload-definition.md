@@ -119,6 +119,15 @@ identical to C2. C1, C2, and P1 serialization and identity digests are
 unchanged. This records a controller addition; it is not a claim that
 qualification quality improved.
 
+Candidate **P2C** (decision D-0026) is the controlled public-catalog
+version of P2: the same workload 2.5.0, controller, prompt bytes,
+temperature 0.2, and pins, executed on exactly the D-0019 catalog schedule
+that P1 executes (development, holdout, and freeze). P2C never binds a
+`sealed_set` and never reads custody; P1 is its control, and the P1/P2C
+pair isolates the effect of `evidence-grounding-v1`. P2C provides no
+blind-generalization evidence, and its catalog scores are not comparable
+with private sealed-set scores. P2 remains the sealed candidate.
+
 Each turn must produce exactly one native OpenAI-compatible function call.
 The six `TOOL_SPECS` contracts are projected onto deterministic OpenAI
 function definitions (`tools` on every chat-completions request;

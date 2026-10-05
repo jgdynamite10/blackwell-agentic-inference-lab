@@ -1434,3 +1434,108 @@ including adversarial rejection tests for scrambled identifiers, swapped
 stages, modified or substituted scenarios, grouped input, 20 copies of one
 scenario, unknown identifiers, 11/9 and shifted distributions, 19 and 21
 entries, duplicate identifiers, and reversed directory iteration.
+
+## 2026-10-05 — D-0026: Candidate P2C, the controlled public-catalog qualification of evidence-grounding-v1
+
+**This decision authorizes no inference, no provider access, no
+provisioning, no model download, and no live qualification.** No
+qualification result predates it. The evaluator (3.1.0), accepted answers,
+thresholds, scenario catalog, system prompts, tool-description prose,
+sampling rules, model, engine, precision, container, infrastructure,
+candidates C1, C2, P1, and P2, the D-0023 custody controller, and the
+D-0024 execution adapter are unchanged. D-0022 through D-0025 are not
+edited.
+
+**Problem.** P2 (D-0022) binds workload 2.5.0 and the
+`evidence-grounding-v1` controller, but under D-0024 its development and
+holdout stages execute a private sealed custody stage rather than the
+public catalog schedule that P1 executes. A P2 score therefore differs
+from a P1 score in two respects at once: the controller and the task
+source. The effect of the controller alone cannot be isolated from the
+P1/P2 pair, and the sealed stages are not yet materialized or imported.
+
+**Decision.** Candidate **P2C** is added as the controlled public-catalog
+version of P2. Its contract is:
+
+1. **Identity.** `candidate_id` `P2C`; `workload_version` `2.5.0`;
+   controller `evidence-grounding-v1`; system prompt `SYSTEM_PROMPT_V241`
+   byte for byte (SHA-256
+   `37b3a4fb615dc21c8d39a5301dc4318870fea3498fbed196c50bfcbe67de1bd3`);
+   temperature 0.2; `top_p` 0.95; seed 20260906; `max_tokens` 1024;
+   evaluator 3.1.0; task source the public catalog; no `sealed_set`; no
+   custody directory. Model, engine, precision, container, and
+   infrastructure pins are those of every other candidate. The identity
+   digest is produced by the unchanged candidate serialization
+   (`49b279fb76dfa3ee3da2dbf8bdd15c7547441faa386c14c97f7787aeff1a069a`
+   at this commit); the C1, C2, P1, and P2 serializations and digests are
+   byte-identical to before.
+2. **P1 is the valid control.** P2C differs from P1 only in
+   `candidate_id`, `workload_version`, `controller`, and the
+   version-bound `evidence_refs` argument of the `recommend_remediation`
+   native-tool schema that the controller requires. System prompt bytes,
+   tool-description prose, scenarios, schedule, sampling, generation
+   pins, model, serving, and evaluator are identical. **P2C tests the
+   effect of `evidence-grounding-v1`** and nothing else.
+3. **Schedule.** P2C development, holdout, and freeze use exactly the
+   existing D-0019 catalog scheduling path: the frozen 6/4 template split,
+   20/20/200 tasks, zero warm-up passes for development and holdout and
+   one for freeze, one measured repetition, seed derivation
+   `FROZEN_SEED - i - 1` for warm-up pass `i` and `FROZEN_SEED + 1` for
+   the measured repetition, and the public catalog scenario bytes. The
+   ordered P2C schedule equals the ordered P1 schedule at every stage.
+   P2C never calls `load_sealed_stage` and never reads custody.
+4. **Rejections, before any model client exists.** A `sealed_set`
+   section, a `--custody-dir` argument, any workload other than 2.5.0,
+   any controller other than `evidence-grounding-v1`, a different
+   prompt, temperature, evaluator, seed, `top_p`, or `max_tokens`, any
+   schedule-overriding or private-scenario key (`template_ids`,
+   `frozen_template_id(s)`, `private_scenario(s)`, `scenarios`,
+   `scenario_ids`, `task_source`, `custody_dir`), and any task count,
+   warm-up, or repetition count other than the stage's are refused by
+   config validation. The running code is re-checked against the frozen
+   contract (`require_p2c_contract`) at the same point, and the
+   assembled run specification is re-checked for catalog execution
+   immediately before `OpenAICompatibleClient` is constructed. No turn
+   is streamed on any of these paths.
+5. **P2 is preserved.** P2 remains the sealed candidate: its development
+   and holdout still require the D-0024 binding and custody directory,
+   remain blocked until the private sets are materialized and imported,
+   and are not deleted or repurposed. The sealed-candidate table is still
+   exactly `("P2",)`.
+6. **Instruments are not interchangeable.** The private sealed variants
+   are a **different future instrument**. **Private-set scores cannot be
+   compared with P1/P2C catalog scores**, and P2C provides **no
+   blind-generalization evidence**: its tasks are the public catalog that
+   candidate wording was developed against. Reports must keep P2C
+   results in the controlled-catalog category and must not present them
+   as holdout generalization.
+7. **What success may authorize.** Successful P2C qualification may
+   authorize the frozen catalog workload (workload 2.5.0 with
+   `evidence-grounding-v1`) for cross-cloud comparison, only through the
+   existing approval process (owner decision in this log plus the
+   separate digest-bearing approval phrases). It authorizes nothing by
+   itself.
+8. **Provenance.** P2C receipts and validate-only reports carry a
+   content-free `controlled_experiment` block (`control_candidate: P1`,
+   `treatment: evidence-grounding-v1`, `task_source: catalog`,
+   `blind_generalization_evidence: false`,
+   `comparable_with_private_sealed_scores: false`). Other candidates'
+   receipts are unchanged. Run manifests record
+   `workload.task_source = {"kind": "catalog"}` with the public
+   `catalog_digest`, as for every catalog cell.
+9. **No new private support.** This decision adds no private scenario,
+   frozen-template, or alternative task-source mechanism; the only
+   mentions of such keys in the codebase are the P2C refusal list.
+   Controller text (observation identifiers, eligibility codes, the
+   single rejection category, and the counts-only summary) carries no
+   catalog answer or scenario content.
+
+**Rationale.** A controlled comparison needs a control that differs in
+one treatment. P1 on the public catalog and P2C on the same public
+catalog, same prompt bytes, same schedule, same evaluator, differ only in
+the controller, so the P1/P2C pair measures the controller. The sealed P2
+instrument answers a different question (generalization to tasks the
+wording was never developed against) and stays separate. Tested only with
+the public catalog and synthetic fixtures; no real bundle, custody
+package, private result, provider, credential, inference, download,
+publication system, or the secondary repository was accessed.
