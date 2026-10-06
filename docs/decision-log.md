@@ -1583,13 +1583,20 @@ project quality-floor stop, a failure record, or a missing result may not.
 The control binds the P1 receipt, the terminal `qualification_completed`
 event, and the frozen precision. A production firewall ledger entry may
 omit region; the region binding is the authenticated instance region.
-Before live provenance, P1 development validates that reconciled session:
-run tag, provider check, the expected instance and firewall, provider
-ids, labels, the `us-iad-2` instance region, and a valid resource
-identity. The `qualification_completed` event carries the P1 run label
-and config digest. Exactly one such event is authenticated with the
-receipt. `verify-results` recomputes the resource identity from the
-ledger.
+Before any lifecycle path is built, the run tag must satisfy the
+lifecycle safe-run-tag contract. Before live provenance, P1 and P2C
+development capture one content-free session snapshot: run tag, ledger
+digest, resource-identity digest, and region. The ledger must be
+reconciled, provider-checked, and free of a pending operation. Its
+instance label is `bwlab-{run_tag}`, its firewall label is
+`bwlab-fw-{run_tag}`, and both resources carry `blackwell-lab`,
+`run:{run_tag}`, `ttl-hours:6`, and `phase:3`. A copied ledger whose
+labels or tags still name another run is refused. The same snapshot is
+checked again after measurement and is the only ledger identity a P1
+control may bind. The `qualification_completed` event carries the P1
+run label and config digest. Exactly one such event is authenticated
+with the receipt. `verify-results` recomputes the resource identity
+from the ledger.
 
 Candidate identity digests include `region`. Moving the lock from
 `us-sea` to `us-iad-2` is the only serialization change. Digests at the

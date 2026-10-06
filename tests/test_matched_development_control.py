@@ -392,7 +392,7 @@ class TestProductionLedgerAndPins:
         paths = lifecycle.lifecycle_paths(external, RUN_TAG)
         write_private_json(paths.ledger_path, ledger)
         config = qualification_config_dict("P2C", "development")
-        with pytest.raises(QualificationError, match="historical or cross-region"):
+        with pytest.raises(QualificationError, match="P1 development session"):
             install_verified_p1_development_control(
                 external,
                 config,
@@ -667,14 +667,61 @@ class TestPreInferenceSession:
         def malformed_identity(ledger):
             ledger["resources"][0]["label"] = 12
 
+        def copied_other_run(ledger):
+            for resource in ledger["resources"]:
+                if resource["type"] == "linode_instance":
+                    resource["label"] = "bwlab-other-run"
+                else:
+                    resource["label"] = "bwlab-fw-other-run"
+                resource["tags"] = [
+                    "blackwell-lab",
+                    "run:other-run",
+                    "ttl-hours:6",
+                    "phase:3",
+                ]
+
+        def not_reconciled(ledger):
+            ledger["reconciled"] = False
+
+        def provider_not_checked(ledger):
+            ledger["reconciliation"]["provider_checked"] = False
+
         for mutate in (
             wrong_firewall_region,
             missing_provider_id,
             wrong_address_and_type,
             malformed_identity,
+            copied_other_run,
+            not_reconciled,
+            provider_not_checked,
         ):
             run(mutate)
         assert provenance_calls == [] and constructed == [] and streamed == [] and fetches == []
+
+    def test_pending_operation_never_reaches_inference(self, tmp_path, monkeypatch, capsys):
+        from test_qualification import qual_argv
+
+        monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+        monkeypatch.setattr(cli, "_git_head", lambda: COMMIT)
+        monkeypatch.setattr(cli, "_tree_clean", lambda: True)
+        external = tmp_path / "external"
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        paths = lifecycle.lifecycle_paths(external, RUN_TAG)
+        write_private_json(paths.ledger_path, _ready_ledger())
+        write_private_json(paths.ledger_path.parent / "pending.json", {"operation": "apply"})
+        constructed, streamed = _spy(monkeypatch)
+        provenance_calls: list[object] = []
+        monkeypatch.setattr(
+            provenance,
+            "verify_live_provenance",
+            lambda **kwargs: provenance_calls.append(kwargs),
+        )
+        config = qualification_config_dict("P1", "development")
+        path = tmp_path / "p1.json"
+        path.write_text(json.dumps(config), encoding="utf-8")
+        assert main(qual_argv(path, candidate="P1")) == 1
+        assert "pending lifecycle operation" in capsys.readouterr().err
+        assert provenance_calls == [] and constructed == [] and streamed == []
 
 
 class TestExactBinding:
@@ -844,3 +891,104 @@ class TestSafeLabel:
             for accessed in reads:
                 resolved = accessed.resolve()
                 assert resolved == root or root in resolved.parents
+
+
+class TestSessionSnapshot:
+    def test_ledger_changed_between_authentication_and_provenance(
+        self, bound, tmp_path, monkeypatch, capsys
+    ):
+        from blackwell_lab.cloud import matched_control as matched
+
+        external, config, fetches = bound
+        constructed, streamed = _spy(monkeypatch)
+        provenance_calls: list[object] = []
+
+        def record_provenance(**kwargs):
+            provenance_calls.append(kwargs)
+            return _observed()
+
+        monkeypatch.setattr(provenance, "verify_live_provenance", record_provenance)
+        real = matched.authenticate_matched_development_control
+
+        def authenticate_then_replace(config, **kwargs):
+            summary = real(config, **kwargs)
+            ledger_path = ledger_path_for(external, RUN_TAG)
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            ledger["resources"][0]["provider_id"] = "99"
+            write_private_json(ledger_path, ledger)
+            return summary
+
+        monkeypatch.setattr(
+            matched,
+            "authenticate_matched_development_control",
+            authenticate_then_replace,
+        )
+        assert _run(tmp_path, config) == 1
+        _assert_refused(
+            capsys,
+            external,
+            constructed,
+            streamed,
+            fetches,
+            "development session changed",
+        )
+        assert provenance_calls == []
+
+    def test_ledger_changed_during_p2c_measurement_mints_nothing(
+        self, bound, tmp_path, monkeypatch, capsys
+    ):
+        from test_qualification import _FakeRecord, _stage_outcomes
+
+        external, config, fetches = bound
+        _constructed, streamed = _spy(monkeypatch)
+
+        def swap_during_measurement(*_args, **_kwargs):
+            ledger_path = ledger_path_for(external, RUN_TAG)
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            ledger["resources"][0]["provider_id"] = "99"
+            write_private_json(ledger_path, ledger)
+            return [_FakeRecord(run_id="qual", outcomes=_stage_outcomes("development"))]
+
+        monkeypatch.setattr(realbench, "run_real_cell", swap_during_measurement)
+        assert _run(tmp_path, config) == 1
+        err = capsys.readouterr().err
+        assert "development session changed" in err
+        assert streamed == [] and fetches == []
+        family = external / "qualification-runs"
+        assert not (family / "qual-a-p2c-development-receipt.json").exists()
+        session = json.loads(
+            (external / "infra-lifecycle" / RUN_TAG / "session.json").read_text(encoding="utf-8")
+        )
+        completed = [
+            event
+            for event in session["events"]
+            if event["event"] == "qualification_completed"
+            and event["detail"].get("candidate_id") == "P2C"
+        ]
+        assert completed == []
+
+    def test_unchanged_production_session_completes(self, bound, tmp_path, monkeypatch, capsys):
+        from test_qualification import _FakeRecord, _stage_outcomes
+
+        external, config, _fetches = bound
+
+        def succeed(*_args, **_kwargs):
+            cell = external / "qualification-runs" / "qual-a-p2c-development"
+            cell.mkdir(parents=True, exist_ok=True)
+            (cell / "p2c.result.json").write_text("{}\n", encoding="utf-8")
+            return [_FakeRecord(run_id="qual", outcomes=_stage_outcomes("development"))]
+
+        monkeypatch.setattr(realbench, "run_real_cell", succeed)
+        assert _run(tmp_path, config) == 0
+        receipt = external / "qualification-runs" / "qual-a-p2c-development-receipt.json"
+        assert receipt.is_file()
+        body = json.loads(receipt.read_text(encoding="utf-8"))
+        assert body["candidate_id"] == "P2C"
+        assert body["matched_control"]["region"] == "us-iad-2"
+        session = json.loads(
+            (external / "infra-lifecycle" / RUN_TAG / "session.json").read_text(encoding="utf-8")
+        )
+        assert any(
+            event["event"] == "qualification_completed" and event["detail"]["candidate_id"] == "P2C"
+            for event in session["events"]
+        )

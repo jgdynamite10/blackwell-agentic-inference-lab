@@ -1186,6 +1186,9 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
     if not validate_only:
         lifecycle.refuse_hosted_execution()
     try:
+        from blackwell_lab.cloud.matched_control import require_qualification_run_tag
+
+        require_qualification_run_tag(args.run_tag)
         run_label = qualification.require_safe_run_label(args.run_label)
         candidate_id = args.candidate
         stage = args.stage
@@ -1311,6 +1314,23 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
     )
     endpoint = config["endpoint"]
+    snapshot = None
+    if stage == qualification.STAGE_DEVELOPMENT and candidate_id in {
+        qualification.CANDIDATE_P1,
+        qualification.CANDIDATE_P2C,
+    }:
+        from blackwell_lab.cloud.matched_control import (
+            capture_development_session,
+            require_snapshot_matches_control,
+        )
+
+        try:
+            snapshot = capture_development_session(results_dir, run_tag=args.run_tag)
+            if candidate_id == qualification.CANDIDATE_P2C:
+                require_snapshot_matches_control(snapshot, matched_control)
+        except qualification.QualificationError as exc:
+            print(f"BLOCKED: {exc}", file=sys.stderr)
+            return 1
     lifecycle.record_session_event(
         paths,
         "qualification_started",
@@ -1442,6 +1462,10 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         )
         gates = qualification.evaluate_stage_thresholds(stage, metrics)
         files = [name for record in records for name in getattr(record, "written_files", ())]
+        if snapshot is not None:
+            from blackwell_lab.cloud.matched_control import revalidate_development_session
+
+            revalidate_development_session(results_dir, snapshot)
         receipt = qualification.sanitized_receipt(
             run_label=cell_label,
             candidate_id=candidate_id,
@@ -1485,15 +1509,19 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 persist_completed_p1_development_control,
             )
 
+            if snapshot is None:
+                raise qualification.QualificationError(
+                    "development session changed before the result was bound"
+                )
             persist_completed_p1_development_control(
                 results_dir=results_dir,
                 run_tag=args.run_tag,
                 p1_run_label=run_label,
                 canonical_commit=str(config["canonical_commit"]),
                 config_sha256=config_sha256,
-                ledger_path=paths.ledger_path,
                 receipt_sha256=receipt_sha256,
                 session_path=paths.session_path,
+                snapshot=snapshot,
             )
     except Exception as exc:
         message = (

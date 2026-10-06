@@ -292,14 +292,16 @@ def ready_ledger(**overrides):
                 "type": "linode_instance",
                 "provider_id": "42",
                 "region": "us-iad-2",
-                "label": "bwlab-gpu-baseline",
+                "label": f"bwlab-{RUN_TAG}",
+                "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
             },
             {
                 "address": "linode_firewall.gpu_baseline",
                 "type": "linode_firewall",
                 "provider_id": "555",
                 "region": "",
-                "label": "bwlab-gpu-baseline",
+                "label": f"bwlab-fw-{RUN_TAG}",
+                "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
             },
         ],
     }
@@ -1413,6 +1415,16 @@ class TestPromptVariantP1:
                 ).read_bytes()
             ).hexdigest()
         )
+        ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+        labels = {item["label"] for item in ledger["resources"]}
+        assert labels == {f"bwlab-{RUN_TAG}", f"bwlab-fw-{RUN_TAG}"}
+        for item in ledger["resources"]:
+            assert {"blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"} <= set(
+                item["tags"]
+            )
+        assert (
+            control["ledger_sha256"] == hashlib.sha256(paths.ledger_path.read_bytes()).hexdigest()
+        )
         session = json.loads(paths.session_path.read_text(encoding="utf-8"))
         assert any(
             event["event"] == "qualification_completed"
@@ -1551,3 +1563,100 @@ class TestPromptVariantP1:
         assert not control.exists()
         session = json.loads(paths.session_path.read_text(encoding="utf-8"))
         assert any(event["event"] == "qualification_completed" for event in session["events"])
+
+    def test_replaced_ledger_during_p1_measurement_cannot_mint_a_control(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from blackwell_lab.cloud import realbench
+
+        external, paths, path, phrase = self._drive_p1(tmp_path, monkeypatch)
+
+        def swap_then_succeed(spec, *_args, **_kwargs):
+            ledger = json.loads(paths.ledger_path.read_text(encoding="utf-8"))
+            ledger["resources"][0]["provider_id"] = "99"
+            lifecycle.write_private_json(paths.ledger_path, ledger)
+            cell = external / "qualification-runs" / "qual-a-p1-development"
+            cell.mkdir(parents=True, exist_ok=True)
+            (cell / "p1.result.json").write_text("{}\n", encoding="utf-8")
+            return [_FakeRecord(run_id="qual", outcomes=_stage_outcomes("development"))]
+
+        monkeypatch.setattr(realbench, "run_real_cell", swap_then_succeed)
+        assert main(qual_argv(path, candidate="P1", approve=phrase)) == 1
+        err = capsys.readouterr().err
+        assert "development session changed" in err
+        family = external / "qualification-runs"
+        assert not (family / "qual-a-p1-development-control.json").exists()
+        assert not (family / "qual-a-p1-development-receipt.json").exists()
+        session = json.loads(paths.session_path.read_text(encoding="utf-8"))
+        names = [event["event"] for event in session["events"]]
+        assert "qualification_completed" not in names
+        assert "qualification_stopped" not in names
+        for written in family.rglob("*.json"):
+            assert '"99"' not in written.read_text(encoding="utf-8")
+
+
+def test_invalid_run_tag_never_reads_or_writes(tmp_path, monkeypatch, capsys):
+    import builtins
+
+    from blackwell_lab.cloud import provenance
+    from blackwell_lab.workload import openai_client
+
+    monkeypatch.setattr(lifecycle, "refuse_hosted_execution", lambda environ=None: None)
+    secret = tmp_path / "outside-secret.txt"
+    secret.write_text("do-not-read\n", encoding="utf-8")
+    config = tmp_path / "config.json"
+    config.write_text("{}\n", encoding="utf-8")
+    argv_by_tag = {
+        tag: qual_argv(config, candidate="P1", run_tag=tag)
+        for tag in ("../outside", "/etc/passwd", "foo/bar", "..", "abc", "a" * 42, "Bad-Tag")
+    }
+    reads: list[Path] = []
+    real_text = Path.read_text
+    real_bytes = Path.read_bytes
+    real_open = builtins.open
+
+    def spy_text(self, *args, **kwargs):
+        reads.append(Path(self))
+        return real_text(self, *args, **kwargs)
+
+    def spy_bytes(self, *args, **kwargs):
+        reads.append(Path(self))
+        return real_bytes(self, *args, **kwargs)
+
+    def spy_open(file, *args, **kwargs):
+        reads.append(Path(file))
+        return real_open(file, *args, **kwargs)
+
+    constructed: list[object] = []
+    streamed: list[object] = []
+
+    class SpyClient:
+        def __init__(self, *args, **kwargs):
+            constructed.append(self)
+
+        def stream_turn(self, *args, **kwargs):
+            streamed.append(args)
+
+    provenance_calls: list[object] = []
+    monkeypatch.setattr(Path, "read_text", spy_text)
+    monkeypatch.setattr(Path, "read_bytes", spy_bytes)
+    monkeypatch.setattr(builtins, "open", spy_open)
+    monkeypatch.setattr(openai_client, "OpenAICompatibleClient", SpyClient)
+    monkeypatch.setattr(
+        provenance, "verify_live_provenance", lambda **kwargs: provenance_calls.append(kwargs)
+    )
+    monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path / "external"))
+    for tag, argv in argv_by_tag.items():
+        reads.clear()
+        constructed.clear()
+        streamed.clear()
+        provenance_calls.clear()
+        assert main(argv) == 1
+        err = capsys.readouterr().err
+        assert "malformed" in err
+        assert tag not in err
+        assert reads == []
+        assert constructed == [] and streamed == [] and provenance_calls == []
+        external = tmp_path / "external"
+        if external.exists():
+            assert list(external.rglob("*")) == []

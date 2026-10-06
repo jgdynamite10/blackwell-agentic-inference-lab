@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -53,8 +54,10 @@ _RELATION = "P2C development matched-control provenance does not match the compl
 _OWN_LABEL = "P2C cannot bind its own run label as the P1 control"
 _MALFORMED = "P2C development control record is malformed"
 _PRIVATE = "P2C development control record contains a private path"
-_PENDING = "P2C development control session has a pending lifecycle operation"
+_PENDING = "development session has a pending lifecycle operation"
 _P1_SESSION = "P1 development session is not a reconciled us-iad-2 resource session"
+_RUN_TAG_UNSAFE = "qualification run tag is malformed"
+_SESSION_CHANGED = "development session changed before the result was bound"
 _EVENT = "P1 development terminal event does not match the selected control"
 _UNSAFE = "P2C development control label is unsafe"
 
@@ -173,42 +176,27 @@ def resource_identity_sha256(resources: list[dict]) -> str:
     return _sha256_bytes(_canonical({"resources": rows}))
 
 
-def validate_p1_development_session(results_dir: Path, *, run_tag: str) -> str:
-    """Read-only gate for a live P1 development command.
+def require_qualification_run_tag(run_tag: object) -> str:
+    """Lifecycle run-tag contract, as a content-free qualification refusal.
 
-    Fails before live provenance, endpoint contact, a model client, streaming,
-    or any result write. Returns the resource-identity digest when the
-    reconciled session matches the frozen region lock.
+    Returns only after the value is safe to embed in a path. Invalid values,
+    including absolute paths, separators, traversal, and out-of-range lengths,
+    raise before any path is constructed.
     """
-    from blackwell_lab.cloud.qualification import QualificationError
+    from blackwell_lab.cloud.lifecycle import LifecycleError, validate_run_tag
 
-    path = ledger_path_for(results_dir, run_tag)
-    if not path.is_file():
-        _fail(_P1_SESSION)
     try:
-        ledger = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        _fail(_P1_SESSION)
-    if not isinstance(ledger, dict) or ledger.get("run_tag") != run_tag:
-        _fail(_P1_SESSION)
-    if ledger.get("reconciled") is not True:
-        _fail(_P1_SESSION)
-    reconciliation = ledger.get("reconciliation")
-    if not isinstance(reconciliation, dict) or reconciliation.get("provider_checked") is not True:
-        _fail(_P1_SESSION)
-    resources = ledger.get("resources")
-    if not isinstance(resources, list):
-        _fail(_P1_SESSION)
-    try:
-        session_region(resources)
-        return resource_identity_sha256(resources)
-    except QualificationError:
-        _fail(_P1_SESSION)
+        if not isinstance(run_tag, str):
+            raise LifecycleError("run_tag")
+        return validate_run_tag(run_tag)
+    except LifecycleError:
+        _fail(_RUN_TAG_UNSAFE)
 
 
 def ledger_path_for(results_dir: Path, run_tag: str) -> Path:
-    """Ledger location. Does not create directories."""
-    return results_dir / "infra-lifecycle" / run_tag / "ledger.json"
+    """Ledger location. Does not create directories or read the filesystem."""
+    checked = require_qualification_run_tag(run_tag)
+    return results_dir / "infra-lifecycle" / checked / "ledger.json"
 
 
 def control_record_path(results_dir: Path, p1_run_label: str) -> Path:
@@ -236,7 +224,118 @@ def p1_receipt_path(results_dir: Path, p1_run_label: str) -> Path:
 
 
 def session_path_for(results_dir: Path, run_tag: str) -> Path:
-    return results_dir / "infra-lifecycle" / run_tag / "session.json"
+    checked = require_qualification_run_tag(run_tag)
+    return results_dir / "infra-lifecycle" / checked / "session.json"
+
+
+@dataclass(frozen=True)
+class DevelopmentSessionSnapshot:
+    """Content-free binding of the ledger observed before live provenance."""
+
+    run_tag: str
+    ledger_sha256: str
+    resource_identity_sha256: str
+    region: str
+
+
+def _production_resource_identity(resources: list, *, run_tag: str) -> str:
+    """Exact instance and firewall identity used by the Terraform session."""
+    from blackwell_lab.cloud.lifecycle import PROJECT_TAG
+    from blackwell_lab.cloud.mvl import FROZEN_REGION
+    from blackwell_lab.cloud.qualification import QualificationError
+
+    try:
+        if session_region(resources) != FROZEN_REGION:
+            _fail(_HISTORICAL)
+        identity = resource_identity_sha256(resources)
+    except QualificationError:
+        _fail(_P1_SESSION)
+    expected_labels = {
+        "linode_instance.gpu_baseline": f"bwlab-{run_tag}",
+        "linode_firewall.gpu_baseline": f"bwlab-fw-{run_tag}",
+    }
+    required_tags = {PROJECT_TAG, f"run:{run_tag}", "ttl-hours:6", "phase:3"}
+    by_address = {
+        resource.get("address"): resource for resource in resources if isinstance(resource, dict)
+    }
+    for address, label in expected_labels.items():
+        resource = by_address.get(address)
+        if not isinstance(resource, dict) or resource.get("label") != label:
+            _fail(_P1_SESSION)
+        tags = resource.get("tags")
+        observed = (
+            {tag for tag in tags if isinstance(tag, str)} if isinstance(tags, list) else set()
+        )
+        if not required_tags <= observed:
+            _fail(_P1_SESSION)
+    return identity
+
+
+def capture_development_session(results_dir: Path, *, run_tag: str) -> DevelopmentSessionSnapshot:
+    """Read the ledger only after the run tag is a safe path component."""
+    from blackwell_lab.cloud.mvl import FROZEN_REGION
+
+    checked = require_qualification_run_tag(run_tag)
+    ledger_path = results_dir / "infra-lifecycle" / checked / "ledger.json"
+    root = (results_dir / "infra-lifecycle").resolve()
+    if ledger_path.resolve().parent.parent != root:
+        _fail(_RUN_TAG_UNSAFE)
+    if not ledger_path.is_file():
+        _fail(_P1_SESSION)
+    if (ledger_path.parent / "pending.json").is_file():
+        _fail(_PENDING)
+    try:
+        payload = ledger_path.read_bytes()
+        ledger = json.loads(payload)
+    except (OSError, json.JSONDecodeError):
+        _fail(_P1_SESSION)
+    if not isinstance(ledger, dict) or ledger.get("run_tag") != checked:
+        _fail(_P1_SESSION)
+    if ledger.get("reconciled") is not True:
+        _fail(_P1_SESSION)
+    reconciliation = ledger.get("reconciliation")
+    if not isinstance(reconciliation, dict) or reconciliation.get("provider_checked") is not True:
+        _fail(_P1_SESSION)
+    resources = ledger.get("resources")
+    if not isinstance(resources, list):
+        _fail(_P1_SESSION)
+    return DevelopmentSessionSnapshot(
+        run_tag=checked,
+        ledger_sha256=_sha256_bytes(payload),
+        resource_identity_sha256=_production_resource_identity(resources, run_tag=checked),
+        region=FROZEN_REGION,
+    )
+
+
+def revalidate_development_session(results_dir: Path, snapshot: DevelopmentSessionSnapshot) -> None:
+    """Refuse when the ledger bytes or resource identity changed after capture."""
+    current = capture_development_session(results_dir, run_tag=snapshot.run_tag)
+    if current != snapshot:
+        _fail(_SESSION_CHANGED)
+
+
+def require_snapshot_matches_control(
+    snapshot: DevelopmentSessionSnapshot, matched: dict | None
+) -> None:
+    """P2C may proceed only when the live snapshot is the authenticated control."""
+    if not isinstance(matched, dict):
+        _fail(_MISSING)
+    if (
+        snapshot.ledger_sha256 != matched.get("ledger_sha256")
+        or snapshot.resource_identity_sha256 != matched.get("resource_identity_sha256")
+        or snapshot.region != matched.get("region")
+    ):
+        _fail(_SESSION_CHANGED)
+
+
+def validate_p1_development_session(results_dir: Path, *, run_tag: str) -> str:
+    """Read-only gate for a live P1 development command.
+
+    Fails before live provenance, endpoint contact, a model client, streaming,
+    or any result write. Returns the resource-identity digest when the
+    reconciled session matches the production resource contract.
+    """
+    return capture_development_session(results_dir, run_tag=run_tag).resource_identity_sha256
 
 
 def result_dir_for(results_dir: Path, p1_run_label: str) -> Path:
@@ -408,21 +507,6 @@ def _result_bytes(results_dir: Path, p1_run_label: str) -> bytes:
         return results[0].read_bytes()
     except OSError:
         _fail(_FAILED)
-
-
-def _load_ledger(results_dir: Path, run_tag: str) -> tuple[dict, bytes]:
-    from blackwell_lab.cloud.lifecycle import LifecycleError, load_ledger
-
-    path = ledger_path_for(results_dir, run_tag)
-    payload = _read_bytes(path, missing=_MISSING)
-    pending = path.parent / "pending.json"
-    if pending.is_file():
-        _fail(_PENDING)
-    try:
-        ledger = load_ledger(path)
-    except LifecycleError:
-        _fail(_MISSING)
-    return ledger, payload
 
 
 def _require_completed_receipt(
@@ -684,22 +768,18 @@ def persist_completed_p1_development_control(
     p1_run_label: str,
     canonical_commit: str,
     config_sha256: str,
-    ledger_path: Path,
     receipt_sha256: str,
     session_path: Path,
+    snapshot: DevelopmentSessionSnapshot,
 ) -> None:
-    """Write the control only after a completed, non-stopped P1 receipt and event."""
-    if not ledger_path.is_file():
-        _fail(_FAILED)
-    try:
-        ledger_bytes = ledger_path.read_bytes()
-        ledger = json.loads(ledger_bytes)
-    except (OSError, json.JSONDecodeError):
-        _fail(_FAILED)
-    resources = ledger.get("resources")
-    if not isinstance(resources, list):
-        _fail(_FAILED)
-    session_region(resources)
+    """Write the control only for the session captured before inference.
+
+    A ledger replaced during measurement is refused. The control is never
+    bound to the replacement resource identity.
+    """
+    if snapshot.run_tag != run_tag:
+        _fail(_SESSION_CHANGED)
+    revalidate_development_session(results_dir, snapshot)
     receipt_bytes = _read_bytes(p1_receipt_path(results_dir, p1_run_label), missing=_FAILED)
     if _sha256_bytes(receipt_bytes) != receipt_sha256:
         _fail(_DIGEST)
@@ -733,8 +813,8 @@ def persist_completed_p1_development_control(
         canonical_commit=canonical_commit,
         config_sha256=config_sha256,
         result_sha256=_sha256_bytes(result),
-        ledger_sha256=_sha256_bytes(ledger_bytes),
-        resource_identity=resource_identity_sha256(resources),
+        ledger_sha256=snapshot.ledger_sha256,
+        resource_identity=snapshot.resource_identity_sha256,
         receipt_sha256=receipt_sha256,
         terminal_event_sha256=terminal_digest,
     )
@@ -756,9 +836,7 @@ def install_verified_p1_development_control(
     qualification_completed event, and the control record, then returns the
     config section. It does not contact a provider or construct a client.
     """
-    ledger, ledger_bytes = _load_ledger(results_dir, run_tag)
-    resources = ledger["resources"]
-    session_region(resources)
+    snapshot = capture_development_session(results_dir, run_tag=run_tag)
     result_body = {
         "schema_version": "1.0.0",
         "kind": "synthetic-matched-control-result",
@@ -793,8 +871,8 @@ def install_verified_p1_development_control(
         canonical_commit=canonical_commit,
         config_sha256=config_digest,
         result_sha256=result_digest,
-        ledger_sha256=_sha256_bytes(ledger_bytes),
-        resource_identity=resource_identity_sha256(resources),
+        ledger_sha256=snapshot.ledger_sha256,
+        resource_identity=snapshot.resource_identity_sha256,
         receipt_sha256=receipt_digest,
         terminal_event_sha256=_require_terminal_event(
             session,
@@ -868,21 +946,14 @@ def authenticate_matched_development_control(
     cloud = config.get("cloud") if isinstance(config.get("cloud"), dict) else {}
     if section["region"] != FROZEN_REGION or cloud.get("region") != FROZEN_REGION:
         _fail(_HISTORICAL)
-    ledger, ledger_bytes = _load_ledger(results_dir, run_tag)
-    if ledger.get("run_tag") != run_tag or ledger.get("reconciled") is not True:
-        _fail(_RESOURCE)
-    reconciliation = ledger.get("reconciliation") or {}
-    if reconciliation.get("provider_checked") is not True:
-        _fail(_RESOURCE)
-    resources = ledger.get("resources")
-    if not isinstance(resources, list):
-        _fail(_RESOURCE)
-    if session_region(resources) != FROZEN_REGION:
-        _fail(_HISTORICAL)
-    if _sha256_bytes(ledger_bytes) != section["ledger_sha256"]:
+    require_qualification_run_tag(run_tag)
+    snapshot = capture_development_session(results_dir, run_tag=run_tag)
+    if snapshot.ledger_sha256 != section["ledger_sha256"]:
         _fail(_DIGEST)
-    if resource_identity_sha256(resources) != section["resource_identity_sha256"]:
+    if snapshot.resource_identity_sha256 != section["resource_identity_sha256"]:
         _fail(_RESOURCE)
+    if snapshot.region != section["region"]:
+        _fail(_HISTORICAL)
     control_path = control_record_path(results_dir, section["p1_run_label"])
     control_bytes = _read_bytes(control_path, missing=_MISSING)
     if _sha256_bytes(control_bytes) != section["control_record_sha256"]:
@@ -947,24 +1018,8 @@ def _safe_control_label(label: object) -> str | None:
 
 
 def _ledger_resource_identity(results_dir: Path, run_tag: str) -> str:
-    """Parse the ledger and recompute its resource identity."""
-    from blackwell_lab.cloud.lifecycle import LifecycleError, load_ledger, validate_run_tag
-
-    try:
-        validate_run_tag(run_tag)
-        ledger = load_ledger(ledger_path_for(results_dir, run_tag))
-    except LifecycleError:
-        _fail(_RESOURCE)
-    if ledger.get("run_tag") != run_tag or ledger.get("reconciled") is not True:
-        _fail(_RESOURCE)
-    reconciliation = ledger.get("reconciliation")
-    if not isinstance(reconciliation, dict) or reconciliation.get("provider_checked") is not True:
-        _fail(_RESOURCE)
-    resources = ledger.get("resources")
-    if not isinstance(resources, list):
-        _fail(_RESOURCE)
-    session_region(resources)
-    return resource_identity_sha256(resources)
+    """Parse the ledger and recompute its production resource identity."""
+    return capture_development_session(results_dir, run_tag=run_tag).resource_identity_sha256
 
 
 def _audit_p2c_relationship(family: Path, matched: object) -> str | None:

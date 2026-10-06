@@ -1522,14 +1522,16 @@ def _ready_ledger():
                 "type": "linode_instance",
                 "provider_id": "42",
                 "region": "us-iad-2",
-                "label": "bwlab-gpu-baseline",
+                "label": f"bwlab-{RUN_TAG}",
+                "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
             },
             {
                 "address": "linode_firewall.gpu_baseline",
                 "type": "linode_firewall",
                 "provider_id": "555",
                 "region": "",
-                "label": "bwlab-gpu-baseline",
+                "label": f"bwlab-fw-{RUN_TAG}",
+                "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
             },
         ],
     }
