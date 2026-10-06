@@ -1539,3 +1539,84 @@ wording was never developed against) and stays separate. Tested only with
 the public catalog and synthetic fixtures; no real bundle, custody
 package, private result, provider, credential, inference, download,
 publication system, or the secondary repository was accessed.
+
+## 2026-10-05 — D-0027: Fixed qualification region us-iad-2 and same-session P1/P2C development control
+
+**Decision.** The fixed Akamai qualification infrastructure region changes
+from the historical `us-sea` attempt to exactly `us-iad-2`. There is no
+region list, dynamic fallback, automatic retry, or provider selection.
+One `g3-gpu-rtxpro6000-blackwell-1`, one run-tagged firewall, a six-hour
+TTL, the $3.00/hour planning rate, and the $18 six-hour exposure are
+unchanged. External Terraform state, Terraform 1.9.8, and the provider
+lock are unchanged. Lifecycle, reconciliation, emergency teardown,
+privacy, and approval controls are unchanged.
+
+A `us-sea` create was refused because that plan was not available in the
+selected region. Recovery verified the state empty. No resources were
+billed. That attempt, its receipts, and the historical P1 evidence stay
+historical. This decision does not rewrite D-0022 through D-0026 and does
+not redefine those results. Advertised availability is not capacity proof.
+Changing the region means the historical `us-sea` P1 is not the matched
+control for a later P2C run.
+
+P2C **development** must bind a completed, verified P1 **development**
+control from the same run tag, lifecycle ledger, and resource identity,
+and from the same canonical commit, region, model, engine, precision,
+container and model artifacts, evaluator, catalog schedule, seeds, and
+generation pins. P1 development executes first and writes a content-free
+control record. P2C development authenticates that record, the P1 result,
+and the ledger by digest before a model client is constructed and before
+any turn is streamed. A missing, stale, failed, mismatched, substituted,
+cross-run, cross-region, cross-resource, or historical control fails
+closed with no provider mutation, client, endpoint contact, or result
+write. P1 and P2C keep distinct run labels and approval phrases. P2C
+cannot fall back to historical P1 evidence. Holdout and freeze do not
+carry this binding.
+
+The P1/P2C experimental difference stays the D-0026 surface:
+`candidate_id`, `workload_version`, `controller`, and the version-bound
+`evidence_refs` schema. Prompts, catalog tasks, evaluator 3.1.0, accepted
+answers, thresholds, scheduling, model, engine, precision, and serving
+pins are unchanged. Only a fully completed, non-stopped, verified P1
+development measurement may be the control. A stopped gate, including a
+project quality-floor stop, a failure record, or a missing result may not.
+The control binds the P1 receipt, the terminal `qualification_completed`
+event, and the frozen precision. A production firewall ledger entry may
+omit region; the region binding is the authenticated instance region.
+Before any lifecycle path is built, the run tag must satisfy the
+lifecycle safe-run-tag contract. Before live provenance, P1 and P2C
+development capture one content-free session snapshot: run tag, ledger
+digest, resource-identity digest, and region. The ledger must be
+reconciled, provider-checked, and free of a pending operation. Its
+instance label is `bwlab-{run_tag}`, its firewall label is
+`bwlab-fw-{run_tag}`, and both resources carry `blackwell-lab`,
+`run:{run_tag}`, `ttl-hours:6`, and `phase:3`. A copied ledger whose
+labels or tags still name another run is refused. The same snapshot is
+checked again after measurement and is the only ledger identity a P1
+control may bind. The `qualification_completed` event carries the P1
+run label and config digest. Exactly one such event is authenticated
+with the receipt. `verify-results` recomputes the resource identity
+from the ledger.
+
+Candidate identity digests include `region`. Moving the lock from
+`us-sea` to `us-iad-2` is the only serialization change. Digests at the
+previous lock, then at `us-iad-2`:
+
+| Candidate | Previous (`us-sea`) | D-0027 (`us-iad-2`) |
+| --- | --- | --- |
+| C1 | `76510b8d3829f69ee8406680f7861ec38ab9d831052506c69819cf90cc3b1969` | `ce95fe585d24bd427aa8cd470f089c051eed6af3ce42ded7bea21bd3c93f7f7c` |
+| C2 | `79cd85134d8c662b65e082bb3203b68e862f89f6083b69a0882022306ae01145` | `99ca5e56fd9dc37de069e23c48a08f6b95dd0256f05416eff12791092adfcba9` |
+| P1 | `674280ef9090933d170a8000b4e67ca914310ea0261bc1ffcda36d7692a590d2` | `bc7d60758d21c040cc58a6b63490f7d0e7a4f26158a7da6c6286035316aa84c9` |
+| P2 | `478a0ce881b22be8e5e747eafb63a6453b51540492dc1dba497bd8e28d160e44` | `20fe6cfbc084fb79d646b88a3c75ac490fad3040b1d58581b585988a9dac1ee6` |
+| P2C | `49b279fb76dfa3ee3da2dbf8bdd15c7547441faa386c14c97f7787aeff1a069a` | `f9f3bb323f675674b0e5cffa84518e1007882fced1e8e71fec9275dd40885e4b` |
+
+**This decision does not authorize** holdout, freeze, cross-cloud
+inference, publication, provisioning, downloads, or live execution. Those
+still require their own decisions and exact approval phrases.
+
+**Rationale.** The failed `us-sea` attempt cannot be reused as the control
+for a run in another region. A same-session digest binding is what makes
+the new P1 the P2C development control. Tested with synthetic fixtures
+only. No provider, credential, inference endpoint, download, private
+result, custody package, publication system, or the secondary repository
+was accessed.

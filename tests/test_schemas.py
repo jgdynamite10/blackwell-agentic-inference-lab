@@ -13,6 +13,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from blackwell_lab.cloud.matched_control import schema_path as matched_control_schema_path
 from blackwell_lab.cloud.sealed_materialize import schema_path as materialization_schema_path
 from blackwell_lab.cloud.sealed_payload import schema_path as sealed_payload_schema_path
 from blackwell_lab.schemas import (
@@ -47,6 +48,7 @@ def test_schemas_are_valid_json_schema():
         ENGINE_CONTRACT_SCHEMA,
         sealed_payload_schema_path(),
         materialization_schema_path(),
+        matched_control_schema_path(),
     ):
         schema = load_schema(schema_path)
         validator_cls = jsonschema.validators.validator_for(schema)

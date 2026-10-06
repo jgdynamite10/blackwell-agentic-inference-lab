@@ -20,16 +20,17 @@ variable "run_tag" {
 
 variable "region" {
   description = <<-EOT
-    Akamai region id for the authorized D-0014 diagnostic pilot. Locked to
-    us-sea. A saved Terraform plan verifies this intended configuration only;
-    it does not prove live capacity.
+    Fixed Akamai qualification infrastructure region (decision D-0027).
+    Locked to us-iad-2. There is no fallback list. A saved Terraform plan
+    verifies this intended configuration only; it does not prove live capacity.
+    Historical D-0014 evidence for us-sea stays in the decision log.
   EOT
   type        = string
-  default     = "us-sea"
+  default     = "us-iad-2"
 
   validation {
-    condition     = var.region == "us-sea"
-    error_message = "region must equal us-sea for the authorized D-0014 diagnostic pilot."
+    condition     = var.region == "us-iad-2"
+    error_message = "region must equal us-iad-2 for the authorized qualification infrastructure."
   }
 }
 

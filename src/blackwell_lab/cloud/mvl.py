@@ -23,7 +23,9 @@ MVL_APPROVAL_TEMPLATE = (
 )
 
 FROZEN_PROVIDER = "akamai"
-FROZEN_REGION = "us-sea"
+# D-0027 fixed qualification infrastructure region. Historical D-0014
+# evidence stays us-sea in the decision log. There is no fallback list.
+FROZEN_REGION = "us-iad-2"
 FROZEN_INSTANCE_TYPE = "g3-gpu-rtxpro6000-blackwell-1"
 FROZEN_GPU = "RTX PRO 6000 Blackwell"
 FROZEN_COMPARISON_MODE = "provider-native"

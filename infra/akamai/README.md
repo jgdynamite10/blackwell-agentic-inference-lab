@@ -58,6 +58,11 @@ intended configuration and planned actions only. It does not prove live
 capacity. Capacity is known when the provider accepts provisioning and the
 instance reaches the expected running state.
 
+Decision D-0027 sets the fixed qualification infrastructure region to
+`us-iad-2`. The historical `us-sea` evidence above stays historical.
+Advertised availability is not capacity proof, and there is no region
+fallback.
+
 D-0014 pilot envelope (unchanged, separately named): provider-native only;
 one GPU instance plus its one project/run-tagged firewall; six hours
 maximum instance lifetime; **$25 total** session ceiling; owner checkpoint
@@ -89,7 +94,7 @@ reviewed saved plan — not a read-only token.
 
 - `versions.tf` — Terraform **= 1.9.8**; provider `linode/linode` pinned to `4.1.0`; empty `backend "local" {}` for external state configuration at init.
 - `.terraform.lock.hcl` — official HashiCorp Registry checksums for `darwin_arm64` (operator laptop) and `linux_amd64` (CI / Linux operators), generated with `terraform providers lock`. Lifecycle and readiness init always pass `-lockfile=readonly`. Never edit checksums by hand.
-- `variables.tf` — D-0014 locks (`region=us-sea`, `gpu_instance_type=g3-gpu-rtxpro6000-blackwell-1`, `ttl_hours=6`) plus `management_cidr` (rejects `0.0.0.0/0` and `::/0`).
+- `variables.tf` — D-0027 region lock (`region=us-iad-2`) and the unchanged D-0014 plan locks (`gpu_instance_type=g3-gpu-rtxpro6000-blackwell-1`, `ttl_hours=6`) plus `management_cidr` (rejects `0.0.0.0/0` and `::/0`).
 - `main.tf` — the single GPU instance and its run-tagged firewall (inbound DROP; SSH from management CIDR only).
 - `outputs.tf` — ledger inputs including firewall id/label; instance IPv4 is sensitive.
 - `bootstrap/` — idempotent instance bootstrap with pinned driver/toolkit/docker packages and digest-pinned CUDA GPU probe.
@@ -158,7 +163,7 @@ confirmed deployability in the selected region, deployment capability, and the
 applicable regional price:
 
 ```bash
-python scripts/preflight/check_akamai.py --region us-sea
+python scripts/preflight/check_akamai.py --region us-iad-2
 # exit 0 only when every decision passed; writes a sanitized receipt under
 # $LAB_RESULTS_DIR/preflight-receipts/ (path not printed)
 ```
@@ -181,7 +186,7 @@ Write `$LAB_RESULTS_DIR/infra-lifecycle/<run-tag>/terraform.tfvars`, for example
 
 ```hcl
 run_tag            = "p3-pilot-20260907a"
-region             = "us-sea"
+region             = "us-iad-2"
 gpu_instance_type  = "g3-gpu-rtxpro6000-blackwell-1"
 authorized_ssh_key = "ssh-ed25519 AAAA... operator"
 management_cidr    = "203.0.113.10/32"   # operator management IP only

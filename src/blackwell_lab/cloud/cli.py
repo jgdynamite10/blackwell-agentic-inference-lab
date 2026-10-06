@@ -93,7 +93,7 @@ AUTHORIZED_PILOT_CELLS = (
 AUTHORIZED_PILOT_PRECISION = "bf16"
 AUTHORIZED_PILOT_SERVING_MODE = "provider-native"
 AUTHORIZED_PILOT_GPU = "RTX PRO 6000 Blackwell"
-AUTHORIZED_PILOT_REGION = "us-sea"
+AUTHORIZED_PILOT_REGION = "us-iad-2"
 AUTHORIZED_PILOT_INSTANCE_TYPE = "g3-gpu-rtxpro6000-blackwell-1"
 AUTHORIZED_WARMUP_PASSES = 1
 AUTHORIZED_REPETITIONS = 1
@@ -1124,6 +1124,7 @@ def _sealed_validation_report(
     stage: str,
     config_sha256: str,
     sealed: object,
+    matched_control: dict | None = None,
 ) -> dict:
     """Content-free ``--validate-only`` report. No paths, ids, or payload content."""
     from blackwell_lab.cloud import qualification
@@ -1149,6 +1150,7 @@ def _sealed_validation_report(
             if candidate_id == qualification.CANDIDATE_P2C
             else {}
         ),
+        **({"matched_control": matched_control} if matched_control is not None else {}),
         **(
             {
                 "sealed_tasks_loaded": len(sealed.tasks),
@@ -1184,6 +1186,9 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
     if not validate_only:
         lifecycle.refuse_hosted_execution()
     try:
+        from blackwell_lab.cloud.matched_control import require_qualification_run_tag
+
+        require_qualification_run_tag(args.run_tag)
         run_label = qualification.require_safe_run_label(args.run_label)
         candidate_id = args.candidate
         stage = args.stage
@@ -1239,6 +1244,29 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             qualification.candidate_workload_version(candidate_id),
             qualification.candidate_controller(candidate_id),
         )
+        # Same-session P1 control (D-0027). Read-only, before any client,
+        # endpoint contact, provider mutation, or result write. Holdout and
+        # freeze do not carry this binding.
+        matched_control = None
+        if candidate_id == qualification.CANDIDATE_P2C and stage == qualification.STAGE_DEVELOPMENT:
+            from blackwell_lab.cloud.matched_control import (
+                authenticate_matched_development_control,
+            )
+
+            matched_control = authenticate_matched_development_control(
+                config,
+                results_dir=_resolve_real_results_dir(),
+                run_tag=args.run_tag,
+                p2c_run_label=run_label,
+            )
+        if (
+            not validate_only
+            and candidate_id == qualification.CANDIDATE_P1
+            and stage == qualification.STAGE_DEVELOPMENT
+        ):
+            from blackwell_lab.cloud.matched_control import validate_p1_development_session
+
+            validate_p1_development_session(_resolve_real_results_dir(), run_tag=args.run_tag)
     except (ConfigError, qualification.QualificationError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 1
@@ -1251,6 +1279,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                     stage=stage,
                     config_sha256=config_sha256,
                     sealed=sealed,
+                    matched_control=matched_control,
                 ),
                 indent=2,
             )
@@ -1285,6 +1314,23 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         artifact_family=qualification.QUALIFICATION_ARTIFACT_FAMILY,
     )
     endpoint = config["endpoint"]
+    snapshot = None
+    if stage == qualification.STAGE_DEVELOPMENT and candidate_id in {
+        qualification.CANDIDATE_P1,
+        qualification.CANDIDATE_P2C,
+    }:
+        from blackwell_lab.cloud.matched_control import (
+            capture_development_session,
+            require_snapshot_matches_control,
+        )
+
+        try:
+            snapshot = capture_development_session(results_dir, run_tag=args.run_tag)
+            if candidate_id == qualification.CANDIDATE_P2C:
+                require_snapshot_matches_control(snapshot, matched_control)
+        except qualification.QualificationError as exc:
+            print(f"BLOCKED: {exc}", file=sys.stderr)
+            return 1
     lifecycle.record_session_event(
         paths,
         "qualification_started",
@@ -1416,6 +1462,10 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         )
         gates = qualification.evaluate_stage_thresholds(stage, metrics)
         files = [name for record in records for name in getattr(record, "written_files", ())]
+        if snapshot is not None:
+            from blackwell_lab.cloud.matched_control import revalidate_development_session
+
+            revalidate_development_session(results_dir, snapshot)
         receipt = qualification.sanitized_receipt(
             run_label=cell_label,
             candidate_id=candidate_id,
@@ -1426,15 +1476,53 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             files=files,
             stopped=bool(gates["stopped"]),
             sealed_set=sealed.binding if sealed is not None else None,
+            matched_control=matched_control,
         )
         from blackwell_lab.cloud.artifacts import write_private_json
 
-        write_private_json(
+        receipt_sha256 = write_private_json(
             results_dir
             / qualification.QUALIFICATION_ARTIFACT_FAMILY
             / f"{cell_label}-receipt.json",
             receipt,
         )
+        terminal_event = (
+            "qualification_completed" if not gates["stopped"] else "qualification_stopped"
+        )
+        lifecycle.record_session_event(
+            paths,
+            terminal_event,
+            {
+                "stage": stage,
+                "candidate_id": candidate_id,
+                "run_label": run_label,
+                "config_sha256": config_sha256,
+                "stopped": bool(gates["stopped"]),
+            },
+        )
+        if (
+            candidate_id == qualification.CANDIDATE_P1
+            and stage == qualification.STAGE_DEVELOPMENT
+            and not gates["stopped"]
+        ):
+            from blackwell_lab.cloud.matched_control import (
+                persist_completed_p1_development_control,
+            )
+
+            if snapshot is None:
+                raise qualification.QualificationError(
+                    "development session changed before the result was bound"
+                )
+            persist_completed_p1_development_control(
+                results_dir=results_dir,
+                run_tag=args.run_tag,
+                p1_run_label=run_label,
+                canonical_commit=str(config["canonical_commit"]),
+                config_sha256=config_sha256,
+                receipt_sha256=receipt_sha256,
+                session_path=paths.session_path,
+                snapshot=snapshot,
+            )
     except Exception as exc:
         message = (
             str(exc)
@@ -1443,11 +1531,6 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         )
         return _qualify_stop(message, results_dir=results_dir, run_label=run_label)
 
-    lifecycle.record_session_event(
-        paths,
-        "qualification_completed" if not gates["stopped"] else "qualification_stopped",
-        {"stage": stage, "candidate_id": candidate_id, "stopped": gates["stopped"]},
-    )
     print(json.dumps(receipt, indent=2))
     return 1 if gates["stopped"] else 0
 
@@ -1470,14 +1553,17 @@ def cmd_verify_results(args: argparse.Namespace) -> int:
     is required, "nothing to verify" is never success. Pass --allow-empty
     only for explicitly exploratory checks.
     """
+    from blackwell_lab.cloud.matched_control import audit_matched_controls
+
     base = _resolve_real_results_dir() / args.subdirectory
+    control_failures = audit_matched_controls(base)
     result_paths = sorted(base.rglob("*.result.json")) if base.is_dir() else []
     if not result_paths:
         report = {
             "workflow": "verify-results",
             "verified": 0,
-            "failed": [],
-            "ok": bool(args.allow_empty),
+            "failed": control_failures,
+            "ok": bool(args.allow_empty) and not control_failures,
             "note": (
                 "no persisted results were found. This is a FAILURE unless "
                 "--allow-empty was passed: an empty directory never verifies "
@@ -1485,7 +1571,7 @@ def cmd_verify_results(args: argparse.Namespace) -> int:
             ),
         }
         print(json.dumps(report, indent=2))
-        return 0 if args.allow_empty else 1
+        return 0 if args.allow_empty and not control_failures else 1
 
     verified: list[str] = []
     failures: list[dict] = []
@@ -1523,6 +1609,7 @@ def cmd_verify_results(args: argparse.Namespace) -> int:
         except Exception as exc:
             failures.append({"file": name, "error": f"{type(exc).__name__}: {exc}"})
 
+    failures.extend(control_failures)
     failure_records = sorted(p.name for p in base.rglob("*.failure.json"))
     print(
         json.dumps(
