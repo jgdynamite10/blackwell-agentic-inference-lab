@@ -6,10 +6,11 @@ update, resize, stop, start, terminate, or delete cloud resources, and they
 never print credential values or account identifiers. This complies with
 AGENTS.md sections 1, 3, and 4.
 
-**Execution boundary:** these scripts are intended to be run **locally by the
-operator** in their authenticated environment. The hosted Cloud Agent must not
-run credential-dependent preflight checks and never receives provider
-credentials (AGENTS.md, section 3).
+**Execution boundary:** these scripts are intended to be run in the owner's
+authenticated local environment, directly or by a Cursor Agent running on the
+owner's machine. Remote/hosted Cloud Agents must not run credential-dependent
+preflight checks and never receive provider credentials (AGENTS.md, section
+3).
 
 | Script | Provider | Needs credentials? |
 | --- | --- | --- |

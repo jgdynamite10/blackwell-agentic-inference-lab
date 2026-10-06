@@ -1,9 +1,10 @@
 """Read-only Akamai Cloud (Linode) preflight checks.
 
-Run **locally by the operator** in their authenticated environment. The
-hosted Cloud Agent must not run credential-dependent preflight checks
-(AGENTS.md, section 3) — this module is imported there only by offline tests
-that inject fake fetchers.
+Run in the owner's authenticated local environment, either directly or by a
+Cursor Agent running locally on the owner's machine. A remote/hosted Cloud
+Agent must not run credential-dependent preflight checks (AGENTS.md, section
+3) — this module is imported there only by offline tests that inject fake
+fetchers.
 
 Safe by construction:
 
@@ -417,8 +418,8 @@ def main(argv: list[str] | None = None) -> int:
             "price. Exit 0 ONLY when every readiness decision passed. Writes "
             "a sanitized receipt to the external private LAB_RESULTS_DIR. "
             "Performs no create/update/delete operations and never prints "
-            "secrets or raw error payloads. Run locally; not from the hosted "
-            "Cloud Agent."
+            "secrets or raw error payloads. Run only in the owner's local "
+            "environment; not from a remote/hosted Cloud Agent."
         ),
     )
     parser.add_argument(

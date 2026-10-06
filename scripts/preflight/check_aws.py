@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Read-only AWS feasibility preflight for single-GPU EC2 G7e instances.
 
-Intended to be run LOCALLY by the operator in their authenticated
-environment. The hosted Cloud Agent must not run credential-dependent
-preflight checks (AGENTS.md, section 3).
+Intended to be run in the owner's authenticated local environment, directly
+or by a Cursor Agent running on the owner's machine. A remote/hosted Cloud
+Agent must not run credential-dependent preflight checks (AGENTS.md, section
+3).
 
 Safe by construction: only ``describe``/``get`` calls; no create, modify,
 start, stop, or terminate operations (AGENTS.md forbids AWS mutation until
@@ -63,7 +64,8 @@ def main(argv: list[str] | None = None) -> int:
             "G/VT vCPU service quota, using aws describe/get commands only. It "
             "does not query the AWS Pricing API. Performs no create/modify/stop/"
             "terminate operations and never prints secrets, account identifiers, "
-            "or raw error output. Run locally; not from the hosted Cloud Agent."
+            "or raw error output. Run only in the owner's local environment; "
+            "not from a remote/hosted Cloud Agent."
         )
     )
     parser.parse_args(argv)

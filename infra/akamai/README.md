@@ -20,7 +20,7 @@ envelope remains separately named.
 | Destroy requires provider verification first | `teardown-plan` and `destroy` refuse unless every ledger resource is verified against state **and** the provider API **before** any Terraform destroy plan is generated or applied |
 | Destroy requires digest-bearing approval | The destroy approval phrase is verbatim: `I approve deleting the exact recorded resources for run <tag> using destroy plan sha256:<digest>` |
 | Deletion must be confirmed | Success is reported only after read-only polling confirms every recorded provider id is gone; on timeout the operator is told billing may continue |
-| No hosted execution | apply/destroy refuse when CI/hosted-agent environment markers are present |
+| No remote/hosted execution | apply/destroy refuse in CI, GitHub Actions, Cursor Cloud Agents, and claimed Cursor workers; `CURSOR_AGENT` alone is allowed for an Agent running on the owner's machine |
 | Exact resource ledger | after apply, reconciliation writes the ledger under `$LAB_RESULTS_DIR/infra-lifecycle/<run-tag>/`; teardown targets **only** ledger-recorded resources |
 | Never broad cleanup | there is no sweep/cleanup verb; the orphan report is read-only |
 | Single GPU + firewall | exactly one `linode_instance` and one `linode_firewall`; SSH only from `management_cidr`; no public model-serving port |
@@ -114,7 +114,8 @@ benchmark.
 2. **Reviewed apply plan** — `blackwell-cloud plan` saves the binary plan
    and SHA-256 outside Git.
 3. **Apply approval** — `blackwell-cloud apply` with the digest-bearing
-   phrase; hosted execution is refused.
+   phrase; remote/hosted execution is refused, while a Cursor Agent running
+   locally on the owner's machine is allowed.
 4. **Reconciliation** — `blackwell-cloud reconcile` must be clean
    (`provider_checked=true`, exact instance + firewall identity).
 5. **Immediate emergency teardown-plan generation** — `blackwell-cloud
@@ -146,7 +147,12 @@ benchmark.
     absence; then `orphan-report` (zero matching resources) and
     `session-summary --hourly-price 3.00`.
 
-## Operator workflow (local, authenticated environment only)
+## Operator workflow (owner-controlled local, authenticated environment only)
+
+The owner may run this workflow directly or authorize a Cursor Agent running
+on the owner's machine to run it. CI, GitHub Actions, Cursor Cloud Agents, and
+claimed Cursor workers remain blocked. Local-agent execution does not bypass
+the exact approval phrase or any other lifecycle gate.
 
 All paths below assume an absolute external results directory:
 

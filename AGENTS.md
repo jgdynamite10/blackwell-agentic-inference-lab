@@ -45,7 +45,7 @@ explicitly revises them in writing.
 4. Do not change repository visibility or administrative settings without the
    owner's explicit instruction.
 
-## 3. Execution boundary (hosted Cloud Agent vs local operator)
+## 3. Execution boundary (remote agents vs owner-controlled local execution)
 
 1. The hosted Cloud Agent must **not** request, receive, discover, store,
    print, or use credentials for Akamai Cloud, AWS, Google Cloud, NVIDIA
@@ -64,9 +64,21 @@ explicitly revises them in writing.
 4. All credentialed operations — account and quota discovery, capacity and
    pricing checks, provisioning, authenticated model downloads, benchmark
    execution, result collection, teardown, and teardown verification — are
-   performed separately by the owner through their authenticated local
-   environment. Code must support this separation cleanly and must not assume
-   the Cloud Agent will ever hold provider credentials.
+   performed in the owner's authenticated local environment, either directly
+   by the owner or by a Cursor Agent running locally on the owner's machine.
+   A local Cursor Agent may use credentials already available through the
+   owner's local credential store or process environment, but must never
+   print, persist, or transmit them.
+5. `CURSOR_AGENT` by itself identifies an allowed local Cursor Agent. CI,
+   GitHub Actions, `CLOUD_AGENT`, `CURSOR_AGENT_SOCKET`, and
+   `CURSOR_AGENT_WORKER_ID` identify remote, claimed-worker, or automated
+   execution and remain blocked from billable or destructive commands. A
+   local Cursor Agent receives no waiver from the exact digest-bearing
+   approval, plan-freshness, cost, reconciliation, privacy, or phase gates.
+6. This execution-boundary permission applies consistently to Akamai Cloud,
+   Google Cloud, and AWS only when the corresponding provider phase and exact
+   run are separately authorized. It does not itself authorize a later phase
+   or a particular billable run.
 
 ## 4. Credential handling
 
