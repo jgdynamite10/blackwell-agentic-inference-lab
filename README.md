@@ -145,8 +145,10 @@ blackwell-cloud engine-contract --config examples/example-engine-contract.json
 
 The bounded Phase 3B pilot (`blackwell-cloud apply`, `pilot`, `destroy`),
 the D-0017 `mvl-baseline` command, and the D-0019 `qualify-agent`
-command run only in the owner's authenticated local environment and still
-require each command's separate exact approval phrase. Live MVL,
+command run only in the owner's authenticated local environment, either
+directly or through a Cursor Agent running on the owner's machine, and still
+require each command's separate exact approval phrase. Remote/hosted agents
+and CI remain blocked. Live MVL,
 qualification, and Phase 4 engine/precision execution are not authorized
 by the implementation decisions themselves. See
 [infra/akamai/README.md](infra/akamai/README.md),

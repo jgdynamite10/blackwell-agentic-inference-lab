@@ -99,9 +99,10 @@ for Phases 3–6:
 
 Future provider execution code must **default to dry-run or plan mode** and
 require explicit local confirmation before any billable change. All
-credentialed steps run in the owner's authenticated local environment — never
-in the hosted Cloud Agent (AGENTS.md, section 3). Tooling must let a local
-operator:
+credentialed steps run in the owner's authenticated local environment —
+directly or through a Cursor Agent running on the owner's machine, never in a
+remote/hosted Cloud Agent or CI (AGENTS.md, section 3). Tooling must let the
+local operator:
 
 1. verify identity, account/project, region, quota, and estimated price;
 2. generate a deployment plan;

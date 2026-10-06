@@ -37,12 +37,13 @@ budgeting or provisioning decision.
 | GitHub | **[VERIFIED] Available (read/limited write)** | Authenticated CLI present; used for repository operations only. |
 | NGC / Hugging Face | **[VERIFIED] Not available** | No `NGC_API_KEY` or `HF_TOKEN` present. Artifact access checks were limited to public pages. |
 
-**Execution boundary (project governance):** the hosted Cloud Agent must not
+**Execution boundary (project governance):** a remote/hosted Cloud Agent must not
 request, receive, discover, store, print, or use provider credentials, and
 must not run credential-dependent preflight scripts
 ([../AGENTS.md](../AGENTS.md), section 3). The account-level checks below are
-therefore **owner actions performed in the owner's authenticated local
-environment**, using the read-only preflight scripts in `scripts/preflight/`:
+therefore performed in the owner's authenticated local environment, directly
+or by an owner-authorized Cursor Agent running on the owner's machine, using
+the read-only preflight scripts in `scripts/preflight/`:
 (a) Akamai account onboarding/eligibility for the limited-availability RTX
 PRO 6000 plan and per-region deployability, (b) the Google Cloud project's
 `NVIDIA_RTX_PRO_6000_GPUS` regional quota, (c) AWS "Running On-Demand G and VT
@@ -420,8 +421,9 @@ teardown tooling is implemented or executed in Phase 1.
 1. Owner-run local preflight checks for Google Cloud and AWS (see
    section 1): the read-only scripts in `scripts/preflight/` verify
    account-level availability and pricing from the owner's authenticated
-   local environment. The hosted Cloud Agent does not receive credentials
-   and does not run these checks. Akamai plan, Seattle region, and catalog
+   local environment. An owner-authorized local Cursor Agent may run them;
+   remote/hosted Cloud Agents do not receive credentials and do not run these
+   checks. Akamai plan, Seattle region, and catalog
    base price for the authorized pilot are recorded in decision D-0014.
 2. ~~Akamai limited-availability onboarding / Seattle price for the exact
    one-GPU plan~~ — recorded as owner-verified sanitized facts in D-0014

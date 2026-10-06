@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Read-only Google Cloud feasibility preflight for g4-standard-48.
 
-Intended to be run LOCALLY by the operator in their authenticated
-environment. The hosted Cloud Agent must not run credential-dependent
-preflight checks (AGENTS.md, section 3).
+Intended to be run in the owner's authenticated local environment, directly
+or by a Cursor Agent running on the owner's machine. A remote/hosted Cloud
+Agent must not run credential-dependent preflight checks (AGENTS.md, section
+3).
 
 Safe by construction: only ``gcloud`` list/describe commands; no
 create/update/delete calls; never prints credentials, identity values,
@@ -53,7 +54,8 @@ def main(argv: list[str] | None = None) -> int:
             f"live capacity) and the regional {QUOTA_METRIC} quota overview "
             "using gcloud list commands only. Performs no create/update/delete "
             "operations and never prints secrets or raw error output. Run "
-            "locally; not from the hosted Cloud Agent."
+            "only in the owner's local environment; not from a remote/hosted "
+            "Cloud Agent."
         )
     )
     parser.parse_args(argv)

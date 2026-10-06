@@ -1620,3 +1620,52 @@ the new P1 the P2C development control. Tested with synthetic fixtures
 only. No provider, credential, inference endpoint, download, private
 result, custody package, publication system, or the secondary repository
 was accessed.
+
+## 2026-10-06 — D-0028: Owner-authorized local Cursor Agent execution
+
+> **SUPERSEDES D-0006(c) only to the following extent:** credentialed local
+> execution may be performed by an owner-authorized Cursor Agent running on
+> the owner's machine. The prohibition on credentials and provider operations
+> in remote/hosted Cloud Agents remains fully in force.
+
+**Decision.** A Cursor Agent running directly on the project owner's machine
+is an allowed local operator for credentialed and billable lifecycle work.
+It may execute Akamai Cloud, Google Cloud, and AWS preflight, planning,
+provisioning, measurement, reconciliation, and teardown commands only when
+the corresponding provider phase and exact run are separately authorized.
+Every existing command-specific approval phrase, reviewed-plan digest,
+plan-age limit, cost envelope, resource-identity check, reconciliation gate,
+results-privacy rule, and phase gate remains binding.
+
+`CURSOR_AGENT` alone no longer means hosted execution. Cursor uses that marker
+for Agent commands running in a local terminal. Remote and automated contexts
+remain blocked when any of `CI`, `GITHUB_ACTIONS`, `CLOUD_AGENT`,
+`CURSOR_AGENT_SOCKET`, or `CURSOR_AGENT_WORKER_ID` is non-empty. Cursor-managed
+Cloud Agent VMs expose `CURSOR_AGENT_SOCKET`; claimed self-hosted workers can
+expose the socket and/or worker marker. A local marker never overrides a
+remote or CI marker. Error messages disclose marker names only, never values.
+
+The local Cursor Agent may consume credentials already supplied through the
+owner's local credential store or temporary process environment. It must not
+request credentials through chat, print them, persist them in the repository
+or results, forward them to a remote agent, or weaken provider permissions.
+The exact approval phrase remains the owner's authorization for the specific
+digest-bearing command; Agent presence is not authorization by itself.
+
+This decision changes the execution boundary only. It does **not** authorize
+Google Cloud Phase 5, AWS Phase 6, a new Akamai run, an expired saved plan,
+publication, or any billable action without its separate approval. Provider
+implementations must reuse this boundary instead of creating provider-specific
+Agent exceptions.
+
+**Rationale.** The previous guard treated every `CURSOR_AGENT` process as a
+hosted Cloud Agent, so it also rejected the owner's local Cursor Agent. That
+classification was broader than the governance intent. Cursor documents
+`CURSOR_AGENT` for local Agent terminal sessions and documents
+`CURSOR_AGENT_SOCKET` for Cloud Agent identity and metadata:
+[local terminal](https://cursor.com/docs/agent/tools/terminal) and
+[Cloud Agent identity](https://cursor.com/docs/cloud-agent/identity).
+Distinguishing the local marker from the cloud/worker markers permits the
+owner-requested local automation without granting CI or remote agents access.
+Implemented and tested without provider credentials, provider calls,
+provisioning, inference, or private results.

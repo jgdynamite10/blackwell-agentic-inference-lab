@@ -3,9 +3,10 @@
 
 The implementation lives in :mod:`blackwell_lab.cloud.preflight` so it can be
 unit-tested offline with injected fetchers. Run this script LOCALLY in the
-operator's authenticated environment (``pip install -e .`` first). The hosted
-Cloud Agent must not run credential-dependent preflight checks (AGENTS.md,
-section 3).
+owner's authenticated environment (``pip install -e .`` first), either
+directly or through a Cursor Agent running on the owner's machine. A
+remote/hosted Cloud Agent must not run credential-dependent preflight checks
+(AGENTS.md, section 3).
 
 Checks (all HTTP GET only; no create/update/delete calls anywhere):
 

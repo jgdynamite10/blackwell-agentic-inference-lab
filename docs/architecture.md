@@ -245,15 +245,17 @@ agent-quality qualification; it makes no infrastructure changes.
 Decision D-0020 adds `blackwell-cloud engine-contract` as an offline
 readiness check and a profile registry; it adds no launch command.
 Every billable or destructive action still requires its separate exact
-local owner approval phrase and refuses to execute in hosted/CI
-environments. Live MVL apply is not authorized by D-0017 itself. There
+local owner approval phrase and refuses to execute in remote/hosted-agent or
+CI environments. An owner-authorized Cursor Agent running on the owner's
+machine is an allowed local operator. Live MVL apply is not authorized by
+D-0017 itself. There
 is **no frontend application** — the entire workflow is CLI-first.
 
 ### Deployment view (single Akamai GPU instance)
 
 ```mermaid
 flowchart TB
-    subgraph operator["Owner's authenticated local environment (never the hosted Cloud Agent)"]
+    subgraph operator["Owner's authenticated local environment (owner or local Cursor Agent)"]
         cli["blackwell-cloud CLI<br/>readiness / engine-contract / plan / apply (gated) /<br/>pilot (gated) / mvl-baseline (gated) /<br/>qualify-agent (gated) / verify-results /<br/>teardown-plan / destroy (gated) / orphan-report"]
         tf["Terraform (pinned CLI + linode provider 4.1.0)<br/>state + tfvars OUTSIDE Git"]
         preflight["Authenticated read-only preflight<br/>plan entitlement, regions, price<br/>(sanitized output; local only)"]
@@ -303,7 +305,9 @@ explicitly authorized measurement:
 
 - **Plan is the default.** `blackwell-cloud plan` and `teardown-plan` are
   read-only; `apply` and `destroy` each require a separate explicit approval
-  phrase from the local owner and refuse hosted execution. A saved plan
+  phrase from the local owner and refuse remote/hosted execution. A local
+  Cursor Agent on the owner's machine is allowed but receives no waiver from
+  any lifecycle gate. A saved plan
   verifies intended configuration and actions only; it does not prove live
   capacity.
 - **Laptop vs instance.** Lifecycle and Terraform run on the owner's laptop.

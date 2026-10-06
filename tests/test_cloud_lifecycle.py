@@ -1192,10 +1192,61 @@ class TestRunTagAndHostedGuards:
         assert lifecycle.validate_run_tag(RUN_TAG) == RUN_TAG
 
     def test_hosted_markers_refuse_billable_verbs(self):
-        for marker in ("CI", "GITHUB_ACTIONS", "CURSOR_AGENT", "CLOUD_AGENT"):
+        for marker in (
+            "CI",
+            "GITHUB_ACTIONS",
+            "CLOUD_AGENT",
+            "CURSOR_AGENT_SOCKET",
+            "CURSOR_AGENT_WORKER_ID",
+        ):
             with pytest.raises(LifecycleError, match="hosted"):
                 lifecycle.refuse_hosted_execution({marker: "1"})
         lifecycle.refuse_hosted_execution({})  # local: no exception
+
+    def test_local_cursor_agent_is_allowed(self):
+        lifecycle.refuse_hosted_execution({"CURSOR_AGENT": "1"})
+
+    def test_cursor_agent_with_cloud_socket_is_refused(self):
+        with pytest.raises(LifecycleError, match="CURSOR_AGENT_SOCKET"):
+            lifecycle.refuse_hosted_execution(
+                {
+                    "CURSOR_AGENT": "1",
+                    "CURSOR_AGENT_SOCKET": "/run/cursor/api.sock",
+                }
+            )
+
+    def test_local_cursor_agent_does_not_override_other_hosted_markers(self):
+        with pytest.raises(LifecycleError, match="CI"):
+            lifecycle.refuse_hosted_execution({"CURSOR_AGENT": "1", "CI": "true"})
+
+    def test_apply_from_local_cursor_agent_reaches_the_saved_plan_gate(self, paths, tf_dir):
+        runner = FakeRunner()
+        with pytest.raises(LifecycleError, match="no reviewed apply plan"):
+            lifecycle.apply(
+                RUN_TAG,
+                "not-an-approval",
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                environ={"CURSOR_AGENT": "1"},
+            )
+        assert runner.calls == []
+
+    def test_apply_from_cursor_cloud_agent_stops_before_file_or_command_access(self, paths, tf_dir):
+        runner = FakeRunner()
+        with pytest.raises(LifecycleError, match="CURSOR_AGENT_SOCKET"):
+            lifecycle.apply(
+                RUN_TAG,
+                "not-an-approval",
+                paths=paths,
+                tf_dir=tf_dir,
+                runner=runner,
+                environ={
+                    "CURSOR_AGENT": "1",
+                    "CURSOR_AGENT_SOCKET": "/run/cursor/api.sock",
+                },
+            )
+        assert runner.calls == []
 
 
 def _empty_provider_fetch(path, token=None):

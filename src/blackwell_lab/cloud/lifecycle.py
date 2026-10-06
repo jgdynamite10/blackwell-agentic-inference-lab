@@ -102,8 +102,22 @@ DESTROY_APPROVAL_TEMPLATE = (
     "using destroy plan sha256:{plan_sha256}"
 )
 
-#: Environment markers that identify hosted (non-local-owner) execution.
-_HOSTED_ENV_MARKERS = ("CI", "GITHUB_ACTIONS", "CURSOR_AGENT", "CLOUD_AGENT")
+#: Environment markers that identify CI or remote/cloud-agent execution.
+#:
+#: ``CURSOR_AGENT`` is intentionally not in this tuple. Cursor sets that
+#: marker for an Agent running directly on the owner's workstation as well as
+#: for other Agent surfaces. A local Cursor Agent is an allowed local operator
+#: and remains subject to every plan, digest, approval, reconciliation, and
+#: cost gate. Cursor-managed Cloud Agents expose ``CURSOR_AGENT_SOCKET``;
+#: claimed self-hosted workers can expose ``CURSOR_AGENT_WORKER_ID``. Those
+#: remote/background execution contexts remain refused.
+_HOSTED_ENV_MARKERS = (
+    "CI",
+    "GITHUB_ACTIONS",
+    "CLOUD_AGENT",
+    "CURSOR_AGENT_SOCKET",
+    "CURSOR_AGENT_WORKER_ID",
+)
 
 _RUN_TAG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{3,40}$")
 _LEDGER_SCHEMA_VERSION = "2.0.0"
@@ -209,7 +223,12 @@ def validate_run_tag(run_tag: str) -> str:
 
 
 def refuse_hosted_execution(environ: dict | None = None) -> None:
-    """Billable verbs run only in the owner's local environment."""
+    """Refuse billable verbs in CI and remote/cloud-agent environments.
+
+    ``CURSOR_AGENT`` alone is allowed because Cursor also sets it for an
+    Agent executing on the owner's workstation. It does not bypass any other
+    lifecycle or approval gate.
+    """
     env = os.environ if environ is None else environ
     markers = [m for m in _HOSTED_ENV_MARKERS if env.get(m)]
     if markers:
