@@ -125,6 +125,16 @@ committed or pasted into chat, issues, PRs, or CI; see
   verifies intended configuration and planned actions only; it does not
   prove live capacity. Capacity is known when provisioning is accepted and
   the instance reaches the expected running state.
+- **[CURRENT LOCK — decision D-0029, 2026-10-06]** The fixed qualification
+  region is `us-sea` again. D-0027 had locked `us-iad-2`. That region
+  passed advertised-availability checks, then creation of run
+  `p1-dev-20261006b` returned HTTP 403 (plan not currently available) and
+  the apply was recovered as `aborted_verified_empty_apply` with zero
+  resources. `us-sea` has the prior successful create/run/delete evidence
+  recorded above and is currently advertised available at $3.00/hour.
+  Advertised availability is advisory and is not capacity proof. There is
+  no fallback list, automatic retry, or dynamic region selection. The
+  2026-09-06 observations above stay historical facts.
 
 ## 3. Google Cloud — `g4-standard-48`
 

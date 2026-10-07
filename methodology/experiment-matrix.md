@@ -87,7 +87,12 @@ Before any full-baseline measurement, one short owner-approved
   exploratory. MVL-F is diagnostic-only and is not the comparative
   reference (decision D-0019). A bounded agent-quality qualification
   (`blackwell-cloud qualify-agent`) must pass the study-entry gate before
-  a configuration may enter comparative measurement. Controlled-resource
+  a configuration may enter comparative measurement. The Akamai
+  qualification infrastructure region is fixed to `us-sea` (decision
+  D-0029). D-0027's `us-iad-2` lock is historical: that region's create
+  returned HTTP 403 and was recovered empty. There is no fallback list,
+  automatic retry, or dynamic region selection. Advertised availability
+  is not capacity proof. Controlled-resource
   mode remains optional future work. AWS and GCP later repeat this same
   three-cell matrix if quota permits.
 

@@ -20,17 +20,21 @@ variable "run_tag" {
 
 variable "region" {
   description = <<-EOT
-    Fixed Akamai qualification infrastructure region (decision D-0027).
-    Locked to us-iad-2. There is no fallback list. A saved Terraform plan
-    verifies this intended configuration only; it does not prove live capacity.
-    Historical D-0014 evidence for us-sea stays in the decision log.
+    Fixed Akamai qualification infrastructure region (decision D-0029).
+    Locked to us-sea. There is no fallback list, automatic retry, or dynamic
+    region selection. A saved Terraform plan verifies this intended
+    configuration only; it does not prove live capacity. Advertised
+    availability is advisory and is not capacity proof. Decision D-0027's
+    us-iad-2 lock is historical: creation of run p1-dev-20261006b returned
+    HTTP 403 and was recovered empty. Historical D-0014 evidence stays in
+    the decision log.
   EOT
   type        = string
-  default     = "us-iad-2"
+  default     = "us-sea"
 
   validation {
-    condition     = var.region == "us-iad-2"
-    error_message = "region must equal us-iad-2 for the authorized qualification infrastructure."
+    condition     = var.region == "us-sea"
+    error_message = "region must equal us-sea for the authorized qualification infrastructure."
   }
 }
 
