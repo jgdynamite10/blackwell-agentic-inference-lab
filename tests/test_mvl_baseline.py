@@ -58,7 +58,7 @@ def mvl_config_dict(commit=COMMIT):
         "endpoint": {"base_url": "http://127.0.0.1:8000/v1", "model": "m"},
         "cloud": {
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-            "region": "us-sea",
+            "region": "us-ord",
             "list_price_usd_per_hour": 3.0,
             "price_source_date": "2026-09-08",
         },
@@ -132,7 +132,7 @@ def ready_ledger(**overrides):
                 "address": "linode_instance.gpu_baseline",
                 "type": "linode_instance",
                 "provider_id": "42",
-                "region": "us-sea",
+                "region": "us-ord",
             },
             {
                 "address": "linode_firewall.gpu_baseline",
@@ -171,7 +171,7 @@ def _observed():
         instance={
             "provider_id": "42",
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-            "region": "us-sea",
+            "region": "us-ord",
             "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
         },
         host_facts={
@@ -417,7 +417,7 @@ def test_frozen_mvl_canary_uses_container_digest_when_image_absent(tmp_path, mon
         lambda **_kwargs: {
             "provider_id": "42",
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-            "region": "us-sea",
+            "region": "us-ord",
             "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
         },
     )

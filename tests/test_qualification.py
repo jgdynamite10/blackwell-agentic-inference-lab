@@ -105,8 +105,8 @@ from blackwell_lab.workload.validation import ConfigError
 COMMIT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 RUN_TAG = "p3-qual-20260918a"
 FROZEN_ACCEPTED_ANSWERS_SHA256 = "2edb7134040af2e8e9e9fec4c068bbc0dfaf6bfa55cbd4284b8bf6045c7aea2a"
-FROZEN_C1_IDENTITY_SHA256 = "76510b8d3829f69ee8406680f7861ec38ab9d831052506c69819cf90cc3b1969"
-FROZEN_C2_IDENTITY_SHA256 = "79cd85134d8c662b65e082bb3203b68e862f89f6083b69a0882022306ae01145"
+FROZEN_C1_IDENTITY_SHA256 = "fe804d2a14be46f89b32f760d2f7540e05769db83ce041086ec6d8a5477f33bd"
+FROZEN_C2_IDENTITY_SHA256 = "e44bb30ede6e1002eb8751b940b62e58c93901e2031e36ea777eead372f3030d"
 FROZEN_SYSTEM_PROMPT_V240 = (
     "You are a Cloud Operations Agent working a synthetic incident. "
     "Diagnose the incident using only the provided tools. "
@@ -202,7 +202,7 @@ def qualification_config_dict(candidate_id="C1", stage="development"):
         "endpoint": {"base_url": "http://127.0.0.1:8000/v1", "model": "m"},
         "cloud": {
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-            "region": "us-sea",
+            "region": "us-ord",
             "list_price_usd_per_hour": 3.0,
             "price_source_date": "2026-09-18",
         },
@@ -291,7 +291,7 @@ def ready_ledger(**overrides):
                 "address": "linode_instance.gpu_baseline",
                 "type": "linode_instance",
                 "provider_id": "42",
-                "region": "us-sea",
+                "region": "us-ord",
                 "label": f"bwlab-{RUN_TAG}",
                 "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
             },
@@ -322,7 +322,7 @@ def _observed():
         instance={
             "provider_id": "42",
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-            "region": "us-sea",
+            "region": "us-ord",
             "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
         },
         host_facts={
@@ -1401,7 +1401,7 @@ class TestPromptVariantP1:
                 encoding="utf-8"
             )
         )
-        assert control["region"] == "us-sea"
+        assert control["region"] == "us-ord"
         assert control["precision"] == "bf16"
         assert control["stopped"] is False
         assert control["terminal_event"] == "qualification_completed"

@@ -1677,6 +1677,11 @@ provisioning, inference, or private results.
 
 ## 2026-10-06 — D-0029: Fixed qualification region returns to us-sea
 
+> **Region lock superseded by D-0030.** D-0030 supersedes only the fixed
+> qualification region in this decision. The same-session P1/P2C development
+> control requirement remains in force. The digest table below is the
+> historical `us-sea` contract.
+
 > **SUPERSEDES D-0027 only to the following extent:** the single fixed Akamai
 > qualification region is `us-sea`. The same-session P1/P2C development
 > control requirement in D-0027 remains in force.
@@ -1735,3 +1740,71 @@ matching the region is not enough to reuse an older control. Tested with
 synthetic fixtures only. No provider, credential, inference endpoint,
 download, private result, custody package, publication system, plan, apply,
 or the secondary repository was accessed.
+
+## 2026-10-07 — D-0030: Fixed qualification region moves to us-ord
+
+> **SUPERSEDES D-0029 only to the following extent:** the single fixed Akamai
+> qualification region is `us-ord`. The same-session P1/P2C development
+> control requirement in D-0027 remains in force.
+
+**Decision.** The fixed Akamai qualification infrastructure region is
+exactly `us-ord`. There is no region list, dynamic region selection,
+automatic retry, or fallback. One `g3-gpu-rtxpro6000-blackwell-1`, one
+run-tagged firewall, a six-hour TTL, Terraform 1.9.8, the $3.00/hour
+planning rate, the $18 six-hour expected exposure, and the $25 ceiling are
+unchanged. Approval phrases, privacy, reconciliation, recovery, and
+teardown protections are unchanged. Production labels stay
+`bwlab-{run_tag}` and `bwlab-fw-{run_tag}`, with tags `blackwell-lab`,
+`run:{run_tag}`, `ttl-hours:6`, and `phase:3`. Qualification candidates,
+workloads, thresholds, and publication policy are unchanged.
+
+The owner confirmed current capacity in `us-ord`. `us-sea` passed
+advertised-availability checks, then the authenticated create for run
+`p1-dev-20261007b` returned HTTP 403 because the plan was not currently
+available. That run was recovered as `aborted_verified_empty_apply` with
+zero resources. Run `p1-dev-20261007a` is a separate authentication
+failure (HTTP 401 Invalid Token) that was later provider-verified empty.
+It is not a capacity failure. The historical `us-iad-2` HTTP 403 capacity
+failure for run `p1-dev-20261006b` stays historical. Availability and
+capacity observations are time-bound and do not guarantee future capacity.
+Advertised availability is advisory and is not capacity proof. That
+`us-sea` attempt, its receipts, and the D-0029 digest table stay
+historical. This decision does not rewrite D-0022 through D-0028 and does
+not redefine those results.
+
+P2C development still requires a completed, verified P1 development
+control from the same run tag, lifecycle ledger, resource identity,
+canonical commit, configuration digest, region, and frozen pins. The next
+P1 must be a new same-session control for the new run. An old `us-ord`
+control does not authenticate a new P2C unless the run tag, canonical
+commit, configuration digest, ledger digest, resource identity digest,
+and region all match the current session. A `us-sea` or `us-iad-2`
+ledger is historical and is refused for a new session. A production
+firewall ledger entry may omit region or carry `us-ord`; any other
+firewall region is refused. The instance region must be exactly `us-ord`.
+
+Candidate identity digests include `region`. Moving the lock from
+`us-sea` to `us-ord` is the only serialization change. The values below
+were recomputed with `candidate_identity_digest` after that change. They
+are the current contract. The D-0029 table remains the historical
+`us-sea` contract. The D-0027 table remains the historical `us-iad-2`
+contract.
+
+| Candidate | D-0030 (`us-ord`, recomputed) |
+| --- | --- |
+| C1 | `fe804d2a14be46f89b32f760d2f7540e05769db83ce041086ec6d8a5477f33bd` |
+| C2 | `e44bb30ede6e1002eb8751b940b62e58c93901e2031e36ea777eead372f3030d` |
+| P1 | `d244d01308b525d970d7e706a8acecc3f4e6e10009ef962197e2cdfa926453de` |
+| P2 | `11cbed1d8a4672fb19b4df35f3a6c25ce9ca536a25d2208063495a2d8b13d138` |
+| P2C | `3bd46c049832a66f8de2f68d38195691361462961308ac76501f3f523ea1fd4c` |
+
+**This decision does not authorize** holdout, freeze, cross-cloud inference, publication, provisioning, downloads, or live execution. Those still require their own decisions and exact approval phrases.
+
+**Rationale.** The `us-sea` create for `p1-dev-20261007b` failed closed with
+no resources after advertised availability, while the owner confirmed
+current capacity in `us-ord`. A same-session digest binding is what makes
+the next P1 the P2C development control; matching the region is not enough
+to reuse an older control. Tested with synthetic fixtures only. No
+provider, credential, inference endpoint, download, private result,
+custody package, publication system, plan, apply, or the secondary
+repository was accessed.

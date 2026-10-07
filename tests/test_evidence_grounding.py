@@ -116,11 +116,12 @@ from blackwell_lab.workload.tools import (
 )
 from blackwell_lab.workload.validation import ConfigError
 
-# Current D-0029 us-sea identity contract, recomputed from serialize_candidate.
-# The D-0027 us-iad-2 digests stay historical in the decision log.
-FROZEN_C1_IDENTITY_SHA256 = "76510b8d3829f69ee8406680f7861ec38ab9d831052506c69819cf90cc3b1969"
-FROZEN_C2_IDENTITY_SHA256 = "79cd85134d8c662b65e082bb3203b68e862f89f6083b69a0882022306ae01145"
-FROZEN_P1_IDENTITY_SHA256 = "674280ef9090933d170a8000b4e67ca914310ea0261bc1ffcda36d7692a590d2"
+# Current D-0030 us-ord identity contract, recomputed from serialize_candidate.
+# The D-0029 us-sea digests and the D-0027 us-iad-2 digests stay historical
+# in the decision log.
+FROZEN_C1_IDENTITY_SHA256 = "fe804d2a14be46f89b32f760d2f7540e05769db83ce041086ec6d8a5477f33bd"
+FROZEN_C2_IDENTITY_SHA256 = "e44bb30ede6e1002eb8751b940b62e58c93901e2031e36ea777eead372f3030d"
+FROZEN_P1_IDENTITY_SHA256 = "d244d01308b525d970d7e706a8acecc3f4e6e10009ef962197e2cdfa926453de"
 FROZEN_ACCEPTED_ANSWERS_SHA256 = "2edb7134040af2e8e9e9fec4c068bbc0dfaf6bfa55cbd4284b8bf6045c7aea2a"
 FROZEN_SYSTEM_PROMPT_V240_SHA256 = (
     "8c8c84b85f8970485380fc5de299ef1f902f8007007185d8375385d65f44ae08"
@@ -1430,7 +1431,7 @@ def qualification_config_dict(candidate_id="P2", stage="development", sealed_set
         "endpoint": {"base_url": "http://127.0.0.1:8000/v1", "model": "m"},
         "cloud": {
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-            "region": "us-sea",
+            "region": "us-ord",
             "list_price_usd_per_hour": 3.0,
             "price_source_date": "2026-09-18",
         },
@@ -1476,7 +1477,7 @@ def qualification_config_dict(candidate_id="P2", stage="development", sealed_set
             "run_tag": RUN_TAG,
             "p1_run_label": "qual-p1",
             "canonical_commit": COMMIT,
-            "region": "us-sea",
+            "region": "us-ord",
             "config_sha256": "0" * 64,
             "result_sha256": "0" * 64,
             "control_record_sha256": "0" * 64,
@@ -1522,7 +1523,7 @@ def _ready_ledger():
                 "address": "linode_instance.gpu_baseline",
                 "type": "linode_instance",
                 "provider_id": "42",
-                "region": "us-sea",
+                "region": "us-ord",
                 "label": f"bwlab-{RUN_TAG}",
                 "tags": ["blackwell-lab", f"run:{RUN_TAG}", "ttl-hours:6", "phase:3"],
             },
@@ -1555,7 +1556,7 @@ def _observed(*, full_host: bool = False):
             instance={
                 "provider_id": "42",
                 "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-                "region": "us-sea",
+                "region": "us-ord",
                 "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
             },
             host_facts=dict(_HOST),
@@ -1572,7 +1573,7 @@ def _observed(*, full_host: bool = False):
         instance={
             "provider_id": "42",
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-            "region": "us-sea",
+            "region": "us-ord",
             "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
         },
         host_facts={

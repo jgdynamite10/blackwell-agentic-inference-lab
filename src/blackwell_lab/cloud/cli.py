@@ -93,8 +93,9 @@ AUTHORIZED_PILOT_CELLS = (
 AUTHORIZED_PILOT_PRECISION = "bf16"
 AUTHORIZED_PILOT_SERVING_MODE = "provider-native"
 AUTHORIZED_PILOT_GPU = "RTX PRO 6000 Blackwell"
-# D-0029 fixed qualification region. The D-0027 us-iad-2 lock is historical.
-AUTHORIZED_PILOT_REGION = "us-sea"
+# D-0030 fixed qualification region. The D-0029 us-sea lock and the
+# D-0027 us-iad-2 lock are historical.
+AUTHORIZED_PILOT_REGION = "us-ord"
 AUTHORIZED_PILOT_INSTANCE_TYPE = "g3-gpu-rtxpro6000-blackwell-1"
 AUTHORIZED_WARMUP_PASSES = 1
 AUTHORIZED_REPETITIONS = 1

@@ -88,11 +88,17 @@ Before any full-baseline measurement, one short owner-approved
   reference (decision D-0019). A bounded agent-quality qualification
   (`blackwell-cloud qualify-agent`) must pass the study-entry gate before
   a configuration may enter comparative measurement. The Akamai
-  qualification infrastructure region is fixed to `us-sea` (decision
-  D-0029). D-0027's `us-iad-2` lock is historical: that region's create
-  returned HTTP 403 and was recovered empty. There is no fallback list,
-  automatic retry, or dynamic region selection. Advertised availability
-  is not capacity proof. Controlled-resource
+  qualification infrastructure region is fixed to `us-ord` (decision
+  D-0030). The owner confirmed current capacity in `us-ord`. D-0029's
+  `us-sea` lock is historical: the authenticated create for
+  `p1-dev-20261007b` returned HTTP 403 and was recovered empty. Run
+  `p1-dev-20261007a` was an HTTP 401 Invalid Token authentication
+  failure later provider-verified empty, not a capacity failure.
+  D-0027's `us-iad-2` lock is historical: that region's create returned
+  HTTP 403 and was recovered empty. There is no fallback list, automatic
+  retry, or dynamic region selection. Advertised availability is not
+  capacity proof. Availability and capacity observations are time-bound
+  and do not guarantee future capacity. Controlled-resource
   mode remains optional future work. AWS and GCP later repeat this same
   three-cell matrix if quota permits.
 
