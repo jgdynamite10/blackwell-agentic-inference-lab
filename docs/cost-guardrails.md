@@ -62,7 +62,12 @@ Phase 3–6 ranges remain **planning estimates**, not authorization. Decision
 D-0014 authorizes only the $25 / six-hour compatibility/headroom pilot.
 D-0017 keeps that six-hour envelope for the minimum valuable lab and
 does not authorize a multi-day session. Live MVL apply is still a
-separate owner phrase. Akamai figures use the
+separate owner phrase. Decision D-0029 fixes the active Akamai
+qualification region at `us-sea`. Planning uses the $3.00/hour rate, an
+$18 six-hour exposure, and the $25 ceiling. Advertised availability is
+advisory and is not capacity proof. D-0027's `us-iad-2` lock is
+historical: creation of run `p1-dev-20261006b` returned HTTP 403 and was
+recovered with zero resources. Akamai figures use the
 owner-observed Seattle **$3.00/h** catalog base price and distinguish it
 from the public **$2.50/h** advertised starting price. The Phase 3–4 ranges
 reflect the D-0010 sample plan and the D-0012 12-cell matrix; measured-cell

@@ -1542,6 +1542,11 @@ publication system, or the secondary repository was accessed.
 
 ## 2026-10-05 — D-0027: Fixed qualification region us-iad-2 and same-session P1/P2C development control
 
+> **Region lock superseded by D-0029.** D-0029 supersedes only the fixed
+> qualification region in this decision. The same-session P1/P2C development
+> control requirement remains in force. The digest table below is the
+> historical `us-iad-2` contract.
+
 **Decision.** The fixed Akamai qualification infrastructure region changes
 from the historical `us-sea` attempt to exactly `us-iad-2`. There is no
 region list, dynamic fallback, automatic retry, or provider selection.
@@ -1669,3 +1674,64 @@ Distinguishing the local marker from the cloud/worker markers permits the
 owner-requested local automation without granting CI or remote agents access.
 Implemented and tested without provider credentials, provider calls,
 provisioning, inference, or private results.
+
+## 2026-10-06 — D-0029: Fixed qualification region returns to us-sea
+
+> **SUPERSEDES D-0027 only to the following extent:** the single fixed Akamai
+> qualification region is `us-sea`. The same-session P1/P2C development
+> control requirement in D-0027 remains in force.
+
+**Decision.** The fixed Akamai qualification infrastructure region is
+exactly `us-sea`. There is no region list, dynamic region selection,
+automatic retry, or fallback. One `g3-gpu-rtxpro6000-blackwell-1`, one
+run-tagged firewall, a six-hour TTL, Terraform 1.9.8, the $3.00/hour
+planning rate, the $18 six-hour expected exposure, and the $25 ceiling are
+unchanged. Approval phrases, privacy, reconciliation, and teardown
+protections are unchanged. Production labels stay `bwlab-{run_tag}` and
+`bwlab-fw-{run_tag}`, with tags `blackwell-lab`, `run:{run_tag}`,
+`ttl-hours:6`, and `phase:3`.
+
+`us-sea` has prior successful create/run/delete evidence and is currently
+advertised available at $3.00/hour. `us-iad-2` passed
+advertised-availability checks, then creation of run `p1-dev-20261006b`
+returned HTTP 403 because the plan was not currently available in that
+region. The apply was recovered as `aborted_verified_empty_apply` with
+zero resources. Advertised availability is advisory and is not capacity
+proof. That `us-iad-2` attempt, its receipts, and the D-0027 digest table
+stay historical. This decision does not rewrite D-0022 through D-0026 and
+does not redefine those results.
+
+P2C development still requires a completed, verified P1 development
+control from the same run tag, lifecycle ledger, resource identity,
+canonical commit, region, and frozen pins. The next P1 must be a new
+same-session control for the new run. An old `us-sea` control, including
+one whose candidate identity serialization matches this lock, does not
+authenticate a new P2C when the commit, ledger digest, or resource
+identity differs. A `us-iad-2` ledger is historical and cross-region and
+is refused. A production firewall ledger entry may omit region or carry
+`us-sea`; any other firewall region is refused. The instance region must
+be exactly `us-sea`.
+
+Candidate identity digests include `region`. Returning the lock from
+`us-iad-2` to `us-sea` is the only serialization change. The values below
+were recomputed with `candidate_identity_digest` after that change. They
+are the current contract. The D-0027 table remains the historical
+`us-iad-2` contract.
+
+| Candidate | D-0029 (`us-sea`, recomputed) |
+| --- | --- |
+| C1 | `76510b8d3829f69ee8406680f7861ec38ab9d831052506c69819cf90cc3b1969` |
+| C2 | `79cd85134d8c662b65e082bb3203b68e862f89f6083b69a0882022306ae01145` |
+| P1 | `674280ef9090933d170a8000b4e67ca914310ea0261bc1ffcda36d7692a590d2` |
+| P2 | `478a0ce881b22be8e5e747eafb63a6453b51540492dc1dba497bd8e28d160e44` |
+| P2C | `49b279fb76dfa3ee3da2dbf8bdd15c7547441faa386c14c97f7787aeff1a069a` |
+
+**This decision does not authorize** holdout, freeze, cross-cloud inference, publication, provisioning, downloads, or live execution. Those still require their own decisions and exact approval phrases.
+
+**Rationale.** The `us-iad-2` create failed closed with no resources, while
+`us-sea` already has successful create/run/delete evidence. A same-session
+digest binding is what makes the next P1 the P2C development control;
+matching the region is not enough to reuse an older control. Tested with
+synthetic fixtures only. No provider, credential, inference endpoint,
+download, private result, custody package, publication system, plan, apply,
+or the secondary repository was accessed.

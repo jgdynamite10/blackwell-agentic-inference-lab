@@ -102,8 +102,8 @@ class TestStaticConfiguration:
 
     def test_variables_lock_authorized_pilot_identity(self):
         variables = read("variables.tf")
-        assert 'var.region == "us-iad-2"' in variables
-        assert "region must equal us-iad-2" in variables
+        assert 'var.region == "us-sea"' in variables
+        assert "region must equal us-sea" in variables
         assert 'var.gpu_instance_type == "g3-gpu-rtxpro6000-blackwell-1"' in variables
         assert "gpu_instance_type must equal g3-gpu-rtxpro6000-blackwell-1" in variables
         assert "var.ttl_hours == 6" in variables

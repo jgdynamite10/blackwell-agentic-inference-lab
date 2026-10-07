@@ -1,12 +1,14 @@
 """Same-session P1 development control for P2C development (decision D-0027).
 
-P2C development may run only when a fully completed, non-stopped, verified
-P1 development control from the same run tag, lifecycle ledger, and resource
-identity is present. The control binds that P1 receipt, the terminal
-qualification_completed event, and the frozen precision. Authentication is
-read-only and fails closed before a model client exists. Records store
-digests only: no private paths, provider ids, addresses, prompts,
-completions, reasoning, or task bodies.
+Decision D-0029 fixes the region at us-sea and leaves the same-session
+requirement in force. P2C development may run only when a fully completed,
+non-stopped, verified P1 development control from the same run tag,
+lifecycle ledger, resource identity, and canonical commit is present. A
+prior us-sea or us-iad-2 control from another session is historical. The
+control binds that P1 receipt, the terminal qualification_completed event,
+and the frozen precision. Authentication is read-only and fails closed
+before a model client exists. Records store digests only: no private paths,
+provider ids, addresses, prompts, completions, reasoning, or task bodies.
 """
 
 from __future__ import annotations
@@ -55,7 +57,7 @@ _OWN_LABEL = "P2C cannot bind its own run label as the P1 control"
 _MALFORMED = "P2C development control record is malformed"
 _PRIVATE = "P2C development control record contains a private path"
 _PENDING = "development session has a pending lifecycle operation"
-_P1_SESSION = "P1 development session is not a reconciled us-iad-2 resource session"
+_P1_SESSION = "P1 development session is not a reconciled us-sea resource session"
 _RUN_TAG_UNSAFE = "qualification run tag is malformed"
 _SESSION_CHANGED = "development session changed before the result was bound"
 _EVENT = "P1 development terminal event does not match the selected control"

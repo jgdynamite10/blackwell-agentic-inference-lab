@@ -140,7 +140,12 @@ explicitly revises them in writing.
    **D-0019 authorizes implementation** of the bounded agent-quality
    qualification (`blackwell-cloud qualify-agent`). Decision **D-0020
    authorizes implementation** of the provider-neutral engine/precision
-   contract (`blackwell-cloud engine-contract`) only. **Live MVL,
+   contract (`blackwell-cloud engine-contract`) only. Decision **D-0029**
+   sets the single fixed Akamai qualification region to `us-sea`,
+   superseding only the D-0027 region lock. The same-session P1/P2C
+   control requirement remains. There is no fallback list, automatic
+   retry, or dynamic region selection. Advertised availability is
+   advisory and is not capacity proof. **Live MVL,
    qualification, and Phase 4 engine/precision execution still require**
    their separate digest-bearing approval phrases. The D-0014 six-hour /
    $25 pilot envelope remains separately named. **Phase 4 live execution
