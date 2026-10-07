@@ -62,13 +62,24 @@ Decision D-0027 later locked the qualification region to `us-iad-2`.
 That region passed advertised-availability checks, but creation of run
 `p1-dev-20261006b` returned HTTP 403 because the plan was not currently
 available there. The apply was recovered as `aborted_verified_empty_apply`
-with zero resources. Decision D-0029 supersedes only that region lock
-and sets the single fixed region to `us-sea`. `us-sea` has prior
-successful create/run/delete evidence and is currently advertised
-available at $3.00/hour. Advertised availability is advisory and is not
-capacity proof. There is no fallback list, automatic retry, or dynamic
-region selection. The historical evidence above stays historical. An old
-`us-sea` control does not authenticate a new P2C.
+with zero resources. Decision D-0029 superseded only that region lock
+and set the single fixed region to `us-sea`. `us-sea` passed
+advertised-availability checks, but the authenticated create for run
+`p1-dev-20261007b` returned HTTP 403 because the plan was not currently
+available. That run was recovered as `aborted_verified_empty_apply` with
+zero resources. Run `p1-dev-20261007a` was a separate HTTP 401 Invalid
+Token authentication failure later provider-verified empty; it is not a
+capacity failure. Decision D-0030 supersedes only the D-0029 region lock
+and sets the single fixed region to `us-ord`. The owner confirmed
+current capacity in `us-ord`. Advertised availability is advisory and is
+not capacity proof. Availability and capacity observations are
+time-bound and do not guarantee future capacity. There is no fallback
+list, automatic retry, or dynamic region selection. The historical
+evidence above stays historical. A `us-sea` or `us-iad-2` ledger does
+not authenticate a new session. An old `us-ord` control does not
+authenticate a new P2C unless the run tag, canonical commit,
+configuration digest, ledger digest, resource identity digest, and
+region all match the current session.
 
 D-0014 pilot envelope (unchanged, separately named): provider-native only;
 one GPU instance plus its one project/run-tagged firewall; six hours
@@ -101,7 +112,7 @@ reviewed saved plan — not a read-only token.
 
 - `versions.tf` — Terraform **= 1.9.8**; provider `linode/linode` pinned to `4.1.0`; empty `backend "local" {}` for external state configuration at init.
 - `.terraform.lock.hcl` — official HashiCorp Registry checksums for `darwin_arm64` (operator laptop) and `linux_amd64` (CI / Linux operators), generated with `terraform providers lock`. Lifecycle and readiness init always pass `-lockfile=readonly`. Never edit checksums by hand.
-- `variables.tf` — D-0029 region lock (`region=us-sea`) and the unchanged D-0014 plan locks (`gpu_instance_type=g3-gpu-rtxpro6000-blackwell-1`, `ttl_hours=6`) plus `management_cidr` (rejects `0.0.0.0/0` and `::/0`). The D-0027 `us-iad-2` lock is historical.
+- `variables.tf` — D-0030 region lock (`region=us-ord`) and the unchanged D-0014 plan locks (`gpu_instance_type=g3-gpu-rtxpro6000-blackwell-1`, `ttl_hours=6`) plus `management_cidr` (rejects `0.0.0.0/0` and `::/0`). The D-0027 `us-iad-2` lock and the D-0029 `us-sea` lock are historical.
 - `main.tf` — the single GPU instance and its run-tagged firewall (inbound DROP; SSH from management CIDR only).
 - `outputs.tf` — ledger inputs including firewall id/label; instance IPv4 is sensitive.
 - `bootstrap/` — idempotent instance bootstrap with pinned driver/toolkit/docker packages and digest-pinned CUDA GPU probe.
@@ -176,7 +187,7 @@ confirmed deployability in the selected region, deployment capability, and the
 applicable regional price:
 
 ```bash
-python scripts/preflight/check_akamai.py --region us-sea
+python scripts/preflight/check_akamai.py --region us-ord
 # exit 0 only when every decision passed; writes a sanitized receipt under
 # $LAB_RESULTS_DIR/preflight-receipts/ (path not printed)
 ```
@@ -199,7 +210,7 @@ Write `$LAB_RESULTS_DIR/infra-lifecycle/<run-tag>/terraform.tfvars`, for example
 
 ```hcl
 run_tag            = "p3-pilot-20260907a"
-region             = "us-sea"
+region             = "us-ord"
 gpu_instance_type  = "g3-gpu-rtxpro6000-blackwell-1"
 authorized_ssh_key = "ssh-ed25519 AAAA... operator"
 management_cidr    = "203.0.113.10/32"   # operator management IP only

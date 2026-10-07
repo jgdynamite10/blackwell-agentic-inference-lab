@@ -83,17 +83,23 @@ Decision D-0014 authorized **only one** Akamai compatibility/headroom pilot:
 - three diagnostic cells only (interactive/1, batch-heavy/4, batch-heavy/8),
   each with one warm-up pass, one measured repetition, and 20 tasks.
 
-Decision D-0029 sets the fixed qualification infrastructure region to
-`us-sea`, superseding only the D-0027 region lock. The same-session
-P1/P2C control requirement remains. D-0027 locked `us-iad-2`. That region
-passed advertised-availability checks, then creation of run
-`p1-dev-20261006b` returned HTTP 403 (plan not currently available) and
-the apply was recovered as `aborted_verified_empty_apply` with zero
-resources. The D-0014 record above stays a historical decision record.
-`us-sea` has prior successful create/run/delete evidence and is the
-current fixed region. There is no region fallback, automatic retry, or
-dynamic region selection. Advertised availability is advisory and is not
-capacity proof.
+Decision D-0030 sets the fixed qualification infrastructure region to
+`us-ord`, superseding only the D-0029 region lock. The same-session
+P1/P2C control requirement remains. The owner confirmed current capacity
+in `us-ord`. `us-sea` passed advertised-availability checks, then the
+authenticated create for run `p1-dev-20261007b` returned HTTP 403 (plan
+not currently available) and the apply was recovered as
+`aborted_verified_empty_apply` with zero resources. Run
+`p1-dev-20261007a` was a separate HTTP 401 Invalid Token authentication
+failure later provider-verified empty; it is not a capacity failure.
+D-0027 locked `us-iad-2`. That region passed advertised-availability
+checks, then creation of run `p1-dev-20261006b` returned HTTP 403 and
+was recovered empty. The D-0014 record above stays a historical decision
+record. The D-0029 `us-sea` boundary stays historical. There is no
+region fallback, automatic retry, or dynamic region selection.
+Advertised availability is advisory and is not capacity proof.
+Availability and capacity observations are time-bound and do not
+guarantee future capacity.
 
 Pilot observations are diagnostic and must not be represented as comparative
 benchmark findings. Apply, pilot, and destroy still require their separate
