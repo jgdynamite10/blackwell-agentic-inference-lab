@@ -432,7 +432,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--region",
-        help="Exact region id (e.g. us-ord) to confirm deployability for.",
+        help="Exact region id (e.g. ca-central) to confirm deployability for.",
     )
     args = parser.parse_args(argv)
     print(READ_ONLY_BANNER)

@@ -88,23 +88,32 @@ Decision D-0014 authorized **only one** Akamai compatibility/headroom pilot:
 - three diagnostic cells only (interactive/1, batch-heavy/4, batch-heavy/8),
   each with one warm-up pass, one measured repetition, and 20 tasks.
 
-Decision D-0030 sets the fixed qualification infrastructure region to
-`us-ord`, superseding only the D-0029 region lock. The same-session
-P1/P2C control requirement remains. The owner confirmed current capacity
-in `us-ord`. `us-sea` passed advertised-availability checks, then the
-authenticated create for run `p1-dev-20261007b` returned HTTP 403 (plan
-not currently available) and the apply was recovered as
+Decision D-0032 sets the fixed qualification infrastructure region to
+`ca-central`, superseding only the D-0030 region lock. The same-session
+P1/P2C and W1/W2 control requirements remain. The owner confirmed
+current capacity in `ca-central` by authorizing this region change on
+2026-10-08. `ca-central` was previously account-visible at $3.00/hour,
+subject to fresh authenticated verification before provisioning. Run
+`w1-dev-20261008a` passed authenticated advertised-availability
+preflight in `us-ord`, then instance creation returned HTTP 403 because
+the plan was not currently available. The apply was provider-verified
+empty, recovered as `aborted_verified_empty_apply`, and incurred $0.
+That run tag, its Terraform plan, and its canary config are stale by
+identity and must not be reused. The fresh run tag after merge is
+`w1-dev-20261008b`. `us-sea` passed advertised-availability checks, then
+the authenticated create for run `p1-dev-20261007b` returned HTTP 403
+(plan not currently available) and the apply was recovered as
 `aborted_verified_empty_apply` with zero resources. Run
 `p1-dev-20261007a` was a separate HTTP 401 Invalid Token authentication
 failure later provider-verified empty; it is not a capacity failure.
 D-0027 locked `us-iad-2`. That region passed advertised-availability
 checks, then creation of run `p1-dev-20261006b` returned HTTP 403 and
 was recovered empty. The D-0014 record above stays a historical decision
-record. The D-0029 `us-sea` boundary stays historical. There is no
-region fallback, automatic retry, or dynamic region selection.
-Advertised availability is advisory and is not capacity proof.
-Availability and capacity observations are time-bound and do not
-guarantee future capacity.
+record. The D-0029 `us-sea` boundary and the D-0030 `us-ord` boundary
+stay historical. There is no region fallback, automatic retry, dynamic
+region selection, or cross-region substitution. Advertised availability
+is advisory and is not capacity proof. Availability and capacity
+observations are time-bound and do not guarantee future capacity.
 
 Pilot observations are diagnostic and must not be represented as comparative
 benchmark findings. Apply, pilot, and destroy still require their separate

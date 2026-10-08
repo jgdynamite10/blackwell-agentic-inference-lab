@@ -125,22 +125,35 @@ committed or pasted into chat, issues, PRs, or CI; see
   verifies intended configuration and planned actions only; it does not
   prove live capacity. Capacity is known when provisioning is accepted and
   the instance reaches the expected running state.
-- **[CURRENT LOCK — decision D-0030, 2026-10-07]** The fixed qualification
-  region is `us-ord`. The owner confirmed current capacity in `us-ord`.
-  D-0029 had locked `us-sea`. That region passed advertised-availability
-  checks, then the authenticated create for run `p1-dev-20261007b`
-  returned HTTP 403 (plan not currently available) and the apply was
-  recovered as `aborted_verified_empty_apply` with zero resources. Run
-  `p1-dev-20261007a` was a separate HTTP 401 Invalid Token authentication
-  failure later provider-verified empty; it is not a capacity failure.
-  D-0027 had locked `us-iad-2`. That region passed advertised-availability
-  checks, then creation of run `p1-dev-20261006b` returned HTTP 403 and
-  was recovered empty. Advertised availability is advisory and is not
-  capacity proof. Availability and capacity observations are time-bound
-  and do not guarantee future capacity. There is no fallback list,
-  automatic retry, or dynamic region selection. The 2026-09-06
-  observations above and the D-0029 `us-sea` boundary stay historical
-  facts.
+- **[CURRENT LOCK — decision D-0032, 2026-10-08]** The fixed qualification
+  region is `ca-central`. The owner confirmed current capacity in
+  `ca-central` by authorizing this region change on 2026-10-08. That
+  confirmation is time-bound and is not a capacity probe. `ca-central`
+  was previously account-visible at $3.00/hour, subject to fresh
+  authenticated verification before provisioning; that figure is
+  historical advisory pricing. The planning rate stays $3.00/hour, the
+  six-hour expected exposure stays $18, and the ceiling stays $25.
+  D-0030 had locked `us-ord`. Run `w1-dev-20261008a` passed authenticated
+  advertised-availability preflight, then instance creation returned HTTP
+  403 because the plan was not currently available. The apply was
+  provider-verified empty, recovered as `aborted_verified_empty_apply`,
+  and incurred $0. That run tag, its Terraform plan, and its canary
+  config are stale by identity and must not be reused. The fresh run tag
+  after merge is `w1-dev-20261008b`. D-0029 had locked `us-sea`. That
+  region passed advertised-availability checks, then the authenticated
+  create for run `p1-dev-20261007b` returned HTTP 403 (plan not currently
+  available) and the apply was recovered as `aborted_verified_empty_apply`
+  with zero resources. Run `p1-dev-20261007a` was a separate HTTP 401
+  Invalid Token authentication failure later provider-verified empty; it
+  is not a capacity failure. D-0027 had locked `us-iad-2`. That region
+  passed advertised-availability checks, then creation of run
+  `p1-dev-20261006b` returned HTTP 403 and was recovered empty.
+  Advertised availability is advisory and is not live capacity proof.
+  Availability and capacity observations are time-bound and do not
+  guarantee future capacity. There is no fallback list, automatic retry,
+  dynamic region selection, or cross-region substitution. The 2026-09-06
+  observations above and the D-0029 `us-sea`, D-0027 `us-iad-2`, and
+  D-0030 `us-ord` boundaries stay historical facts.
 
 ## 3. Google Cloud — `g4-standard-48`
 

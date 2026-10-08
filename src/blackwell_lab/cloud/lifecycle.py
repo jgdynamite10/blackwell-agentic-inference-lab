@@ -222,6 +222,20 @@ def validate_run_tag(run_tag: str) -> str:
     return run_tag
 
 
+# w1-dev-20261008a is a recovered empty us-ord apply. It is not a credential
+# for a later canary, control, or resource session. Recovery and teardown of
+# other runs are unchanged.
+HISTORICAL_ABORTED_RUN_TAGS = frozenset({"w1-dev-20261008a"})
+
+
+def refuse_historical_aborted_run(run_tag: str) -> None:
+    """Refuse a new apply session for a historical empty-apply run tag."""
+    if run_tag in HISTORICAL_ABORTED_RUN_TAGS:
+        raise LifecycleError(
+            "historical aborted_verified_empty_apply cannot authorize a resource session"
+        )
+
+
 def refuse_hosted_execution(environ: dict | None = None) -> None:
     """Refuse billable verbs in CI and remote/cloud-agent environments.
 
@@ -749,6 +763,8 @@ def save_plan(
     validate_run_tag(run_tag)
     if stage not in ("apply", "destroy"):
         raise LifecycleError("plan stage must be 'apply' or 'destroy'")
+    if stage == "apply":
+        refuse_historical_aborted_run(run_tag)
     directory = tf_dir or default_terraform_dir()
     if not paths.var_file.is_file():
         raise LifecycleError(
@@ -1216,6 +1232,7 @@ def apply(
     after the attempt regardless of outcome.
     """
     validate_run_tag(run_tag)
+    refuse_historical_aborted_run(run_tag)
     refuse_hosted_execution(environ)
     directory = tf_dir or default_terraform_dir()
     meta = verify_saved_plan(run_tag, stage="apply", paths=paths, tf_dir=directory, runner=runner)

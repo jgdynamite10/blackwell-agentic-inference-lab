@@ -69,17 +69,30 @@ advertised-availability checks, but the authenticated create for run
 available. That run was recovered as `aborted_verified_empty_apply` with
 zero resources. Run `p1-dev-20261007a` was a separate HTTP 401 Invalid
 Token authentication failure later provider-verified empty; it is not a
-capacity failure. Decision D-0030 supersedes only the D-0029 region lock
-and sets the single fixed region to `us-ord`. The owner confirmed
-current capacity in `us-ord`. Advertised availability is advisory and is
-not capacity proof. Availability and capacity observations are
+capacity failure. Decision D-0030 superseded only the D-0029 region lock
+and set the single fixed region to `us-ord`. Run `w1-dev-20261008a`
+passed authenticated advertised-availability preflight in `us-ord`, then
+instance creation returned HTTP 403 because the plan was not currently
+available. The apply was provider-verified empty, recovered as
+`aborted_verified_empty_apply`, and incurred $0. That run, its Terraform
+plan, and its canary config stay historical and must not be reused.
+Decision D-0032 supersedes only the D-0030 region lock and sets the
+single fixed region to `ca-central`. The owner confirmed current
+capacity in `ca-central` by authorizing this region change on
+2026-10-08. `ca-central` was previously account-visible at $3.00/hour,
+subject to fresh authenticated verification before provisioning. The
+planning rate stays $3.00/hour. Advertised availability is advisory and
+is not capacity proof. Availability and capacity observations are
 time-bound and do not guarantee future capacity. There is no fallback
-list, automatic retry, or dynamic region selection. The historical
-evidence above stays historical. A `us-sea` or `us-iad-2` ledger does
-not authenticate a new session. An old `us-ord` control does not
-authenticate a new P2C unless the run tag, canonical commit,
-configuration digest, ledger digest, resource identity digest, and
-region all match the current session.
+list, automatic retry, dynamic region selection, or cross-region
+substitution. The fresh run tag after merge is `w1-dev-20261008b`. The
+historical evidence above stays historical. A `us-ord`, `us-sea`, or
+`us-iad-2` ledger does not authenticate a new session. An earlier
+`ca-central` control does not authenticate a new P2C or W2 unless the
+run tag, canonical commit, configuration digest, ledger digest, resource
+identity digest, exact region, candidate/control pair, and terminal
+completion event all match the current session. `w1-dev-20261008a` cannot
+authenticate a future canary, W1 control, W2 run, or resource session.
 
 D-0014 pilot envelope (unchanged, separately named): provider-native only;
 one GPU instance plus its one project/run-tagged firewall; six hours
@@ -112,7 +125,7 @@ reviewed saved plan — not a read-only token.
 
 - `versions.tf` — Terraform **= 1.9.8**; provider `linode/linode` pinned to `4.1.0`; empty `backend "local" {}` for external state configuration at init.
 - `.terraform.lock.hcl` — official HashiCorp Registry checksums for `darwin_arm64` (operator laptop) and `linux_amd64` (CI / Linux operators), generated with `terraform providers lock`. Lifecycle and readiness init always pass `-lockfile=readonly`. Never edit checksums by hand.
-- `variables.tf` — D-0030 region lock (`region=us-ord`) and the unchanged D-0014 plan locks (`gpu_instance_type=g3-gpu-rtxpro6000-blackwell-1`, `ttl_hours=6`) plus `management_cidr` (rejects `0.0.0.0/0` and `::/0`). The D-0027 `us-iad-2` lock and the D-0029 `us-sea` lock are historical.
+- `variables.tf` — D-0032 region lock (`region=ca-central`) and the unchanged D-0014 plan locks (`gpu_instance_type=g3-gpu-rtxpro6000-blackwell-1`, `ttl_hours=6`) plus `management_cidr` (rejects `0.0.0.0/0` and `::/0`). The D-0027 `us-iad-2` lock, the D-0029 `us-sea` lock, and the D-0030 `us-ord` lock are historical.
 - `main.tf` — the single GPU instance and its run-tagged firewall (inbound DROP; SSH from management CIDR only).
 - `outputs.tf` — ledger inputs including firewall id/label; instance IPv4 is sensitive.
 - `bootstrap/` — idempotent instance bootstrap with pinned driver/toolkit/docker packages and digest-pinned CUDA GPU probe.
@@ -187,7 +200,7 @@ confirmed deployability in the selected region, deployment capability, and the
 applicable regional price:
 
 ```bash
-python scripts/preflight/check_akamai.py --region us-ord
+python scripts/preflight/check_akamai.py --region ca-central
 # exit 0 only when every decision passed; writes a sanitized receipt under
 # $LAB_RESULTS_DIR/preflight-receipts/ (path not printed)
 ```
@@ -210,7 +223,7 @@ Write `$LAB_RESULTS_DIR/infra-lifecycle/<run-tag>/terraform.tfvars`, for example
 
 ```hcl
 run_tag            = "p3-pilot-20260907a"
-region             = "us-ord"
+region             = "ca-central"
 gpu_instance_type  = "g3-gpu-rtxpro6000-blackwell-1"
 authorized_ssh_key = "ssh-ed25519 AAAA... operator"
 management_cidr    = "203.0.113.10/32"   # operator management IP only

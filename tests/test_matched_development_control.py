@@ -112,10 +112,11 @@ def _assert_refused(capsys, external: Path, constructed, streamed, fetches, mess
 
 class TestRegionLock:
     def test_one_region_lock(self):
-        assert FROZEN_REGION == AUTHORIZED_PILOT_REGION == "us-ord"
+        assert FROZEN_REGION == AUTHORIZED_PILOT_REGION == "ca-central"
         variables = Path("infra/akamai/variables.tf").read_text(encoding="utf-8")
-        assert variables.count('var.region == "us-ord"') == 1
-        assert 'default     = "us-ord"' in variables
+        assert variables.count('var.region == "ca-central"') == 1
+        assert 'default     = "ca-central"' in variables
+        assert 'var.region == "us-ord"' not in variables
         assert 'var.region == "us-sea"' not in variables
         assert 'var.region == "us-iad-2"' not in variables
 
@@ -135,6 +136,18 @@ class TestRegionLock:
         assert "The instance region must" in text
         assert "be exactly `us-sea`." in text
         assert "49b279fb76dfa3ee3da2dbf8bdd15c7547441faa386c14c97f7787aeff1a069a" in text
+        assert "exactly `us-ord`" in text
+        assert "D-0030 (`us-ord`, recomputed)" in text
+        assert "fe804d2a14be46f89b32f760d2f7540e05769db83ce041086ec6d8a5477f33bd" in text
+        assert "e44bb30ede6e1002eb8751b940b62e58c93901e2031e36ea777eead372f3030d" in text
+        assert "d244d01308b525d970d7e706a8acecc3f4e6e10009ef962197e2cdfa926453de" in text
+        assert "11cbed1d8a4672fb19b4df35f3a6c25ce9ca536a25d2208063495a2d8b13d138" in text
+        assert "3bd46c049832a66f8de2f68d38195691361462961308ac76501f3f523ea1fd4c" in text
+        assert "1dfedcabaf0759e8e03ae3ea270ad482f7b7704be6940c78ff95b4870751fe3b" in text
+        assert "da9060df7a03a2f3a7a9d8d9d1bcab9a91b18254b365849abb5e25737de208c7" in text
+        assert "be exactly `us-ord`." in text
+        assert "w1-dev-20261008a" in text
+        assert "bb2b0f3a0dc0a944d7d531b45dffc694b26e9b11c4caa1668a884b7badd8b964" in text
 
 
 class TestPositiveBinding:
@@ -146,7 +159,7 @@ class TestPositiveBinding:
             run_tag=RUN_TAG,
             p2c_run_label="qual-a",
         )
-        assert summary["region"] == "us-ord"
+        assert summary["region"] == "ca-central"
         assert summary["precision"] == "bf16"
         assert summary["stopped"] is False
         assert summary["terminal_event"] == "qualification_completed"
@@ -185,7 +198,7 @@ class TestRefusalsBeforeClient:
         monkeypatch.setattr(realbench, "run_real_cell", lambda *a, **k: runs.append(1))
         config["cloud"]["region"] = "us-iad-2"
         assert _run(tmp_path, config) == 1
-        _assert_refused(capsys, external, constructed, streamed, fetches, "us-ord")
+        _assert_refused(capsys, external, constructed, streamed, fetches, "ca-central")
         assert runs == []
 
     def test_historical_us_sea_config(self, bound, tmp_path, monkeypatch, capsys):
@@ -195,7 +208,17 @@ class TestRefusalsBeforeClient:
         monkeypatch.setattr(realbench, "run_real_cell", lambda *a, **k: runs.append(1))
         config["cloud"]["region"] = "us-sea"
         assert _run(tmp_path, config) == 1
-        _assert_refused(capsys, external, constructed, streamed, fetches, "us-ord")
+        _assert_refused(capsys, external, constructed, streamed, fetches, "ca-central")
+        assert runs == []
+
+    def test_historical_us_ord_config(self, bound, tmp_path, monkeypatch, capsys):
+        external, config, fetches = bound
+        constructed, streamed = _spy(monkeypatch)
+        runs: list[object] = []
+        monkeypatch.setattr(realbench, "run_real_cell", lambda *a, **k: runs.append(1))
+        config["cloud"]["region"] = "us-ord"
+        assert _run(tmp_path, config) == 1
+        _assert_refused(capsys, external, constructed, streamed, fetches, "ca-central")
         assert runs == []
 
     def test_absent_control_is_p2c_before_p1(self, bound, tmp_path, monkeypatch, capsys):
@@ -235,14 +258,14 @@ class TestRefusalsBeforeClient:
             capsys, external, constructed, streamed, fetches, "historical or cross-region"
         )
 
-    def test_old_us_ord_control_requires_every_session_field(
+    def test_ca_central_control_requires_every_session_field(
         self, bound, tmp_path, monkeypatch, capsys
     ):
-        """An old us-ord P1 does not authenticate a new P2C session.
+        """A ca-central P1 does not authenticate a new P2C session by region alone.
 
-        Region agreement is not enough. The run tag, canonical commit,
-        configuration digest, ledger digest, resource identity digest, and
-        region must all match this session.
+        The new identity digest is not enough. The run tag, canonical commit,
+        configuration digest, ledger digest, resource identity digest, exact
+        region, and terminal completion binding must all match this session.
         """
         from blackwell_lab.cloud.qualification import candidate_identity_digest
 
@@ -250,15 +273,16 @@ class TestRefusalsBeforeClient:
         constructed, streamed = _spy(monkeypatch)
         path = control_record_path(external, P1_LABEL)
         original = json.loads(path.read_text(encoding="utf-8"))
-        assert original["region"] == "us-ord"
+        assert original["region"] == "ca-central"
         assert original["identity_sha256"] == candidate_identity_digest("P1")
+        assert original["terminal_event"] == "qualification_completed"
         summary = authenticate_matched_development_control(
             config,
             results_dir=external,
             run_tag=RUN_TAG,
             p2c_run_label="qual-a",
         )
-        assert summary["region"] == "us-ord"
+        assert summary["region"] == "ca-central"
 
         config["development_control"]["run_tag"] = "p3-qual-20260918b"
         assert _run(tmp_path, config) == 1
@@ -270,7 +294,10 @@ class TestRefusalsBeforeClient:
             config,
             lambda record: record.__setitem__("canonical_commit", "c" * 40),
         )
-        assert json.loads(path.read_text(encoding="utf-8"))["region"] == "us-ord"
+        assert json.loads(path.read_text(encoding="utf-8"))["region"] == "ca-central"
+        assert json.loads(path.read_text(encoding="utf-8"))["identity_sha256"] == (
+            candidate_identity_digest("P1")
+        )
         assert _run(tmp_path, config) == 1
         _assert_refused(capsys, external, constructed, streamed, fetches, "canonical commit")
         _rewrite(
@@ -293,7 +320,7 @@ class TestRefusalsBeforeClient:
         )
 
         config["development_control"]["ledger_sha256"] = "cd" * 32
-        assert config["development_control"]["region"] == "us-ord"
+        assert config["development_control"]["region"] == "ca-central"
         assert _run(tmp_path, config) == 1
         _assert_refused(capsys, external, constructed, streamed, fetches, "digest mismatch")
         config["development_control"]["ledger_sha256"] = original["ledger_sha256"]
@@ -308,7 +335,7 @@ class TestRefusalsBeforeClient:
         _rewrite(
             external,
             config,
-            lambda record: record.__setitem__("region", "us-sea"),
+            lambda record: record.__setitem__("region", "us-ord"),
         )
         assert _run(tmp_path, config) == 1
         _assert_refused(
@@ -452,7 +479,7 @@ class TestRefusalsBeforeClient:
         assert failures
         assert all(str(external) not in json.dumps(item) for item in failures)
         assert any(item["error"] == "P2C development control digest mismatch" for item in failures)
-        assert config["development_control"]["region"] == "us-ord"
+        assert config["development_control"]["region"] == "ca-central"
 
 
 def _install_on(external: Path, ledger: dict) -> dict:
@@ -484,18 +511,18 @@ class TestProductionLedgerAndPins:
             run_tag=RUN_TAG,
             p2c_run_label="qual-a",
         )
-        assert summary["region"] == "us-ord"
+        assert summary["region"] == "ca-central"
         assert "region" not in next(
             item for item in ledger["resources"] if item["type"] == "linode_firewall"
         )
 
-    def test_firewall_region_equal_to_us_ord_is_accepted(self, tmp_path, monkeypatch):
+    def test_firewall_region_equal_to_ca_central_is_accepted(self, tmp_path, monkeypatch):
         monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path / "external"))
         external = tmp_path / "external"
         ledger = _ready_ledger()
         for resource in ledger["resources"]:
             if resource["type"] == "linode_firewall":
-                resource["region"] = "us-ord"
+                resource["region"] = "ca-central"
         config = _install_on(external, ledger)
         summary = authenticate_matched_development_control(
             config,
@@ -503,14 +530,14 @@ class TestProductionLedgerAndPins:
             run_tag=RUN_TAG,
             p2c_run_label="qual-a",
         )
-        assert summary["region"] == "us-ord"
+        assert summary["region"] == "ca-central"
 
-    def test_historical_us_sea_and_us_iad_2_ledgers_are_refused(self, tmp_path, monkeypatch):
+    def test_historical_us_ord_us_sea_and_us_iad_2_ledgers_are_refused(self, tmp_path, monkeypatch):
         from blackwell_lab.cloud.qualification import QualificationError
 
         monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path / "external"))
         external = tmp_path / "external"
-        for historical in ("us-sea", "us-iad-2"):
+        for historical in ("us-ord", "us-sea", "us-iad-2"):
             for address in ("linode_instance.gpu_baseline", "linode_firewall.gpu_baseline"):
                 ledger = _ready_ledger()
                 for resource in ledger["resources"]:
@@ -519,7 +546,9 @@ class TestProductionLedgerAndPins:
                 paths = lifecycle.lifecycle_paths(external, RUN_TAG)
                 write_private_json(paths.ledger_path, ledger)
                 config = qualification_config_dict("P2C", "development")
-                with pytest.raises(QualificationError, match="reconciled us-ord resource session"):
+                with pytest.raises(
+                    QualificationError, match="reconciled ca-central resource session"
+                ):
                     install_verified_p1_development_control(
                         external,
                         config,
@@ -527,6 +556,49 @@ class TestProductionLedgerAndPins:
                         p1_run_label=P1_LABEL,
                         canonical_commit=COMMIT,
                     )
+
+    def test_w1_dev_20261008a_cannot_authenticate_a_future_session(
+        self, bound, tmp_path, monkeypatch, capsys
+    ):
+        from blackwell_lab.cloud.matched_control import W1_W2_PAIR
+        from blackwell_lab.cloud.qualification import QualificationError
+
+        external, config, fetches = bound
+        constructed, streamed = _spy(monkeypatch)
+        config["development_control"]["run_tag"] = "w1-dev-20261008a"
+        assert config["development_control"]["region"] == "ca-central"
+        assert _run(tmp_path, config) == 1
+        _assert_refused(capsys, external, constructed, streamed, fetches, "run tag does not match")
+
+        aborted = "w1-dev-20261008a"
+        ledger = _ready_ledger()
+        ledger["run_tag"] = aborted
+        for resource in ledger["resources"]:
+            resource["label"] = resource["label"].replace(RUN_TAG, aborted)
+            resource["tags"] = [
+                tag.replace(RUN_TAG, aborted) if isinstance(tag, str) else tag
+                for tag in resource["tags"]
+            ]
+        paths = lifecycle.lifecycle_paths(external, aborted)
+        write_private_json(paths.ledger_path, ledger)
+        for candidate, pair in (("P2C", None), ("W2", W1_W2_PAIR)):
+            blocked = qualification_config_dict(candidate, "development")
+            kwargs = {
+                "run_tag": aborted,
+                "p1_run_label": "qual-w1",
+                "canonical_commit": COMMIT,
+            }
+            if pair is not None:
+                kwargs["pair"] = pair
+            with pytest.raises(QualificationError, match="aborted_verified_empty_apply"):
+                install_verified_p1_development_control(external, blocked, **kwargs)
+        with pytest.raises(lifecycle.LifecycleError, match="aborted_verified_empty_apply"):
+            lifecycle.save_plan(
+                aborted,
+                stage="apply",
+                paths=paths,
+                tf_dir=tmp_path / "missing-tf",
+            )
 
     def test_firewall_region_other_than_the_instance_is_cross_region(self, tmp_path, monkeypatch):
         from blackwell_lab.cloud.qualification import QualificationError
@@ -1132,7 +1204,7 @@ class TestSessionSnapshot:
         assert receipt.is_file()
         body = json.loads(receipt.read_text(encoding="utf-8"))
         assert body["candidate_id"] == "P2C"
-        assert body["matched_control"]["region"] == "us-ord"
+        assert body["matched_control"]["region"] == "ca-central"
         session = json.loads(
             (external / "infra-lifecycle" / RUN_TAG / "session.json").read_text(encoding="utf-8")
         )
