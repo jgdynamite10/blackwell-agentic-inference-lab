@@ -87,7 +87,17 @@ Before any full-baseline measurement, one short owner-approved
   exploratory. MVL-F is diagnostic-only and is not the comparative
   reference (decision D-0019). A bounded agent-quality qualification
   (`blackwell-cloud qualify-agent`) must pass the study-entry gate before
-  a configuration may enter comparative measurement. The Akamai
+  a configuration may enter comparative measurement. Decision **D-0031**
+  adds the workflow-controlled candidate pair W1/W2 (workloads 2.6.0 /
+  2.6.1, `workflow-controller-v1`, W1 the same-session control for W2)
+  after private development evidence identified workflow-enforcement
+  deficiencies requiring a new candidate; P1/P2C are preserved, the
+  20-task gate and the 0.40 (40 percent) floor are unchanged, and the
+  ten-task `canary-agent` draws only from the six development templates
+  (holdout templates stay unseen until the official qualification). It is
+  diagnostic only and authorizes nothing. Canary findings may support
+  development correction; official qualification findings must not be
+  used to tune the candidate. The Akamai
   qualification infrastructure region is fixed to `us-ord` (decision
   D-0030). The owner confirmed current capacity in `us-ord`. D-0029's
   `us-sea` lock is historical: the authenticated create for

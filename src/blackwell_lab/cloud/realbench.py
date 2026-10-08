@@ -91,6 +91,9 @@ from blackwell_lab.workload.validation import (
 _CONTAINER_DIGEST_RE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 _ARTIFACT_HASH_RE = re.compile(r"^(sha256:[0-9a-f]{64}|sha512:[0-9a-f]{128}|blake3:[0-9a-f]{64})$")
 _RUN_LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+#: Closed set. ``canary-runs`` is the diagnostic family from D-0031 and is
+#: never a qualification cell or a comparative real run. Arbitrary names fail.
+ALLOWED_ARTIFACT_FAMILIES = frozenset({"real-runs", "qualification-runs", "canary-runs"})
 
 ITL_UNAVAILABLE_REASON = (
     "the OpenAI-compatible stream carries no true per-token timing; transport "
@@ -232,8 +235,8 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
         raise ConfigError("list_price_usd_per_hour must be >= 0")
     if not spec.instance_type or not spec.region:
         raise ConfigError("instance_type and region are required for genuine runs")
-    if spec.artifact_family not in {"real-runs", "qualification-runs"}:
-        raise ConfigError("artifact_family must be real-runs or qualification-runs")
+    if spec.artifact_family not in ALLOWED_ARTIFACT_FAMILIES:
+        raise ConfigError("artifact_family must be real-runs, qualification-runs, or canary-runs")
     _validate_sealed_spec(spec)
     if spec.template_ids is not None:
         known = catalog()

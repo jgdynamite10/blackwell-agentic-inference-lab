@@ -44,7 +44,9 @@ from blackwell_lab.cloud.sealed_binding import (
 )
 from blackwell_lab.workload.evidence import (
     CONTROLLER_EVIDENCE_GROUNDING_V1,
+    CONTROLLER_WORKFLOW_V1,
     require_controller_binding,
+    workload_treatments,
 )
 from blackwell_lab.workload.native_tools import (
     REASONING_PARSER,
@@ -76,6 +78,9 @@ CANDIDATE_C2 = "C2"
 CANDIDATE_P1 = "P1"
 CANDIDATE_P2 = "P2"
 CANDIDATE_P2C = "P2C"
+#: Historical candidate table (D-0019 through D-0026). Closed and
+#: byte-identical to before D-0031; the workflow-controlled pair lives in
+#: :data:`WORKFLOW_CANDIDATES` so historical identities never move.
 AUTHORIZED_CANDIDATES = (
     CANDIDATE_C1,
     CANDIDATE_C2,
@@ -83,11 +88,20 @@ AUTHORIZED_CANDIDATES = (
     CANDIDATE_P2,
     CANDIDATE_P2C,
 )
+#: Workflow-controlled candidate pair (decision D-0031): W1 is the control,
+#: W2 the ``evidence-refs`` citation treatment. Both bind
+#: ``workflow-controller-v1``.
+CANDIDATE_W1 = "W1"
+CANDIDATE_W2 = "W2"
+WORKFLOW_CANDIDATES = (CANDIDATE_W1, CANDIDATE_W2)
+#: Every candidate any qualification command may name.
+ALL_AUTHORIZED_CANDIDATES = (*AUTHORIZED_CANDIDATES, *WORKFLOW_CANDIDATES)
 C1_TEMPERATURE = 1.0
 C2_TEMPERATURE = 0.2
 P1_TEMPERATURE = C2_TEMPERATURE
 P2_TEMPERATURE = C2_TEMPERATURE
 P2C_TEMPERATURE = C2_TEMPERATURE
+W_TEMPERATURE = C2_TEMPERATURE
 FROZEN_MAX_TOKENS = 1024
 
 STAGE_DEVELOPMENT = "development"
@@ -292,12 +306,50 @@ CANDIDATE_CONTROLLERS: dict[str, str | None] = {
     CANDIDATE_P2: P2_CONTROLLER,
     CANDIDATE_P2C: P2C_CONTROLLER,
 }
-UNKNOWN_CANDIDATE_MESSAGE = "qualification candidate must be C1, C2, P1, P2, or P2C"
+#: Workflow-controlled pair (D-0031), kept in separate closed tables.
+W1_WORKLOAD_VERSION = "2.6.0"
+W2_WORKLOAD_VERSION = "2.6.1"
+W_CONTROLLER = CONTROLLER_WORKFLOW_V1
+W2_TREATMENT = "evidence-refs"
+W2_CONTROL_CANDIDATE = CANDIDATE_W1
+WORKFLOW_CANDIDATE_WORKLOAD_VERSIONS: dict[str, str] = {
+    CANDIDATE_W1: W1_WORKLOAD_VERSION,
+    CANDIDATE_W2: W2_WORKLOAD_VERSION,
+}
+WORKFLOW_CANDIDATE_CONTROLLERS: dict[str, str] = {
+    CANDIDATE_W1: W_CONTROLLER,
+    CANDIDATE_W2: W_CONTROLLER,
+}
+#: Treatment candidate -> its same-session development control (D-0027 for
+#: P1/P2C; D-0031 for W1/W2). A control candidate never appears as a key.
+DEVELOPMENT_CONTROL_PAIRS: dict[str, str] = {
+    CANDIDATE_P2C: CANDIDATE_P1,
+    CANDIDATE_W2: CANDIDATE_W1,
+}
+UNKNOWN_CANDIDATE_MESSAGE = "qualification candidate must be C1, C2, P1, P2, P2C, W1, or W2"
 _UNKNOWN_CANDIDATE = UNKNOWN_CANDIDATE_MESSAGE
 
 #: Candidates whose every stage executes the public catalog schedule.
-#: P2 is absent on purpose: its development and holdout are sealed.
+#: P2 is absent on purpose: its development and holdout are sealed. The
+#: workflow pair is catalog-only too (see :func:`is_catalog_candidate`).
 CATALOG_CANDIDATES = (CANDIDATE_C1, CANDIDATE_C2, CANDIDATE_P1, CANDIDATE_P2C)
+
+
+def is_catalog_candidate(candidate_id: str) -> bool:
+    """True for every candidate whose stages execute the public catalog."""
+    return candidate_id in CATALOG_CANDIDATES or candidate_id in WORKFLOW_CANDIDATES
+
+
+def control_candidate_for(candidate_id: str) -> str | None:
+    """The same-session development control of a treatment candidate, if any."""
+    return DEVELOPMENT_CONTROL_PAIRS.get(candidate_id)
+
+
+def is_development_control(candidate_id: str) -> bool:
+    """True when a completed development run of this candidate mints a control."""
+    return candidate_id in DEVELOPMENT_CONTROL_PAIRS.values()
+
+
 #: Config keys that would select, override, or privatize the P2C task
 #: schedule. No candidate supports a private scenario or a frozen template
 #: override; P2C refuses the keys explicitly so a config cannot even carry
@@ -339,7 +391,7 @@ P2C_CONTRACT: dict[str, Any] = {
 def candidate_workload_version(candidate_id: str) -> str:
     """Workload contract bound to one authorized qualification candidate."""
     try:
-        return CANDIDATE_WORKLOAD_VERSIONS[candidate_id]
+        return {**CANDIDATE_WORKLOAD_VERSIONS, **WORKFLOW_CANDIDATE_WORKLOAD_VERSIONS}[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
 
@@ -351,10 +403,15 @@ def candidate_controller(candidate_id: str) -> str | None:
     so no P2 run can start with a controller the workload does not bind.
     """
     try:
-        controller = CANDIDATE_CONTROLLERS[candidate_id]
+        controller = {**CANDIDATE_CONTROLLERS, **WORKFLOW_CANDIDATE_CONTROLLERS}[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
     return require_controller_binding(candidate_workload_version(candidate_id), controller)
+
+
+def candidate_treatments(candidate_id: str) -> tuple[str, ...]:
+    """Explicit experimental treatments of a candidate (empty for most)."""
+    return workload_treatments(candidate_workload_version(candidate_id))
 
 
 def candidate_temperature(candidate_id: str) -> float:
@@ -368,13 +425,16 @@ def candidate_temperature(candidate_id: str) -> float:
         return P2_TEMPERATURE
     if candidate_id == CANDIDATE_P2C:
         return P2C_TEMPERATURE
+    if candidate_id in WORKFLOW_CANDIDATES:
+        return W_TEMPERATURE
     raise ConfigError(_UNKNOWN_CANDIDATE)
 
 
 def frozen_candidate_fields(candidate_id: str) -> dict[str, Any]:
-    if candidate_id not in AUTHORIZED_CANDIDATES:
+    if candidate_id not in ALL_AUTHORIZED_CANDIDATES:
         raise ConfigError(_UNKNOWN_CANDIDATE)
     controller = candidate_controller(candidate_id)
+    treatments = candidate_treatments(candidate_id)
     return {
         "candidate_id": candidate_id,
         "workflow": QUALIFICATION_WORKFLOW,
@@ -382,6 +442,9 @@ def frozen_candidate_fields(candidate_id: str) -> dict[str, Any]:
         # The controller key exists only for controller-bound candidates so
         # the C1, C2, and P1 identity serializations stay byte-identical.
         **({"controller": controller} if controller else {}),
+        # The treatments key exists only for W2, so every other identity
+        # serialization (including W1's) is unchanged by its presence.
+        **({"treatments": list(treatments)} if treatments else {}),
         "catalog_workload_version": CATALOG_WORKLOAD_VERSION,
         "provider": FROZEN_PROVIDER,
         "region": FROZEN_REGION,
@@ -620,6 +683,195 @@ def require_p2c_catalog_execution(
         raise ConfigError(f"P2C {stage} must schedule exactly the frozen catalog templates")
 
 
+# --------------------------------------------------------------------------
+# W1 / W2: workflow-controlled candidate pair (decision D-0031)
+# --------------------------------------------------------------------------
+
+W_SYSTEM_PROMPT_SHA256 = P2C_SYSTEM_PROMPT_SHA256
+W_EVALUATOR_VERSION = P2C_EVALUATOR_VERSION
+W_TASK_SOURCE = P2C_TASK_SOURCE
+#: Config keys the pair refuses, exactly as P2C does.
+W_FORBIDDEN_CONFIG_KEYS = P2C_FORBIDDEN_CONFIG_KEYS
+#: The frozen pair contract. Every value is re-derived from the running
+#: code by :func:`require_w_pair_contract` before any model client exists.
+W_PAIR_CONTRACT: dict[str, Any] = {
+    "control_candidate": CANDIDATE_W1,
+    "treatment_candidate": CANDIDATE_W2,
+    "controller": W_CONTROLLER,
+    "control_workload_version": W1_WORKLOAD_VERSION,
+    "treatment_workload_version": W2_WORKLOAD_VERSION,
+    "control_treatments": [],
+    "treatment_treatments": [W2_TREATMENT],
+    "system_prompt_sha256": W_SYSTEM_PROMPT_SHA256,
+    "temperature": W_TEMPERATURE,
+    "top_p": FROZEN_TOP_P,
+    "seed": FROZEN_SEED,
+    "max_tokens": FROZEN_MAX_TOKENS,
+    "evaluator_version": W_EVALUATOR_VERSION,
+    "task_source": W_TASK_SOURCE,
+    "max_turns": 12,
+}
+
+
+def w_pair_experiment_record(candidate_id: str) -> dict[str, Any]:
+    """Content-free provenance of the workflow-controlled pair (receipts, reports)."""
+    if candidate_id not in WORKFLOW_CANDIDATES:
+        raise ConfigError(_UNKNOWN_CANDIDATE)
+    return {
+        "kind": "workflow-controlled-pair",
+        "controller": W_CONTROLLER,
+        "control_candidate": CANDIDATE_W1,
+        "treatment_candidate": CANDIDATE_W2,
+        "role": "control" if candidate_id == CANDIDATE_W1 else "treatment",
+        "treatments": list(candidate_treatments(candidate_id)),
+        "task_source": W_TASK_SOURCE,
+        "schedule": "d-0019-catalog",
+        "historical_candidates_unchanged": True,
+        "blind_generalization_evidence": False,
+        "comparable_with_private_sealed_scores": False,
+        "comparable_with_p1_p2c_scores": False,
+    }
+
+
+def require_w_pair_contract() -> dict[str, Any]:
+    """Fail closed unless the running code still satisfies the frozen pair contract.
+
+    The pair must share controller, prompt bytes, generation pins,
+    evaluator, catalog task source, and stage schedules; the only permitted
+    difference is the explicit ``evidence-refs`` treatment (and the
+    version-bound ``evidence_refs`` argument it requires).
+    """
+    from blackwell_lab.workload.agent import SYSTEM_PROMPT_V241, system_prompt
+    from blackwell_lab.workload.evaluator import EVALUATOR_VERSION
+    from blackwell_lab.workload.tools import TOOL_SPECS, TOOL_SPECS_V250, tool_specs
+
+    problems: list[str] = []
+    if WORKFLOW_CANDIDATES != (CANDIDATE_W1, CANDIDATE_W2):
+        problems.append("candidate table")
+    if any(candidate in AUTHORIZED_CANDIDATES for candidate in WORKFLOW_CANDIDATES):
+        problems.append("historical table")
+    if candidate_workload_version(CANDIDATE_W1) != W_PAIR_CONTRACT["control_workload_version"]:
+        problems.append("control workload_version")
+    if candidate_workload_version(CANDIDATE_W2) != W_PAIR_CONTRACT["treatment_workload_version"]:
+        problems.append("treatment workload_version")
+    for candidate in WORKFLOW_CANDIDATES:
+        if candidate_controller(candidate) != W_CONTROLLER:
+            problems.append("controller")
+        if candidate_temperature(candidate) != W_PAIR_CONTRACT["temperature"]:
+            problems.append("temperature")
+    if list(candidate_treatments(CANDIDATE_W1)) != W_PAIR_CONTRACT["control_treatments"]:
+        problems.append("control treatments")
+    if list(candidate_treatments(CANDIDATE_W2)) != W_PAIR_CONTRACT["treatment_treatments"]:
+        problems.append("treatment treatments")
+    if FROZEN_TOP_P != W_PAIR_CONTRACT["top_p"] or FROZEN_SEED != W_PAIR_CONTRACT["seed"]:
+        problems.append("generation pins")
+    if FROZEN_MAX_TOKENS != W_PAIR_CONTRACT["max_tokens"]:
+        problems.append("max_tokens")
+    if EVALUATOR_VERSION != W_PAIR_CONTRACT["evaluator_version"]:
+        problems.append("evaluator")
+    scenario = next(iter(catalog().values()))
+    prompts = {system_prompt(scenario, candidate_workload_version(c)) for c in WORKFLOW_CANDIDATES}
+    if prompts != {SYSTEM_PROMPT_V241}:
+        problems.append("system_prompt")
+    prompt_digest = hashlib.sha256(SYSTEM_PROMPT_V241.encode("utf-8")).hexdigest()
+    if prompt_digest != W_PAIR_CONTRACT["system_prompt_sha256"]:
+        problems.append("system_prompt")
+    if tool_specs(W1_WORKLOAD_VERSION) is not TOOL_SPECS:
+        problems.append("control tool contract")
+    if tool_specs(W2_WORKLOAD_VERSION) is not TOOL_SPECS_V250:
+        problems.append("treatment tool contract")
+    if any(
+        candidate in SEALED_CANDIDATES or requires_sealed_set(candidate, stage)
+        for candidate in WORKFLOW_CANDIDATES
+        for stage in AUTHORIZED_STAGES
+    ):
+        problems.append("task_source")
+    if control_candidate_for(CANDIDATE_W2) != CANDIDATE_W1 or control_candidate_for(CANDIDATE_W1):
+        problems.append("control pairing")
+    for stage in AUTHORIZED_STAGES:
+        spec = stage_spec(stage)
+        if spec["repetitions"] != STAGE_REPETITIONS or spec["concurrency"] != STAGE_CONCURRENCY:
+            problems.append(f"{stage} schedule")
+    if stage_spec(STAGE_DEVELOPMENT)["tasks"] != DEVELOPMENT_TASKS or DEVELOPMENT_TASKS != 20:
+        problems.append("development tasks")
+    if stage_spec(STAGE_DEVELOPMENT)["quality_floor"] != DEVELOPMENT_QUALITY_FLOOR:
+        problems.append("development floor")
+    if DEVELOPMENT_QUALITY_FLOOR != 0.40:
+        problems.append("development floor")
+    if problems:
+        raise QualificationError(
+            "W1/W2 pair contract drift: "
+            + ", ".join(dict.fromkeys(problems))
+            + "; nothing was executed"
+        )
+    return dict(W_PAIR_CONTRACT)
+
+
+def require_w_config(config: dict, *, candidate_id: str) -> None:
+    """W1/W2 configs carry no sealed, custody, private-scenario, or schedule keys."""
+    if candidate_id not in WORKFLOW_CANDIDATES:
+        return
+    present = sorted(key for key in W_FORBIDDEN_CONFIG_KEYS if key in config)
+    if present:
+        raise ConfigError(
+            f"{candidate_id} executes the public catalog schedule and refuses config keys: "
+            + ", ".join(present)
+        )
+    expected_version = candidate_workload_version(candidate_id)
+    if config.get("workload_version") not in (None, expected_version):
+        raise ConfigError(
+            f"qualify-agent {candidate_id} workload_version must equal {expected_version}"
+        )
+    if config.get("controller") not in (None, W_CONTROLLER):
+        raise ConfigError(f"qualify-agent {candidate_id} controller must equal {W_CONTROLLER}")
+    if "treatments" in config and list(config.get("treatments") or []) != list(
+        candidate_treatments(candidate_id)
+    ):
+        raise ConfigError(
+            f"qualify-agent {candidate_id} treatments must equal the frozen pair contract"
+        )
+    generation = config.get("generation") or {}
+    if generation.get("temperature") not in (None, W_PAIR_CONTRACT["temperature"]):
+        raise ConfigError(f"qualify-agent {candidate_id} generation.temperature must equal 0.2")
+    if generation.get("seed") not in (None, W_PAIR_CONTRACT["seed"]):
+        raise ConfigError(f"qualify-agent {candidate_id} generation.seed must equal {FROZEN_SEED}")
+    if generation.get("max_tokens") not in (None, W_PAIR_CONTRACT["max_tokens"]):
+        raise ConfigError(f"qualify-agent {candidate_id} generation.max_tokens must equal 1024")
+    if generation.get("top_p") not in (None, W_PAIR_CONTRACT["top_p"]):
+        raise ConfigError(f"qualify-agent {candidate_id} generation.top_p must equal 0.95")
+    for key in ("system_prompt", "prompt", "evaluator_version", "evaluator", "max_turns"):
+        if key in config or key in generation:
+            raise ConfigError(f"qualify-agent {candidate_id} does not accept a {key} override")
+    require_w_pair_contract()
+
+
+def require_w_runtime(candidate_id: str, *, custody_dir: str | None) -> None:
+    """``--custody-dir`` is refused for the pair before the config is even read."""
+    if candidate_id in WORKFLOW_CANDIDATES and custody_dir is not None:
+        raise ConfigError(
+            f"{candidate_id} executes the public catalog schedule; --custody-dir is refused"
+        )
+
+
+def require_w_catalog_execution(
+    candidate_id: str,
+    *,
+    stage: str,
+    template_ids: Sequence[str] | None,
+    sealed_set: object,
+    sealed_tasks: object,
+) -> None:
+    """The assembled W1/W2 cell must be exactly the catalog cell of its stage."""
+    if candidate_id not in WORKFLOW_CANDIDATES:
+        return
+    if sealed_set is not None or sealed_tasks is not None:
+        raise ConfigError(f"{candidate_id} must not execute sealed input")
+    if template_ids is None or tuple(template_ids) != tuple(stage_spec(stage)["template_ids"]):
+        raise ConfigError(
+            f"{candidate_id} {stage} must schedule exactly the frozen catalog templates"
+        )
+
+
 def require_safe_run_label(run_label: str) -> str:
     if not _RUN_LABEL_RE.match(run_label):
         raise ConfigError("run_label must be short lowercase letters/digits/hyphens")
@@ -713,7 +965,7 @@ def validate_authorized_qualification_config(
         raise ConfigError("qualify-agent workflow must equal qualify-agent")
     if config.get("candidate_id") != candidate_id:
         raise ConfigError("qualify-agent config candidate_id must match --candidate")
-    if candidate_id not in AUTHORIZED_CANDIDATES:
+    if candidate_id not in ALL_AUTHORIZED_CANDIDATES:
         raise ConfigError(_UNKNOWN_CANDIDATE)
     expected_version = candidate_workload_version(candidate_id)
     if config.get("workload_version") not in (None, expected_version):
@@ -825,6 +1077,8 @@ def validate_authorized_qualification_config(
     # P2C (D-0026) is checked before the generic sealed-binding rule so a
     # sealed or schedule-overriding key on P2C fails with a P2C reason.
     require_p2c_config(config, candidate_id=candidate_id)
+    # W1/W2 (D-0031) refuse the same keys with their own reason.
+    require_w_config(config, candidate_id=candidate_id)
     require_sealed_binding(config, candidate_id=candidate_id, stage=stage)
     from blackwell_lab.cloud.matched_control import require_development_control_section
 
@@ -1207,11 +1461,17 @@ def sanitized_receipt(
 ) -> dict[str, Any]:
     if requires_sealed_set(candidate_id, stage) != (sealed_set is not None):
         raise QualificationError("sealed-set provenance is required exactly for P2 dev/holdout")
-    development_binding = candidate_id == CANDIDATE_P2C and stage == STAGE_DEVELOPMENT
+    development_binding = (
+        control_candidate_for(candidate_id) is not None and stage == STAGE_DEVELOPMENT
+    )
     if development_binding and matched_control is None:
-        raise QualificationError("P2C development receipt requires matched-control provenance")
+        raise QualificationError(
+            f"{candidate_id} development receipt requires matched-control provenance"
+        )
     if matched_control is not None and not development_binding:
-        raise QualificationError("matched-control provenance is valid only for P2C development")
+        raise QualificationError(
+            "matched-control provenance is valid only for P2C or W2 development"
+        )
     return {
         "workflow": QUALIFICATION_WORKFLOW,
         "artifact_family": QUALIFICATION_ARTIFACT_FAMILY,
@@ -1230,10 +1490,17 @@ def sanitized_receipt(
         # count). Present only for sealed cells so other receipts are unchanged.
         **({"sealed_set": sealed_set.provenance()} if sealed_set is not None else {}),
         # Controlled-experiment provenance (D-0026). Present only for P2C so
-        # every other receipt is unchanged.
+        # historical receipts stay byte-identical.
         **(
             {"controlled_experiment": p2c_experiment_record()}
             if candidate_id == CANDIDATE_P2C
+            else {}
+        ),
+        # D-0031: every live W2 receipt records the pair. W1 is the control
+        # and does not gain a treatment block. P1 and P2C are unchanged.
+        **(
+            {"controlled_experiment": w_pair_experiment_record(candidate_id)}
+            if candidate_id == CANDIDATE_W2
             else {}
         ),
         **({"matched_control": matched_control} if matched_control is not None else {}),

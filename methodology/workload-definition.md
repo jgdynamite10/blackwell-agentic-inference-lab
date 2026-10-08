@@ -128,6 +128,59 @@ pair isolates the effect of `evidence-grounding-v1`. P2C provides no
 blind-generalization evidence, and its catalog scores are not comparable
 with private sealed-set scores. P2 remains the sealed candidate.
 
+### Workloads 2.6.0 and 2.6.1 — generic workflow controller (decision D-0031)
+
+Private development evidence identified workflow-enforcement deficiencies
+requiring a new candidate: the minimal agent could reach the terminal tool
+without usable direct evidence and nothing required it to correct a
+zero-match search. Workloads **2.6.0** and **2.6.1** execute the
+unchanged `SYSTEM_PROMPT_V241` bytes and the 2.4.0 tool-description prose
+under the generic deterministic state machine **`workflow-controller-v1`**
+(`src/blackwell_lab/workload/workflow.py`):
+
+- States: `investigating` → `runbook_retrieved` / `evidence_collected` →
+  `ready_for_terminal` → `terminal_accepted` or `budget_exhausted`.
+- Zero-match `search_logs` results and `found: false` runbooks are
+  classified unusable and answered with generic corrective guidance; at
+  least one usable direct log observation and a valid runbook are
+  required before any terminal attempt; the remediation must be one the
+  retrieved runbook returned and the diagnosis one it published.
+- Premature, malformed, or invalid terminal attempts are rejected with a
+  typed rejection (`investigation_required`, `log_evidence_required`,
+  `runbook_required`, `remediation_not_in_runbook`,
+  `diagnosis_not_published`, `evidence_refs_required`,
+  `malformed_terminal`) and the model may correct within the **unchanged**
+  turn budget; a remaining-turn warning is issued at three turns; every
+  rejected attempt is recorded; budget exhaustion is the terminal failure
+  `workflow_requirements_unmet`.
+- The controller never reads accepted answers, evidence predicates, or
+  sealed material, never auto-selects a diagnosis or remediation, and
+  preserves exactly one native tool call per turn and the retry policy.
+  Observations gain a counts-only `workflow_control` summary.
+- 2.6.0 binds no treatment; 2.6.1 binds the single explicit treatment
+  `evidence-refs` (the 2.5.0 native tool schema with `evidence_refs`
+  required on the terminal call). `WORKLOAD_CONTROLLERS` and
+  `WORKLOAD_TREATMENTS` are closed tables.
+
+Candidates **W1** (2.6.0) and **W2** (2.6.1) are the authorized
+`qualify-agent` bindings: identical model, artifact, serving image, prompt
+bytes, generation pins, catalog, evaluator 3.1.0, 20-task development
+schedule, and controller; W1 is the control and W2 differs only by the
+`evidence-refs` treatment. P1 and P2C are not modified; their
+serializations and digests are unchanged. The 20-task gate and the 0.40
+floor (40 percent, at least eight of twenty) are unchanged, and no
+previously successful task may be selected as a qualification set. A
+separate ten-task **diagnostic canary** (`blackwell-cloud canary-agent`,
+measured seed `20261007`) draws every task from the six development
+templates only. Each of those templates appears at least once, and the
+four extra instances are the second occurrences of the first four
+templates in frozen-split order (round-robin, independent of results).
+The four holdout templates stay unseen until the official qualification.
+The schedule is disjoint from every official schedule. The canary is
+diagnostic only and authorizes nothing. Canary findings may support
+development correction. Official qualification findings must not be
+used to tune the candidate.
+
 Each turn must produce exactly one native OpenAI-compatible function call.
 The six `TOOL_SPECS` contracts are projected onto deterministic OpenAI
 function definitions (`tools` on every chat-completions request;
@@ -140,7 +193,13 @@ Tool arguments are strictly validated (`invalid_tool_arguments` on any
 violation): required strings must be non-empty, and every integer argument
 (`search_logs.limit`, `query_metrics.window_s`,
 `check_recent_changes.window_s`) must be a **positive integer** — booleans,
-zero, and negative values are rejected.
+zero, and negative values are rejected. On workloads 2.6.0 and 2.6.1 only,
+a structurally invalid `recommend_remediation` (empty strings, wrong types,
+missing required fields, or arguments the terminal schema does not allow)
+is not an immediate stop: the workflow controller rejects it with a typed
+payload and the model may correct it inside the same turn budget. The
+recommendation is still not accepted. Malformed non-terminal calls, invalid
+JSON, and every legacy workload remain `invalid_tool_arguments`.
 
 Tool responses are deterministic functions of (scenario, query). Tool
 latencies are simulated with fixed, documented values so tool-execution time

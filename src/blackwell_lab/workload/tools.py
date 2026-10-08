@@ -74,6 +74,12 @@ TOOL_SPECS_BY_VERSION: dict[str, dict[str, dict[str, dict[str, type | tuple[type
     "2.4.0": TOOL_SPECS,
     "2.4.1": TOOL_SPECS,
     "2.5.0": TOOL_SPECS_V250,
+    # Workflow-controlled pair (decision D-0031): 2.6.0 (W1, control) keeps
+    # the original argument contract; 2.6.1 (W2, treatment) exposes the
+    # ``evidence_refs`` citation argument exactly as 2.5.0 does. The
+    # argument schema is the pair's only model-visible difference.
+    "2.6.0": TOOL_SPECS,
+    "2.6.1": TOOL_SPECS_V250,
 }
 
 
@@ -115,6 +121,31 @@ class ToolResult:
     tool: str
     payload: dict[str, Any]
     simulated_latency_ms: float
+
+
+#: Workloads whose terminal schema failures are a correctable controller
+#: rejection rather than an immediate ``invalid_tool_arguments`` stop.
+WORKFLOW_TERMINAL_VERSIONS = frozenset({"2.6.0", "2.6.1"})
+
+
+def workflow_terminal_schema_is_correctable(name: str, workload_version: str | None) -> bool:
+    """True only for a terminal call on a workflow-controlled workload.
+
+    Legacy contracts and non-terminal tools stay strict: a schema violation
+    still ends the task. The workflow controller must still reject the
+    terminal; this predicate only decides whether the agent may hand the
+    arguments to that controller inside the existing turn budget.
+    """
+    from blackwell_lab.workload.native_tools import require_workload_version
+    from blackwell_lab.workload.validation import ConfigError
+
+    if name != TERMINAL_TOOL:
+        return False
+    try:
+        resolved = require_workload_version(workload_version)
+    except ConfigError:
+        return False
+    return resolved in WORKFLOW_TERMINAL_VERSIONS
 
 
 def validate_tool_call(
@@ -197,6 +228,14 @@ class SimulatedToolbox:
         self._clock.sleep(latency_ms / 1000.0)
         payload = handler(**arguments)
         return ToolResult(tool=name, payload=payload, simulated_latency_ms=latency_ms)
+
+    def consume_latency(self, name: str) -> float:
+        """Occupy the declared tool latency without invoking the handler."""
+        if name not in TOOL_LATENCY_MS:
+            raise InvalidToolNameError(f"unknown tool: {name!r}")
+        latency_ms = TOOL_LATENCY_MS[name]
+        self._clock.sleep(latency_ms / 1000.0)
+        return latency_ms
 
     # -- tool implementations (deterministic functions of scenario + query) --
 

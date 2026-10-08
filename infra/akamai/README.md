@@ -430,6 +430,78 @@ blackwell-cloud qualify-agent \
 C2 (temperature 0.2 only) is used only if C1 fails the qualification
 gate. Live execution is not authorized by D-0019 itself.
 
+#### Workflow-controlled candidates W1 and W2 (D-0031 implementation; live phrase still required)
+
+Candidates `W1` (workload 2.6.0) and `W2` (workload 2.6.1) run the agent
+under `workflow-controller-v1`. W2 development requires a completed,
+verified **W1** development control from the same run tag, lifecycle
+ledger, resource identity, canonical commit, configuration digest,
+region, and frozen pins — exactly the D-0027 rule applied to the new pair.
+A P1 control never authenticates W2. P1 and P2C are unchanged. The
+official qualification is still twenty tasks at the 0.40 floor (40
+percent, at least eight of twenty).
+
+Before any `qualify-agent` or `canary-agent` run, the operator creates
+the pinned qualification environment **outside the repository** and runs
+the command from it; both commands fail closed before inference when the
+environment is missing, unpinned, or lacks the RFC 3339 `date` /
+`date-time` format checkers:
+
+```bash
+scripts/bootstrap_qual_env.sh            # idempotent; default ~/.local/share/blackwell-lab/qual-env
+"${BWLAB_QUAL_ENV_DIR:-$HOME/.local/share/blackwell-lab/qual-env}/bin/blackwell-cloud" qualify-agent --validate-only ...
+```
+
+`BWLAB_QUAL_ENV_DIR` must resolve outside the repository and
+`BWLAB_QUAL_PYTHON` (default `python3.12`) selects the interpreter; the
+script never modifies system Python.
+
+#### Ten-task diagnostic canary (D-0031 implementation; live phrase still required)
+
+```bash
+blackwell-cloud canary-agent \
+  --run-tag p3-qual-20260918a \
+  --run-label qual-a \
+  --candidate W1 \
+  --config /absolute/private/path/outside/the/repository/qualify.json \
+  --approve "I approve the Akamai diagnostic agent canary for run p3-qual-20260918a (qual-a) using candidate W1 config sha256:<digest-of-those-config-bytes>; the canary is diagnostic only and authorizes no qualification"
+```
+
+The canary runs ten tasks from the six development templates only
+(holdout templates excluded), measured seed `20261007`, deterministic
+round-robin order, disjoint from every official schedule — through the
+unchanged evaluator at the same 0.40 floor (at least four of ten). Each
+development template appears at least once; the four extra instances
+are the second occurrences of the first four templates in frozen-split
+order and do not depend on results. Holdout templates remain unseen
+until the official qualification. Canary findings may support
+development correction. Official qualification findings must not be
+used to tune the candidate. It writes only to the `canary-runs` family
+with receipt kind `diagnostic-canary`. It never creates a development
+control, never authorizes P2C, W2, comparative, or cross-cloud
+execution, and never launches the official qualification. Fewer than
+four passes is a **stop**. Four or more means the operator **may
+separately** approve the official twenty-task qualification with its
+own phrase; that run still requires at least eight of twenty. A
+qualification phrase never authorizes a canary and a canary phrase
+never authorizes a qualification.
+
+#### Read-only analysis of an existing qualification result
+
+```bash
+blackwell-cloud analyze-qualification --run-label qual-a --candidate W1 [--stage development] [--format text|json] [--write-report]
+```
+
+Reads one existing cell under `LAB_RESULTS_DIR` without constructing a
+model client or contacting any provider or endpoint, rejects unsafe paths
+and malformed run labels before touching any file, refuses symlinks,
+never modifies the source, and (with `--write-report`) writes only under
+the private `qualification-analysis` family. Output lists successful
+incidents in plain English, failed gates by task, aggregate gate-failure
+counts, completion versus correctness, and states that 0.40 means 40
+percent. Its output is private (see
+[docs/results-privacy.md](../../docs/results-privacy.md)).
+
 ### 8. Verify exported results
 
 ```bash

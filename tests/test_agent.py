@@ -63,6 +63,7 @@ class TestPolicyConstants:
             "invalid_tool_arguments",
             "no_terminal_recommendation",
             "direct_evidence_required",
+            "workflow_requirements_unmet",
             "task_timeout",
             "agent_runtime_error",
         }

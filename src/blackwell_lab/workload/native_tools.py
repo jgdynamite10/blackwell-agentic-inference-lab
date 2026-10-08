@@ -17,9 +17,11 @@ from typing import Any
 from blackwell_lab.workload.model_client import NativeToolCall, NativeToolCallError, StreamEvent
 from blackwell_lab.workload.tools import (
     TOOL_SPECS,
+    InvalidToolArgumentsError,
     advertised_required_arguments,
     tool_specs,
     validate_tool_call,
+    workflow_terminal_schema_is_correctable,
 )
 
 #: Identity recorded in private gpu-mode manifests so native-tool results
@@ -103,6 +105,10 @@ TOOL_DESCRIPTIONS_BY_VERSION: dict[str, dict[str, str]] = {
     # argument in the recommend_remediation JSON schema (TOOL_SPECS_V250);
     # the evidence-grounding controller adds no description prose.
     "2.5.0": TOOL_DESCRIPTIONS_V240,
+    # 2.6.0 / 2.6.1 (decision D-0031) reuse the 2.4.0 tool text verbatim as
+    # well; the workflow controller speaks only through tool-result payloads.
+    "2.6.0": TOOL_DESCRIPTIONS_V240,
+    "2.6.1": TOOL_DESCRIPTIONS_V240,
 }
 
 #: Default catalog contract (workload 2.3.0). Callers that execute a
@@ -322,6 +328,18 @@ class ToolCallAssembler:
             )
         try:
             validate_tool_call(name, parsed, self.workload_version)
+        except InvalidToolArgumentsError:
+            # Workflow-controlled terminal calls stay correctable. Every
+            # other schema failure is still an assembly error and never
+            # reaches a tool handler.
+            if not workflow_terminal_schema_is_correctable(name, self.workload_version):
+                return self._error(
+                    "invalid_arguments",
+                    tool_call_count=1,
+                    name_valid=True,
+                    arguments_json_ok=True,
+                    arguments_schema_ok=False,
+                )
         except Exception:
             return self._error(
                 "invalid_arguments",

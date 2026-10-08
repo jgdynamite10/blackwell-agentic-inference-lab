@@ -49,7 +49,11 @@ Category                        Meaning
                                 exist (native ``unknown_tool``).
 ``invalid_tool_arguments``      The tool exists but the arguments violate its
                                 contract (native ``invalid_arguments``, or a
-                                mock path that reaches the toolbox).
+                                mock path that reaches the toolbox). On
+                                workloads 2.6.0 and 2.6.1 a structurally
+                                invalid ``recommend_remediation`` is instead
+                                a workflow-controller rejection inside the
+                                same turn budget; it is not accepted.
 ``no_terminal_recommendation``  The agent exhausted ``max_turns`` without ever
                                 calling ``recommend_remediation``.
 ``direct_evidence_required``    Workload 2.5.0 only: the agent exhausted
@@ -60,6 +64,14 @@ Category                        Meaning
                                 accepted recommendation. The turn budget is
                                 unchanged; rejected attempts consume turns
                                 like any tool call.
+``workflow_requirements_unmet`` Workloads 2.6.0 / 2.6.1 only: the agent
+                                exhausted ``max_turns`` after the generic
+                                workflow controller rejected at least one
+                                terminal attempt (missing investigation, log
+                                evidence, runbook, or an unpublished
+                                remediation/diagnosis) and never submitted an
+                                accepted recommendation. The budget is
+                                unchanged.
 ``task_timeout``                The per-task deadline (profile-specific)
                                 elapsed before a terminal recommendation.
 ``agent_runtime_error``         An unexpected exception in the client, a tool,
@@ -94,6 +106,7 @@ from blackwell_lab.workload.tools import (
     InvalidToolArgumentsError,
     InvalidToolNameError,
     SimulatedToolbox,
+    workflow_terminal_schema_is_correctable,
 )
 
 #: Retry policy for measurement runs (measurement contract §7).
@@ -108,6 +121,7 @@ ERROR_TAXONOMY = (
     "invalid_tool_arguments",
     "no_terminal_recommendation",
     "direct_evidence_required",
+    "workflow_requirements_unmet",
     "task_timeout",
     "agent_runtime_error",
 )
@@ -178,6 +192,8 @@ class TaskExecution:
     tool_call_diagnostics: dict | None = None
     #: Sanitized evidence-controller counts (workload 2.5.0 only; else None).
     evidence_grounding: dict | None = None
+    #: Sanitized workflow-controller counts (workloads 2.6.x only; else None).
+    workflow_control: dict | None = None
     turns: list[TurnRecord] = field(default_factory=list)
     e2e_ms: float = 0.0
     queue_wait_ms: float = 0.0
@@ -213,6 +229,15 @@ _OUTPUT_EVENT_KINDS = frozenset({"content_chunk", "reasoning_chunk", "native_too
 
 def _error_category_for_native(failure_category: str) -> str:
     return _NATIVE_ERROR_TAXONOMY.get(failure_category, "malformed_tool_call")
+
+
+def _workflow_can_correct_terminal(
+    controller: object, tool_name: str, workload_version: str
+) -> bool:
+    """Workflow-controlled terminal schema failures stay inside the turn budget."""
+    if getattr(controller, "controller_id", None) != "workflow-controller-v1":
+        return False
+    return workflow_terminal_schema_is_correctable(tool_name, workload_version)
 
 
 def _completed_turn_record(
@@ -309,6 +334,11 @@ SYSTEM_PROMPTS_BY_VERSION = {
     "2.4.0": SYSTEM_PROMPT_V240,
     "2.4.1": SYSTEM_PROMPT_V241,
     "2.5.0": SYSTEM_PROMPT_V241,
+    # Workloads 2.6.0 / 2.6.1 (decision D-0031) execute the 2.4.1 prompt
+    # byte-for-byte: the generic workflow controller is the only treatment
+    # relative to P1, and it speaks only through tool-result payloads.
+    "2.6.0": SYSTEM_PROMPT_V241,
+    "2.6.1": SYSTEM_PROMPT_V241,
 }
 
 
@@ -408,12 +438,22 @@ def run_task(
         execution.e2e_ms = (clock.monotonic() - submitted) * 1000.0
         execution.ended_at_utc = datetime.now(timezone.utc).isoformat()
         if controller is not None:
-            execution.evidence_grounding = controller.summary()
+            # Each controller family records its sanitized counts in its own
+            # observation field (``evidence_grounding`` for 2.5.0,
+            # ``workflow_control`` for 2.6.x), so existing documents and
+            # schemas are untouched.
+            summary_field = getattr(controller, "summary_field", "evidence_grounding")
+            setattr(execution, summary_field, controller.summary())
         return execution
 
+    note_turn = getattr(controller, "note_turn", None)
     for _turn in range(max_turns):
         if clock.monotonic() >= deadline:
             return finish("timeout", "task_timeout")
+        if note_turn is not None:
+            # Generic remaining-turn accounting for the workflow controller;
+            # it adds no message and no tool call (one native call per turn).
+            note_turn(_turn, max_turns)
 
         # --- one model turn, streamed and timed at the driver boundary ---
         dispatch = clock.monotonic()
@@ -514,7 +554,34 @@ def run_task(
         except InvalidToolNameError:
             return finish("error", "invalid_tool_name")
         except InvalidToolArgumentsError:
-            return finish("error", "invalid_tool_arguments")
+            if not _workflow_can_correct_terminal(controller, call.name, executed_version):
+                return finish("error", "invalid_tool_arguments")
+            # Structurally invalid terminal arguments never run the handler
+            # and are never accepted. The controller returns a typed
+            # rejection and the loop continues under the same max_turns.
+            verdict = controller.validate_terminal(call.arguments)
+            if verdict.accepted:
+                return finish("error", "invalid_tool_arguments")
+            payload = controller.rejection_payload(verdict)
+            latency_ms = toolbox.consume_latency(call.name)
+            execution.tool_trace.append(
+                ToolTrace(
+                    tool=call.name,
+                    arguments=dict(call.arguments),
+                    result=payload,
+                    simulated_latency_ms=latency_ms,
+                )
+            )
+            if clock.monotonic() >= deadline:
+                return finish("timeout", "task_timeout")
+            messages.append(
+                Message(
+                    "tool",
+                    content=json.dumps(payload, sort_keys=True),
+                    tool_call_id=call.call_id,
+                )
+            )
+            continue
         except Exception:
             return finish("error", "agent_runtime_error")
 
@@ -528,7 +595,12 @@ def run_task(
                     verdict = controller.validate_terminal(call.arguments)
                     terminal_accepted = verdict.accepted
                     if not verdict.accepted:
-                        payload = verdict.tool_payload()
+                        rejection_payload = getattr(controller, "rejection_payload", None)
+                        payload = (
+                            rejection_payload(verdict)
+                            if rejection_payload is not None
+                            else verdict.tool_payload()
+                        )
                 else:
                     payload = controller.annotate(payload, controller.record(result.tool, payload))
             except Exception:
@@ -566,6 +638,15 @@ def run_task(
             )
         )
 
-    if controller is not None and controller.rejected_terminal_attempts > 0:
-        return finish("error", DIRECT_EVIDENCE_REQUIRED)
+    if controller is not None:
+        mark_exhausted = getattr(controller, "mark_exhausted", None)
+        if mark_exhausted is not None:
+            mark_exhausted()
+        exhaustion_category = getattr(controller, "exhaustion_error_category", None)
+        if exhaustion_category is not None:
+            # Workflow controller: a clear terminal failure that distinguishes
+            # "never tried" from "tried and was rejected".
+            return finish("error", exhaustion_category)
+        if controller.rejected_terminal_attempts > 0:
+            return finish("error", DIRECT_EVIDENCE_REQUIRED)
     return finish("error", "no_terminal_recommendation")
