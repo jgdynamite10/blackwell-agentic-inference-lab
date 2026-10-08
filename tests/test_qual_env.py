@@ -132,6 +132,16 @@ class TestGate:
     def test_qualify_agent_refuses_before_reading_the_config(self, monkeypatch, tmp_path, capsys):
         from blackwell_lab.cloud.cli import main
 
+        # Isolate this assertion from the earlier hosted-execution guard.
+        # GitHub Actions sets CI and GITHUB_ACTIONS before the test runs.
+        for name in (
+            "CI",
+            "GITHUB_ACTIONS",
+            "CLOUD_AGENT",
+            "CURSOR_AGENT_SOCKET",
+            "CURSOR_AGENT_WORKER_ID",
+        ):
+            monkeypatch.delenv(name, raising=False)
         monkeypatch.setattr(qual_env, "marker_path", lambda prefix=None: tmp_path / "absent")
         reads: list[str] = []
         monkeypatch.setattr(
