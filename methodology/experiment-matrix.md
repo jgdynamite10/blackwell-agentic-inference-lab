@@ -98,17 +98,26 @@ Before any full-baseline measurement, one short owner-approved
   diagnostic only and authorizes nothing. Canary findings may support
   development correction; official qualification findings must not be
   used to tune the candidate. The Akamai
-  qualification infrastructure region is fixed to `us-ord` (decision
-  D-0030). The owner confirmed current capacity in `us-ord`. D-0029's
-  `us-sea` lock is historical: the authenticated create for
-  `p1-dev-20261007b` returned HTTP 403 and was recovered empty. Run
-  `p1-dev-20261007a` was an HTTP 401 Invalid Token authentication
-  failure later provider-verified empty, not a capacity failure.
-  D-0027's `us-iad-2` lock is historical: that region's create returned
-  HTTP 403 and was recovered empty. There is no fallback list, automatic
-  retry, or dynamic region selection. Advertised availability is not
-  capacity proof. Availability and capacity observations are time-bound
-  and do not guarantee future capacity. Controlled-resource
+  qualification infrastructure region is fixed to `ca-central` (decision
+  D-0032, superseding only the D-0030 region lock). The owner confirmed
+  current capacity in `ca-central` by authorizing this region change on
+  2026-10-08. `ca-central` was previously account-visible at $3.00/hour,
+  subject to fresh authenticated verification before provisioning.
+  D-0030's `us-ord` lock is historical: run `w1-dev-20261008a` passed
+  authenticated advertised-availability preflight, then instance creation
+  returned HTTP 403 and was recovered as `aborted_verified_empty_apply`
+  with $0 spend. That run tag must not be reused; the fresh run tag after
+  merge is `w1-dev-20261008b`. D-0029's `us-sea` lock is historical: the
+  authenticated create for `p1-dev-20261007b` returned HTTP 403 and was
+  recovered empty. Run `p1-dev-20261007a` was an HTTP 401 Invalid Token
+  authentication failure later provider-verified empty, not a capacity
+  failure. D-0027's `us-iad-2` lock is historical: that region's create
+  returned HTTP 403 and was recovered empty. There is no fallback list,
+  automatic retry, dynamic region selection, or cross-region
+  substitution. Advertised availability is not capacity proof.
+  Availability and capacity observations are time-bound and do not
+  guarantee future capacity. The same-session P1/P2C and W1/W2 control
+  requirements remain. Controlled-resource
   mode remains optional future work. AWS and GCP later repeat this same
   three-cell matrix if quota permits.
 

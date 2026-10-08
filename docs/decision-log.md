@@ -1743,6 +1743,11 @@ or the secondary repository was accessed.
 
 ## 2026-10-07 — D-0030: Fixed qualification region moves to us-ord
 
+> **Region lock superseded by D-0032.** D-0032 supersedes only the fixed
+> qualification region in this decision. The same-session P1/P2C development
+> control requirement remains in force. The digest table below is the
+> historical `us-ord` contract.
+
 > **SUPERSEDES D-0029 only to the following extent:** the single fixed Akamai
 > qualification region is `us-ord`. The same-session P1/P2C development
 > control requirement in D-0027 remains in force.
@@ -1979,3 +1984,98 @@ controlled experiment. Tested only with synthetic fixtures and the public
 catalog; no provider, credential, inference endpoint, download, plan,
 apply, custody package, publication system, or the secondary repository
 was accessed, and no historical result artifact was modified.
+
+## 2026-10-08 — D-0032: Fixed qualification region moves to ca-central
+
+> **SUPERSEDES D-0030 only to the following extent:** the single fixed Akamai
+> qualification region is `ca-central`. The same-session P1/P2C development
+> control requirement in D-0027 remains in force. The same-session W1/W2
+> development control requirement in D-0031 remains in force. D-0030's
+> historical prose and its `us-ord` digest table stay intact. The D-0031
+> W1/W2 digest cells stay the historical `us-ord` contract.
+
+**Decision.** The fixed Akamai qualification infrastructure region is
+exactly `ca-central`. There is no region list, dynamic region selection,
+automatic retry, fallback, or cross-region substitution. One
+`g3-gpu-rtxpro6000-blackwell-1`, one run-tagged firewall, a six-hour TTL,
+Terraform 1.9.8, the $3.00/hour planning rate, the $18 six-hour expected
+exposure, and the $25 ceiling are unchanged. The $3.00/hour rate remains
+pending fresh authenticated re-verification before provisioning. Approval
+phrases, privacy, reconciliation, recovery, and teardown protections are
+unchanged. Production labels stay `bwlab-{run_tag}` and
+`bwlab-fw-{run_tag}`, with tags `blackwell-lab`, `run:{run_tag}`,
+`ttl-hours:6`, and `phase:3`. Qualification candidates, workloads,
+thresholds, the ten-task diagnostic canary, the measured canary seed
+`20261007`, the official 20-task qualification, the 0.40 quality floor,
+and holdout protection are unchanged.
+
+The owner confirmed current capacity in `ca-central` by authorizing this
+region change on 2026-10-08. That confirmation is time-bound evidence. It
+is not a capacity probe, and it does not guarantee future capacity.
+`ca-central` was previously account-visible at $3.00/hour. That figure is
+historical advisory pricing and is subject to fresh authenticated
+verification before provisioning. `us-ord` passed authenticated
+advertised-availability preflight for run `w1-dev-20261008a`, then
+instance creation returned HTTP 403 because the plan was not currently
+available. The failed apply was provider-verified empty, recovered as
+`aborted_verified_empty_apply`, and incurred $0. The recovery receipt
+SHA-256 is
+`bb2b0f3a0dc0a944d7d531b45dffc694b26e9b11c4caa1668a884b7badd8b964`.
+Advertised availability is advisory and is not live capacity proof.
+Availability and capacity observations are time-bound and do not
+guarantee future capacity. The `us-ord` attempt, its receipts, the D-0030
+digest table, and the D-0031 W1/W2 digest cells stay historical. This
+decision does not rewrite D-0022 through D-0031 and does not redefine
+those results.
+
+`w1-dev-20261008a` remains a historical `aborted_verified_empty_apply`.
+It must never authenticate or authorize a future canary, W1 control, W2
+run, or resource session. Its Terraform plan and canary config are stale
+by identity and must not be reused. The fresh run tag required after
+merge is `w1-dev-20261008b`.
+
+P2C development still requires a completed, verified P1 development
+control from the same run tag, lifecycle ledger, resource identity,
+canonical commit, configuration digest, region, and frozen pins, bound to
+the terminal `qualification_completed` event. W2 development still
+requires the same binding for a W1 control. The next control must be a
+new same-session control for the new run. An earlier `ca-central`,
+`us-ord`, `us-sea`, or `us-iad-2` control does not authenticate a new
+session. Matching `ca-central` and the current candidate identity is not
+enough: the run tag, canonical commit, configuration digest, ledger
+digest, resource identity digest, exact region, candidate/control pair,
+and terminal completion event must all match this session. A `us-ord`,
+`us-sea`, or `us-iad-2` ledger is historical and is refused for a new
+session. A production firewall ledger entry may omit region or carry
+`ca-central`; any other firewall region is refused. The instance region
+must be exactly `ca-central`.
+
+Candidate identity digests include `region`. Moving the lock from
+`us-ord` to `ca-central` is the only serialization change. The values
+below were recomputed with `candidate_identity_digest` after that change.
+They are the current contract. The D-0030 table remains the historical
+`us-ord` contract for C1, C2, P1, P2, and P2C. The D-0031 table remains
+the historical `us-ord` contract for W1 and W2. The D-0029 table remains
+the historical `us-sea` contract. The D-0027 table remains the historical
+`us-iad-2` contract.
+
+| Candidate | D-0032 (`ca-central`, recomputed) | Historical D-0030/D-0031 (`us-ord`) |
+| --- | --- | --- |
+| C1 | `22d92d3351ed92b7b46ba0e1c0756c6ecf8c47abe0ae2b6070b9b821e482f27e` | `fe804d2a14be46f89b32f760d2f7540e05769db83ce041086ec6d8a5477f33bd` |
+| C2 | `062bc2063a967638a5943fd760126703a66c34f1d9ec07a4f99e245c538f421b` | `e44bb30ede6e1002eb8751b940b62e58c93901e2031e36ea777eead372f3030d` |
+| P1 | `be54086f77c59f334b5b77bbfbd04d917c295d875a1542c79aa9cb69d0da3bc3` | `d244d01308b525d970d7e706a8acecc3f4e6e10009ef962197e2cdfa926453de` |
+| P2 | `8811a4be01c8befab0984c806879d0e1940faa94855b23aab8fe46a2109ad215` | `11cbed1d8a4672fb19b4df35f3a6c25ce9ca536a25d2208063495a2d8b13d138` |
+| P2C | `c43cfe22e52a0756b70d11df97e3ac37e64c989ffa259fa703c6b3b3a80fbf46` | `3bd46c049832a66f8de2f68d38195691361462961308ac76501f3f523ea1fd4c` |
+| W1 | `2b7c5745084f4459af66e58fa5701d5c513108a9536385acbed00722c02e68cf` | `1dfedcabaf0759e8e03ae3ea270ad482f7b7704be6940c78ff95b4870751fe3b` |
+| W2 | `06d673972a696efcddc9ce00d6c9f6a15a032e0c516d4dc8b54f01dbba0917a2` | `da9060df7a03a2f3a7a9d8d9d1bcab9a91b18254b365849abb5e25737de208c7` |
+
+**This decision does not authorize** holdout, freeze, cross-cloud inference, publication, provisioning, downloads, or live execution. Those still require their own decisions and exact approval phrases. No provider call, Terraform plan, apply, or destroy was performed to record this decision.
+
+**Rationale.** The `us-ord` create for `w1-dev-20261008a` failed closed with
+no resources and no spend after advertised availability. The owner
+authorized `ca-central` on 2026-10-08 as the single fixed region. A
+same-session digest binding is what makes the next control valid;
+matching the region, or reusing the aborted run tag, is not enough.
+Tested with synthetic fixtures only. No provider, credential, inference
+endpoint, download, private result, custody package, publication system,
+plan, apply, or the secondary repository was accessed.

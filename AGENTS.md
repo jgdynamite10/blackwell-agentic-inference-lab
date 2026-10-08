@@ -140,12 +140,16 @@ explicitly revises them in writing.
    **D-0019 authorizes implementation** of the bounded agent-quality
    qualification (`blackwell-cloud qualify-agent`). Decision **D-0020
    authorizes implementation** of the provider-neutral engine/precision
-   contract (`blackwell-cloud engine-contract`) only. Decision **D-0030**
-   sets the single fixed Akamai qualification region to `us-ord`,
-   superseding only the D-0029 region lock. The same-session P1/P2C
-   control requirement remains. There is no fallback list, automatic
-   retry, or dynamic region selection. Advertised availability is
-   advisory and is not capacity proof. Decision **D-0031 authorizes
+   contract (`blackwell-cloud engine-contract`) only. Decision **D-0032**
+   sets the single fixed Akamai qualification region to `ca-central`,
+   superseding only the D-0030 region lock. The same-session P1/P2C and
+   W1/W2 control requirements remain. There is no fallback list, automatic
+   retry, dynamic region selection, or cross-region substitution.
+   Advertised availability is advisory and is not capacity proof. The
+   owner confirmed current capacity in `ca-central` by authorizing this
+   region change on 2026-10-08. Run `w1-dev-20261008a` is a historical
+   `aborted_verified_empty_apply` and must not be reused; the fresh run
+   tag after merge is `w1-dev-20261008b`. Decision **D-0031 authorizes
    implementation** of the workflow-controlled candidate pair W1/W2
    (workloads 2.6.0 / 2.6.1, `workflow-controller-v1`; W1 is W2's
    same-session control), the ten-task diagnostic canary

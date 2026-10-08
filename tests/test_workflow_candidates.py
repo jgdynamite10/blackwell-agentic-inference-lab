@@ -1,7 +1,8 @@
 """W1 / W2 candidate pair and its same-session control (decision D-0031).
 
-Covers candidate identity separation, the pinned historical digests of
-C1/C2/P1/P2/P2C (immutability), the explicit single treatment difference,
+Covers candidate identity separation, the historical us-ord digests of
+C1/C2/P1/P2/P2C/W1/W2, the current ca-central identity pins, the explicit
+single treatment difference,
 the frozen pair contract, config refusals, the W1 -> W2 matched control
 (including that a P1 control can never authenticate W2 and vice versa), the
 unchanged twenty-task / 0.40 development gate, and the offline CLI paths.
@@ -80,19 +81,31 @@ from blackwell_lab.workload.validation import ConfigError
 
 COMMIT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-#: Identity digests as frozen before D-0031. Any change here is a protocol
-#: change that needs its own decision-log entry.
+#: D-0030/D-0031 us-ord identity contract. Historical. D-0032 recomputed
+#: these after the region lock moved to ca-central.
 HISTORICAL_IDENTITY_DIGESTS = {
     "C1": "fe804d2a14be46f89b32f760d2f7540e05769db83ce041086ec6d8a5477f33bd",
     "C2": "e44bb30ede6e1002eb8751b940b62e58c93901e2031e36ea777eead372f3030d",
     "P1": "d244d01308b525d970d7e706a8acecc3f4e6e10009ef962197e2cdfa926453de",
     "P2": "11cbed1d8a4672fb19b4df35f3a6c25ce9ca536a25d2208063495a2d8b13d138",
     "P2C": "3bd46c049832a66f8de2f68d38195691361462961308ac76501f3f523ea1fd4c",
-}
-#: The new pair's identities, pinned so a silent change fails CI.
-WORKFLOW_IDENTITY_DIGESTS = {
     "W1": "1dfedcabaf0759e8e03ae3ea270ad482f7b7704be6940c78ff95b4870751fe3b",
     "W2": "da9060df7a03a2f3a7a9d8d9d1bcab9a91b18254b365849abb5e25737de208c7",
+}
+#: Current D-0032 ca-central identities, recomputed by candidate_identity_digest.
+CA_CENTRAL_IDENTITY_DIGESTS = {
+    "C1": "22d92d3351ed92b7b46ba0e1c0756c6ecf8c47abe0ae2b6070b9b821e482f27e",
+    "C2": "062bc2063a967638a5943fd760126703a66c34f1d9ec07a4f99e245c538f421b",
+    "P1": "be54086f77c59f334b5b77bbfbd04d917c295d875a1542c79aa9cb69d0da3bc3",
+    "P2": "8811a4be01c8befab0984c806879d0e1940faa94855b23aab8fe46a2109ad215",
+    "P2C": "c43cfe22e52a0756b70d11df97e3ac37e64c989ffa259fa703c6b3b3a80fbf46",
+    "W1": "2b7c5745084f4459af66e58fa5701d5c513108a9536385acbed00722c02e68cf",
+    "W2": "06d673972a696efcddc9ce00d6c9f6a15a032e0c516d4dc8b54f01dbba0917a2",
+}
+#: The workflow pair's current identities, pinned so a silent change fails CI.
+WORKFLOW_IDENTITY_DIGESTS = {
+    "W1": CA_CENTRAL_IDENTITY_DIGESTS["W1"],
+    "W2": CA_CENTRAL_IDENTITY_DIGESTS["W2"],
 }
 
 
@@ -102,7 +115,11 @@ class TestCandidateTables:
         assert CATALOG_CANDIDATES == ("C1", "C2", "P1", "P2C")
         assert set(CANDIDATE_WORKLOAD_VERSIONS) == set(AUTHORIZED_CANDIDATES)
         assert set(CANDIDATE_CONTROLLERS) == set(AUTHORIZED_CANDIDATES)
+        text = Path("docs/decision-log.md").read_text(encoding="utf-8")
         for candidate, digest in HISTORICAL_IDENTITY_DIGESTS.items():
+            assert digest in text, candidate
+            assert candidate_identity_digest(candidate) != digest, candidate
+        for candidate, digest in CA_CENTRAL_IDENTITY_DIGESTS.items():
             assert candidate_identity_digest(candidate) == digest, candidate
 
     def test_workflow_pair_lives_in_its_own_tables(self):
@@ -124,6 +141,8 @@ class TestCandidateTables:
     def test_workflow_identities_are_distinct_and_pinned(self):
         digests = {c: candidate_identity_digest(c) for c in ALL_AUTHORIZED_CANDIDATES}
         assert len(set(digests.values())) == 7
+        for candidate, digest in CA_CENTRAL_IDENTITY_DIGESTS.items():
+            assert digests[candidate] == digest, candidate
         for candidate, digest in WORKFLOW_IDENTITY_DIGESTS.items():
             assert digests[candidate] == digest, candidate
         w1 = frozen_candidate_fields("W1")
@@ -179,7 +198,7 @@ class TestConfigs:
                 "run_tag": RUN_TAG,
                 "w1_run_label": "qual-w1",
                 "canonical_commit": COMMIT,
-                "region": "us-ord",
+                "region": "ca-central",
                 "config_sha256": "0" * 64,
                 "result_sha256": "0" * 64,
                 "control_record_sha256": "0" * 64,

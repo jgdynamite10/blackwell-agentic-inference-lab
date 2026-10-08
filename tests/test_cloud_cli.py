@@ -124,7 +124,7 @@ def pilot_config(tmp_path, comparison_mode="provider-native", **overrides):
         "endpoint": {"base_url": "http://127.0.0.1:8000/v1", "model": "m"},
         "cloud": {
             "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-            "region": "us-ord",
+            "region": "ca-central",
             "list_price_usd_per_hour": 3.0,
             "price_source_date": "2026-09-06",
         },
@@ -198,7 +198,7 @@ def pilot_ready_ledger(**overrides):
                 "address": "linode_instance.gpu_baseline",
                 "type": "linode_instance",
                 "provider_id": "42",
-                "region": "us-ord",
+                "region": "ca-central",
             },
             {
                 "address": "linode_firewall.gpu_baseline",
@@ -337,7 +337,7 @@ class TestPilotGate:
                 instance={
                     "provider_id": "42",
                     "instance_type": "g3-gpu-rtxpro6000-blackwell-1",
-                    "region": "us-ord",
+                    "region": "ca-central",
                     "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
                 },
                 host_facts={
@@ -371,7 +371,7 @@ class TestPilotGate:
         monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
         paths = lifecycle.lifecycle_paths(external, RUN_TAG)
         ledger = pilot_ready_ledger()
-        ledger["resources"][0]["region"] = "us-ord"
+        ledger["resources"][0]["region"] = "ca-central"
         lifecycle.write_private_json(paths.ledger_path, ledger)
 
         config = pilot_config(tmp_path)
@@ -451,7 +451,7 @@ class TestPilotGate:
         monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
         paths = lifecycle.lifecycle_paths(external, RUN_TAG)
         ledger = pilot_ready_ledger()
-        ledger["resources"][0]["region"] = "us-ord"
+        ledger["resources"][0]["region"] = "ca-central"
         lifecycle.write_private_json(paths.ledger_path, ledger)
         config = pilot_config(tmp_path)
         approved = json.loads(config.read_text(encoding="utf-8"))
@@ -513,7 +513,7 @@ class TestPilotGate:
                 return {
                     "id": "42",
                     "type": "g3-gpu-rtxpro6000-blackwell-1",
-                    "region": "us-ord",
+                    "region": "ca-central",
                     "tags": ["blackwell-lab", f"run:{RUN_TAG}"],
                 }
             raise AssertionError(f"unexpected metadata request: {method} {url}")

@@ -393,7 +393,7 @@ class TestCli:
             "run_tag": RUN_TAG,
             "w1_run_label": "canary-a",
             "canonical_commit": COMMIT,
-            "region": "us-ord",
+            "region": "ca-central",
             "config_sha256": "0" * 64,
             "result_sha256": "0" * 64,
             "control_record_sha256": "0" * 64,
@@ -426,7 +426,7 @@ def _canary_run_spec(**overrides) -> RealRunSpec:
         concurrency=1,
         comparison_mode="provider-native",
         instance_type="g3-gpu-rtxpro6000-blackwell-1",
-        region="us-ord",
+        region="ca-central",
         list_price_usd_per_hour=3.0,
         price_source_date="2026-09-18",
         model={

@@ -1,13 +1,15 @@
 """Same-session P1 development control for P2C development (decision D-0027).
 
-Decision D-0030 fixes the region at us-ord and leaves the same-session
+Decision D-0032 fixes the region at ca-central and leaves the same-session
 requirement in force. P2C development may run only when a fully completed,
 non-stopped, verified P1 development control from the same run tag,
 canonical commit, configuration digest, lifecycle ledger, resource
-identity, and region is present. A us-sea or us-iad-2 ledger is historical
-and refused. An old us-ord control does not authenticate a new session
-unless those fields all match. The control binds that P1 receipt, the
-terminal qualification_completed event, and the frozen precision.
+identity, and region is present. A us-ord, us-sea, or us-iad-2 ledger is
+historical and refused. An earlier ca-central control does not authenticate
+a new session unless those fields all match. Run w1-dev-20261008a is a
+historical aborted_verified_empty_apply and cannot authenticate a future
+session. The control binds that P1 receipt, the terminal
+qualification_completed event, and the frozen precision.
 Authentication is read-only and fails closed before a model client exists.
 Records store digests only: no private paths, provider ids, addresses,
 prompts, completions, reasoning, or task bodies.
@@ -125,7 +127,7 @@ _MESSAGES = {
     "own_label": "{t} cannot bind its own run label as the {c} control",
     "malformed": "{t} development control record is malformed",
     "private": "{t} development control record contains a private path",
-    "control_session": "{c} development session is not a reconciled us-ord resource session",
+    "control_session": "{c} development session is not a reconciled ca-central resource session",
     "event": "{c} development terminal event does not match the selected control",
     "unsafe": "{t} development control label is unsafe",
 }
@@ -274,14 +276,21 @@ def require_qualification_run_tag(run_tag: object) -> str:
     including absolute paths, separators, traversal, and out-of-range lengths,
     raise before any path is constructed.
     """
-    from blackwell_lab.cloud.lifecycle import LifecycleError, validate_run_tag
+    from blackwell_lab.cloud.lifecycle import (
+        HISTORICAL_ABORTED_RUN_TAGS,
+        LifecycleError,
+        validate_run_tag,
+    )
 
     try:
         if not isinstance(run_tag, str):
             raise LifecycleError("run_tag")
-        return validate_run_tag(run_tag)
+        checked = validate_run_tag(run_tag)
     except LifecycleError:
         _fail(_RUN_TAG_UNSAFE)
+    if checked in HISTORICAL_ABORTED_RUN_TAGS:
+        _fail("historical aborted_verified_empty_apply cannot authenticate or authorize a session")
+    return checked
 
 
 def ledger_path_for(results_dir: Path, run_tag: str) -> Path:

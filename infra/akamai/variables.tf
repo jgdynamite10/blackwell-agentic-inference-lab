@@ -20,27 +20,37 @@ variable "run_tag" {
 
 variable "region" {
   description = <<-EOT
-    Fixed Akamai qualification infrastructure region (decision D-0030).
-    Locked to us-ord. There is no fallback list, automatic retry, or dynamic
-    region selection. A saved Terraform plan verifies this intended
-    configuration only; it does not prove live capacity. Advertised
-    availability is advisory and is not capacity proof. Availability and
-    capacity observations are time-bound and do not guarantee future
-    capacity. The owner confirmed current capacity in us-ord. Decision
-    D-0029's us-sea lock is historical: the authenticated create for run
-    p1-dev-20261007b returned HTTP 403 and was recovered empty. Run
-    p1-dev-20261007a was an HTTP 401 authentication failure later
-    provider-verified empty, not a capacity failure. Decision
-    D-0027's us-iad-2 lock is historical: creation of run
-    p1-dev-20261006b returned HTTP 403 and was recovered empty. Historical
-    D-0014 evidence stays in the decision log.
+    Fixed Akamai qualification infrastructure region (decision D-0032).
+    Locked to ca-central. There is no fallback list, automatic retry,
+    dynamic region selection, or cross-region substitution. A saved
+    Terraform plan verifies this intended configuration only; it does not
+    prove live capacity. Advertised availability is advisory and is not
+    capacity proof. Availability and capacity observations are time-bound
+    and do not guarantee future capacity. The owner confirmed current
+    capacity in ca-central by authorizing this region change on 2026-10-08.
+    ca-central was previously account-visible at $3.00/hour, subject to
+    fresh authenticated verification before provisioning. That figure is
+    historical advisory pricing. Decision D-0030's us-ord lock is
+    historical: run w1-dev-20261008a passed authenticated
+    advertised-availability preflight, then instance creation returned
+    HTTP 403 because the plan was not currently available. The apply was
+    provider-verified empty, recovered as aborted_verified_empty_apply,
+    and incurred $0. That run tag, its Terraform plan, and its canary
+    config are stale by identity and must not be reused. The fresh run
+    tag after merge is w1-dev-20261008b. Decision D-0029's us-sea lock is
+    historical: the authenticated create for run p1-dev-20261007b returned
+    HTTP 403 and was recovered empty. Run p1-dev-20261007a was an HTTP 401
+    authentication failure later provider-verified empty, not a capacity
+    failure. Decision D-0027's us-iad-2 lock is historical: creation of
+    run p1-dev-20261006b returned HTTP 403 and was recovered empty.
+    Historical D-0014 evidence stays in the decision log.
   EOT
   type        = string
-  default     = "us-ord"
+  default     = "ca-central"
 
   validation {
-    condition     = var.region == "us-ord"
-    error_message = "region must equal us-ord for the authorized qualification infrastructure."
+    condition     = var.region == "ca-central"
+    error_message = "region must equal ca-central for the authorized qualification infrastructure."
   }
 }
 

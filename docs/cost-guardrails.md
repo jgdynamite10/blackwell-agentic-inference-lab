@@ -62,18 +62,29 @@ Phase 3–6 ranges remain **planning estimates**, not authorization. Decision
 D-0014 authorizes only the $25 / six-hour compatibility/headroom pilot.
 D-0017 keeps that six-hour envelope for the minimum valuable lab and
 does not authorize a multi-day session. Live MVL apply is still a
-separate owner phrase. Decision D-0030 fixes the active Akamai
-qualification region at `us-ord`. Planning uses the $3.00/hour rate, an
-$18 six-hour exposure, and the $25 ceiling. The owner confirmed current
-capacity in `us-ord`. Advertised availability is advisory and is not
-capacity proof. Availability and capacity observations are time-bound
-and do not guarantee future capacity. D-0029's `us-sea` lock is
-historical: the authenticated create for run `p1-dev-20261007b` returned
-HTTP 403 and was recovered with zero resources. Run `p1-dev-20261007a`
-was an HTTP 401 Invalid Token authentication failure later
-provider-verified empty, not a capacity failure. D-0027's `us-iad-2`
-lock is historical: creation of run `p1-dev-20261006b` returned HTTP 403
-and was recovered with zero resources. Akamai figures use the
+separate owner phrase. Decision D-0032 fixes the active Akamai
+qualification region at `ca-central`, superseding only the D-0030 region
+lock. Planning uses the $3.00/hour rate, an $18 six-hour exposure, and
+the $25 ceiling. That hourly rate is pending fresh authenticated
+re-verification before provisioning. The owner confirmed current
+capacity in `ca-central` by authorizing this region change on 2026-10-08.
+`ca-central` was previously account-visible at $3.00/hour; that figure is
+historical advisory pricing. Advertised availability is advisory and is
+not capacity proof. Availability and capacity observations are time-bound
+and do not guarantee future capacity. There is no fallback list, automatic
+retry, dynamic region selection, or cross-region substitution. Run
+`w1-dev-20261008a` is a historical `aborted_verified_empty_apply` (provider-verified
+empty, $0) and must not be reused; the fresh run tag after merge is
+`w1-dev-20261008b`. D-0030's `us-ord` lock is historical: that run passed
+authenticated advertised-availability preflight, then instance creation
+returned HTTP 403 because the plan was not currently available. D-0029's
+`us-sea` lock is historical: the authenticated create for run
+`p1-dev-20261007b` returned HTTP 403 and was recovered with zero
+resources. Run `p1-dev-20261007a` was an HTTP 401 Invalid Token
+authentication failure later provider-verified empty, not a capacity
+failure. D-0027's `us-iad-2` lock is historical: creation of run
+`p1-dev-20261006b` returned HTTP 403 and was recovered with zero
+resources. Akamai figures use the
 owner-observed Seattle **$3.00/h** catalog base price and distinguish it
 from the public **$2.50/h** advertised starting price. The Phase 3–4 ranges
 reflect the D-0010 sample plan and the D-0012 12-cell matrix; measured-cell
