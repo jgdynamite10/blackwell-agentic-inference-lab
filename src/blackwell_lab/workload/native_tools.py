@@ -103,6 +103,10 @@ TOOL_DESCRIPTIONS_BY_VERSION: dict[str, dict[str, str]] = {
     # argument in the recommend_remediation JSON schema (TOOL_SPECS_V250);
     # the evidence-grounding controller adds no description prose.
     "2.5.0": TOOL_DESCRIPTIONS_V240,
+    # 2.6.0 / 2.6.1 (decision D-0031) reuse the 2.4.0 tool text verbatim as
+    # well; the workflow controller speaks only through tool-result payloads.
+    "2.6.0": TOOL_DESCRIPTIONS_V240,
+    "2.6.1": TOOL_DESCRIPTIONS_V240,
 }
 
 #: Default catalog contract (workload 2.3.0). Callers that execute a

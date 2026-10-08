@@ -24,6 +24,19 @@ how that is enforced **by design**, not by discipline alone.
    account data; documentation of the result format; empty result-directory
    placeholders; redaction/sanitization scripts operating on sanitized input;
    methodology; documentation; code.
+4. **Analysis of genuine qualification results is private too.** The
+   read-only `blackwell-cloud analyze-qualification` command (decision
+   D-0031) reads one qualification cell under `LAB_RESULTS_DIR`, never
+   modifies it, writes only to the private `qualification-analysis`
+   family, and prints no raw prompt, model output, tool payload, search
+   query, rationale, receipt hash, or private path. Even its sanitized
+   output stays out of Git, GitHub, CI logs, and pull requests until the
+   publication process in
+   [publication-governance.md](publication-governance.md) approves a
+   summary. Repository documentation may state only the sanitized
+   category of a finding (for example "private development evidence
+   identified workflow-enforcement deficiencies requiring a new
+   candidate"), never a genuine score or task-level result.
 
 ## Enforcement mechanisms
 

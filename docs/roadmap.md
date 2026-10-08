@@ -13,7 +13,12 @@ implementation** of the bounded agent-quality qualification
 (`blackwell-cloud qualify-agent`); **live execution still requires
 separate digest-bearing approval phrases**. Decision **D-0020 authorizes
 implementation** of the provider-neutral engine/precision contract
-(`blackwell-cloud engine-contract`) only. **Phase 4 live execution and
+(`blackwell-cloud engine-contract`) only. Decision **D-0031 authorizes
+implementation** of the workflow-controlled candidate pair W1/W2, the
+ten-task diagnostic canary (`blackwell-cloud canary-agent`), the read-only
+`analyze-qualification` command, and the isolated qualification
+environment; live W1/W2 and canary execution still require their own
+digest-bearing approval phrases. **Phase 4 live execution and
 later phases remain unauthorized.**
 
 ## Phase 1 — Repository foundation and feasibility *(complete)*
@@ -115,7 +120,18 @@ p50 and p95 are primary; p99 is exploratory. Live apply and
 D-0014 six-hour / $25 envelope stays separately named. Decision **D-0019**
 authorizes a bounded agent-quality qualification after MVL-F's quality
 outcome disqualified it as the comparative reference; live
-`qualify-agent` still requires its own digest-bearing phrase.
+`qualify-agent` still requires its own digest-bearing phrase. Decision
+**D-0031** corrects the agent rather than the examination: private
+development evidence identified workflow-enforcement deficiencies
+requiring a new candidate, so candidates W1 (workload 2.6.0) and W2
+(workload 2.6.1) run under the generic `workflow-controller-v1` with W1
+as W2's same-session development control. P1 and P2C are not modified.
+The official qualification remains twenty tasks at the 0.40 floor (40
+percent, at least eight of twenty). The ten-task `canary-agent` is a
+diagnostic that stops below four passes and otherwise only permits the
+operator to approve the official qualification separately; it never
+mints a control and authorizes nothing. Live W1, W2, and canary runs
+still require their own digest-bearing phrases.
 Controlled-resource mode, additional engines, and a 12-cell matrix remain
 optional future work. Phase 4 live execution remains unauthorized. Every
 provisioning action follows [AGENTS.md](../AGENTS.md) §1 and

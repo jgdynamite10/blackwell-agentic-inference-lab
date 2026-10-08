@@ -419,8 +419,8 @@
         },
         "controller": {
           "type": "string",
-          "enum": ["evidence-grounding-v1"],
-          "description": "Agent controller bound to the executed workload contract (workload 2.5.0 binds evidence-grounding-v1). Omitted for controller-free workloads; existing 2.3.0/2.4.0/2.4.1 manifests omit this field and remain valid."
+          "enum": ["evidence-grounding-v1", "workflow-controller-v1"],
+          "description": "Agent controller bound to the executed workload contract (workload 2.5.0 binds evidence-grounding-v1; workloads 2.6.0 / 2.6.1 bind workflow-controller-v1, decision D-0031). Omitted for controller-free workloads; existing 2.3.0/2.4.0/2.4.1 manifests omit this field and remain valid."
         },
         "catalog_digest": {
           "type": "string",

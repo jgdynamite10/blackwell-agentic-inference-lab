@@ -1808,3 +1808,153 @@ to reuse an older control. Tested with synthetic fixtures only. No
 provider, credential, inference endpoint, download, private result,
 custody package, publication system, plan, apply, or the secondary
 repository was accessed.
+
+## 2026-10-07 — D-0031: Workflow-controlled candidate pair W1/W2, diagnostic canary, read-only analysis, and isolated qualification environment
+
+**This decision authorizes no inference, no provider access, no Terraform
+plan, apply, or destroy, no model or container download, and no live
+qualification or canary.** The evaluator (3.1.0), accepted answers,
+evidence predicates, thresholds, scenario catalog (`WORKLOAD_VERSION`
+2.3.0), system-prompt bytes, tool-description prose, sampling rules,
+model, engine, precision, container, infrastructure pins, and candidates
+C1, C2, P1, P2, and P2C are unchanged. D-0019 through D-0030 are not
+edited. No live result predates this decision for the new candidates.
+
+**Private evidence.** Private development evidence from the first live
+P1 development qualification identified **workflow-enforcement
+deficiencies requiring a new candidate**. The owner's read-only analysis
+(performed only under `LAB_RESULTS_DIR`, never in Git) showed that the
+failures were concentrated in a single layer: the minimal agent was
+permitted to call the terminal `recommend_remediation` tool before it had
+acquired usable direct log evidence, and nothing in the loop required it
+to correct a zero-match search or an unusable observation before
+finishing. Model reasoning and the tool/evaluator layer were not the
+cause: where the agent finished, its diagnoses, remediations, and runbook
+use were acceptable to the unchanged evaluator. **The genuine score and
+task-level results of that run are private and are not published here**;
+only this sanitized category is recorded.
+
+**Decision.**
+
+1. **Correct the agent, not the examination.** The agent loop gains a
+   generic deterministic workflow state machine,
+   `workflow-controller-v1` (`workload/workflow.py`). It keeps the custom
+   Python agent loop and the vLLM-facing OpenAI-compatible interface;
+   no agent framework is introduced. States are `investigating` →
+   `runbook_retrieved` / `evidence_collected` → `ready_for_terminal` →
+   `terminal_accepted` or `budget_exhausted`. The controller tracks
+   health, metric, log, change, and runbook observations; classifies
+   zero-match searches and `found: false` runbooks as unusable and
+   returns generic corrective guidance; requires at least one usable
+   direct log observation and a valid runbook before any terminal
+   attempt; requires the remediation to be one the retrieved runbook
+   returned and the diagnosis to be one it published; rejects premature,
+   malformed, or invalid terminal attempts with a typed rejection
+   payload so the model can correct within the **existing** turn budget;
+   emits a remaining-turn warning at three turns; records every rejected
+   attempt; and declares `workflow_requirements_unmet` when the budget
+   is exhausted. It never reads accepted answers, evidence predicates,
+   or sealed material, never auto-selects a diagnosis or remediation,
+   and preserves exactly one native tool call per turn and the existing
+   retry policy (`RETRIES = 0`). `DEFAULT_MAX_TURNS` is unchanged: the
+   evidence did not show the budget to be defective.
+2. **New versioned candidate pair.** Candidates **W1** (workload 2.6.0)
+   and **W2** (workload 2.6.1) are added. P1 and P2C are not modified in
+   place. Both members share the model and artifact, serving image,
+   `SYSTEM_PROMPT_V241` prompt bytes, generation pins (temperature 0.2,
+   `top_p` 0.95, seed 20260906, `max_tokens` 1024), the public catalog,
+   evaluator 3.1.0, the official 20-task development schedule, and the
+   generic controller. The only difference is the single explicit
+   treatment `evidence-refs` on W2: W2 requires `evidence_refs` on the
+   terminal call and binds the 2.5.0 native tool schema that carries it.
+   The treatment is recorded in the candidate identity (`treatments`
+   key, present only when non-empty), in the pair contract
+   (`W_PAIR_CONTRACT`, `require_w_pair_contract`), and in every W2
+   receipt as a content-free `controlled_experiment` block. Identity
+   digests, computed programmatically by the unchanged
+   `candidate_identity_digest` serialization:
+
+   | Candidate | D-0031 identity digest |
+   | --- | --- |
+   | W1 | `1dfedcabaf0759e8e03ae3ea270ad482f7b7704be6940c78ff95b4870751fe3b` |
+   | W2 | `da9060df7a03a2f3a7a9d8d9d1bcab9a91b18254b365849abb5e25737de208c7` |
+
+   The C1, C2, P1, P2, and P2C serializations and digests equal the
+   D-0030 table byte for byte and are pinned by test.
+3. **The 20-task gate and the 0.40 floor are unchanged.** Official
+   development qualification remains exactly twenty public-catalog tasks
+   on the frozen D-0019 schedule, and the quality floor remains 0.40,
+   meaning **40 percent** (at least eight of twenty), not 0.4 percent.
+   No failed task is removed, no threshold is lowered, no evaluator gate,
+   accepted answer, or evidence predicate is weakened, and no task count
+   is reduced.
+4. **No selected qualification set.** Tasks that happened to succeed in
+   private development evidence must never be reused as a selected
+   qualification set. The official schedule is derived only from
+   `FROZEN_SEED` and the frozen template split; the canary (item 5) is
+   derived only from its own fixed seed. Any `template_ids`,
+   `scenario_ids`, `task_ids`, or `private_scenarios` key is refused.
+5. **Ten-task diagnostic canary.** `blackwell-cloud canary-agent` runs
+   ten tasks, exactly one pre-declared instance per catalog incident
+   template, with fixed seed `20261007` and deterministic order
+   (`CANARY_SEED`, `cloud/canary.py`). The schedule is disjoint from the
+   official 20-task development schedule by instance identity and seed,
+   and the disjointness is enforced before any client exists
+   (`require_canary_disjoint`). It uses the same binary evaluator and
+   the same 0.40 floor (at least four of ten). It is **diagnostic
+   only**: it writes to the separate `canary-runs` artifact family with
+   receipt kind `diagnostic-canary`, never creates a development control,
+   never authorizes P2C, W2, comparative, or cross-cloud execution, and
+   never launches the official qualification. It has its own
+   digest-bearing approval phrase, which a qualification phrase does not
+   satisfy and which satisfies no qualification. Fewer than four passes
+   is a stop. Four or more means the operator **may separately** approve
+   the official 20-task qualification with its own approval phrase; that
+   run still requires at least eight of twenty.
+6. **Same-session control for the new pair.** W2 development requires a
+   completed, verified **W1** development control from the same run tag,
+   lifecycle ledger, resource identity, canonical commit, configuration
+   digest, region, and frozen pins — the D-0027 rule applied to the new
+   pair (`matched-w1-development-control`, `W1_W2_PAIR`). The P1/P2C
+   control record format and messages are byte-identical to before; a
+   P1 control never authenticates W2 and a W1 control never
+   authenticates P2C. A canary receipt is never a control.
+7. **Read-only analysis command.** `blackwell-cloud analyze-qualification`
+   reads one existing qualification result under `LAB_RESULTS_DIR` and
+   reports successful incidents in plain English, failed gates by task,
+   aggregate gate-failure counts, and completion versus correctness, with
+   the explicit statement that 0.40 means 40 percent. It constructs no
+   model client, opens no socket, contacts no provider or endpoint,
+   rejects unsafe paths and malformed run tags before any file access,
+   refuses symlinked cells and files, never modifies the source result,
+   writes (only when asked) under the private `qualification-analysis`
+   family, and prints no raw prompt, model output, tool payload, search
+   query, rationale, receipt hash, or private path.
+8. **Isolated qualification environment.** `scripts/bootstrap_qual_env.sh`
+   creates an idempotent, pinned virtual environment outside the
+   repository (default `~/.local/share/blackwell-lab/qual-env`, refusing
+   any in-repo directory) from `constraints.txt`, including the JSON
+   Schema format dependencies for RFC 3339 `date` and `date-time`, and
+   records exact versions in a marker. `cloud/qual_env.py` verifies the
+   interpreter, pins, format checkers, and marker, and
+   `qualify-agent`/`canary-agent` **fail closed before any inference**
+   when the environment is incomplete. It never modifies system Python
+   and places no credentials, models, or results in the repository.
+
+**Not authorized by this decision.** Live W1, W2, or canary execution on
+any provider; Terraform plan, apply, or destroy; downloads; holdout,
+freeze, cross-cloud comparison, or publication. Each still requires its
+separate owner decision and exact digest-bearing approval phrase, and the
+Phase 4 and later gates are unchanged.
+
+**Rationale.** A qualification that fails because the agent is allowed to
+stop early measures the loop's permissiveness, not the model or the
+provider. Enforcing the investigation workflow generically — without
+reading answers, choosing for the model, or widening the budget — fixes
+the agent while leaving the examination exactly as hard. Keeping P1/P2C
+intact and adding a new pair preserves the historical record; keeping W1
+and W2 identical except for one named treatment keeps the pair a
+controlled experiment. Tested only with synthetic fixtures and the public
+catalog; no provider, credential, inference endpoint, download, plan,
+apply, custody package, publication system, or the secondary repository
+was accessed, and no historical result artifact was modified.

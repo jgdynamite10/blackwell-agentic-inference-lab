@@ -54,6 +54,33 @@ WORKLOAD_CONTROLLERS: dict[str, str | None] = {
     "2.5.0": CONTROLLER_EVIDENCE_GROUNDING_V1,
 }
 
+#: Workflow-controlled contracts (decision D-0031). Kept in a separate,
+#: closed table so the historical binding above stays byte-identical.
+#: Both members bind the same generic controller; 2.6.1 adds the single
+#: ``evidence-refs`` treatment (see :mod:`blackwell_lab.workload.workflow`).
+CONTROLLER_WORKFLOW_V1 = "workflow-controller-v1"
+WORKFLOW_WORKLOAD_CONTROLLERS: dict[str, str] = {
+    "2.6.0": CONTROLLER_WORKFLOW_V1,
+    "2.6.1": CONTROLLER_WORKFLOW_V1,
+}
+WORKFLOW_WORKLOAD_TREATMENTS: dict[str, tuple[str, ...]] = {
+    "2.6.0": (),
+    "2.6.1": ("evidence-refs",),
+}
+
+
+def all_workload_controllers() -> dict[str, str | None]:
+    """Every executed contract -> bound controller (historical plus workflow)."""
+    return {**WORKLOAD_CONTROLLERS, **WORKFLOW_WORKLOAD_CONTROLLERS}
+
+
+def workload_treatments(workload_version: str | None) -> tuple[str, ...]:
+    """Explicit experimental treatments bound to a contract (empty for most)."""
+    from blackwell_lab.workload.native_tools import require_workload_version
+
+    return WORKFLOW_WORKLOAD_TREATMENTS.get(require_workload_version(workload_version), ())
+
+
 #: Field injected into every non-terminal tool result returned to the agent.
 OBSERVATION_ID_FIELD = "observation_id"
 #: Terminal-tool argument carrying the cited observation IDs.
@@ -86,7 +113,7 @@ def controller_for_workload(workload_version: str | None) -> str | None:
     """Controller bound to an executed workload contract (fails closed)."""
     from blackwell_lab.workload.native_tools import require_workload_version
 
-    return WORKLOAD_CONTROLLERS[require_workload_version(workload_version)]
+    return all_workload_controllers()[require_workload_version(workload_version)]
 
 
 def require_controller_binding(workload_version: str | None, controller: str | None) -> str | None:
@@ -325,13 +352,20 @@ class EvidenceGroundingController:
         }
 
 
-def build_controller(
-    workload_version: str | None, context: str
-) -> EvidenceGroundingController | None:
-    """The controller instance for one task, or ``None`` for plain workloads."""
+def build_controller(workload_version: str | None, context: str) -> object | None:
+    """The controller instance for one task, or ``None`` for plain workloads.
+
+    Returns an :class:`EvidenceGroundingController` for workload 2.5.0 and a
+    :class:`blackwell_lab.workload.workflow.WorkflowController` (with the
+    contract's explicit treatments) for workloads 2.6.0 / 2.6.1.
+    """
     controller = controller_for_workload(workload_version)
     if controller is None:
         return None
     if controller == CONTROLLER_EVIDENCE_GROUNDING_V1:
         return EvidenceGroundingController(context=context)
+    if controller == CONTROLLER_WORKFLOW_V1:
+        from blackwell_lab.workload.workflow import WorkflowController
+
+        return WorkflowController(context=context, treatments=workload_treatments(workload_version))
     raise ValueError(f"no implementation registered for controller {controller!r}")

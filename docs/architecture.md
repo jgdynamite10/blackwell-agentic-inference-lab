@@ -244,6 +244,19 @@ existing pilot and `run_real_cell` paths. Decision D-0019 adds
 agent-quality qualification; it makes no infrastructure changes.
 Decision D-0020 adds `blackwell-cloud engine-contract` as an offline
 readiness check and a profile registry; it adds no launch command.
+Decision D-0031 adds the generic deterministic workflow state machine
+`workflow-controller-v1` (`src/blackwell_lab/workload/workflow.py`) that
+the agent loop consults on every turn for workloads 2.6.0 / 2.6.1
+(candidates W1/W2): it tracks observations, rejects premature or invalid
+terminal attempts with typed guidance within the existing turn budget,
+and never reads answers, predicates, or sealed material. D-0031 also
+adds `blackwell-cloud canary-agent` (ten-task diagnostic on the
+`canary-runs` family, own approval phrase, no control minting),
+`blackwell-cloud analyze-qualification` (read-only, offline, sanitized
+analysis of one private qualification result under `LAB_RESULTS_DIR`),
+and the pinned qualification environment gate (`cloud/qual_env.py`,
+`scripts/bootstrap_qual_env.sh`) that `qualify-agent` and `canary-agent`
+check before any inference.
 Every billable or destructive action still requires its separate exact
 local owner approval phrase and refuses to execute in remote/hosted-agent or
 CI environments. An owner-authorized Cursor Agent running on the owner's
@@ -256,7 +269,7 @@ is **no frontend application** — the entire workflow is CLI-first.
 ```mermaid
 flowchart TB
     subgraph operator["Owner's authenticated local environment (owner or local Cursor Agent)"]
-        cli["blackwell-cloud CLI<br/>readiness / engine-contract / plan / apply (gated) /<br/>pilot (gated) / mvl-baseline (gated) /<br/>qualify-agent (gated) / verify-results /<br/>teardown-plan / destroy (gated) / orphan-report"]
+        cli["blackwell-cloud CLI<br/>readiness / engine-contract / plan / apply (gated) /<br/>pilot (gated) / mvl-baseline (gated) /<br/>qualify-agent (gated) / canary-agent (gated) /<br/>analyze-qualification (read-only) / verify-results /<br/>teardown-plan / destroy (gated) / orphan-report"]
         tf["Terraform (pinned CLI + linode provider 4.1.0)<br/>state + tfvars OUTSIDE Git"]
         preflight["Authenticated read-only preflight<br/>plan entitlement, regions, price<br/>(sanitized output; local only)"]
     end

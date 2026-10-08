@@ -1127,6 +1127,7 @@ def _sealed_validation_report(
     config_sha256: str,
     sealed: object,
     matched_control: dict | None = None,
+    qual_environment: dict | None = None,
 ) -> dict:
     """Content-free ``--validate-only`` report. No paths, ids, or payload content."""
     from blackwell_lab.cloud import qualification
@@ -1152,6 +1153,12 @@ def _sealed_validation_report(
             if candidate_id == qualification.CANDIDATE_P2C
             else {}
         ),
+        **(
+            {"controlled_experiment": qualification.w_pair_experiment_record(candidate_id)}
+            if candidate_id in qualification.WORKFLOW_CANDIDATES
+            else {}
+        ),
+        **({"qualification_environment": qual_environment} if qual_environment is not None else {}),
         **({"matched_control": matched_control} if matched_control is not None else {}),
         **(
             {
@@ -1173,7 +1180,14 @@ def _sealed_validation_report(
 
 
 def cmd_qualify_agent(args: argparse.Namespace) -> int:
-    from blackwell_lab.cloud import lifecycle, provenance, qualification, realbench, telemetry
+    from blackwell_lab.cloud import (
+        lifecycle,
+        provenance,
+        qual_env,
+        qualification,
+        realbench,
+        telemetry,
+    )
     from blackwell_lab.cloud.sealed_binding import (
         require_manifest_provenance,
         require_sealed_stage_evidence,
@@ -1194,13 +1208,17 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         run_label = qualification.require_safe_run_label(args.run_label)
         candidate_id = args.candidate
         stage = args.stage
-        if candidate_id not in qualification.AUTHORIZED_CANDIDATES:
+        if candidate_id not in qualification.ALL_AUTHORIZED_CANDIDATES:
             raise ConfigError(qualification.UNKNOWN_CANDIDATE_MESSAGE)
         if stage not in qualification.AUTHORIZED_STAGES:
             raise ConfigError("qualification stage must be development, holdout, or freeze")
-        # P2C (D-0026) is a catalog cell at every stage: a custody directory
-        # is refused before the config is read.
+        # P2C (D-0026) and W1/W2 (D-0031) are catalog cells at every stage: a
+        # custody directory is refused before the config is read.
         qualification.require_p2c_runtime(candidate_id, custody_dir=custody_dir)
+        qualification.require_w_runtime(candidate_id, custody_dir=custody_dir)
+        # The isolated qualification environment (D-0031) is verified before
+        # any config, ledger, provenance, or client work. Read-only.
+        qual_environment = qual_env.require_qualification_environment(validate_only=validate_only)
         qualification.require_frozen_split()
         qualification.refuse_mvl_identities(
             run_tag=args.run_tag,
@@ -1246,11 +1264,15 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             qualification.candidate_workload_version(candidate_id),
             qualification.candidate_controller(candidate_id),
         )
-        # Same-session P1 control (D-0027). Read-only, before any client,
-        # endpoint contact, provider mutation, or result write. Holdout and
-        # freeze do not carry this binding.
+        # Same-session control (D-0027 for P1->P2C, D-0031 for W1->W2).
+        # Read-only, before any client, endpoint contact, provider mutation,
+        # or result write. Holdout and freeze do not carry this binding.
+        from blackwell_lab.cloud.matched_control import pair_for_control, pair_for_treatment
+
+        treatment_pair = pair_for_treatment(candidate_id)
+        control_pair = pair_for_control(candidate_id)
         matched_control = None
-        if candidate_id == qualification.CANDIDATE_P2C and stage == qualification.STAGE_DEVELOPMENT:
+        if treatment_pair is not None and stage == qualification.STAGE_DEVELOPMENT:
             from blackwell_lab.cloud.matched_control import (
                 authenticate_matched_development_control,
             )
@@ -1260,15 +1282,18 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 results_dir=_resolve_real_results_dir(),
                 run_tag=args.run_tag,
                 p2c_run_label=run_label,
+                pair=treatment_pair,
             )
         if (
             not validate_only
-            and candidate_id == qualification.CANDIDATE_P1
+            and control_pair is not None
             and stage == qualification.STAGE_DEVELOPMENT
         ):
             from blackwell_lab.cloud.matched_control import validate_p1_development_session
 
-            validate_p1_development_session(_resolve_real_results_dir(), run_tag=args.run_tag)
+            validate_p1_development_session(
+                _resolve_real_results_dir(), run_tag=args.run_tag, pair=control_pair
+            )
     except (ConfigError, qualification.QualificationError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 1
@@ -1282,6 +1307,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                     config_sha256=config_sha256,
                     sealed=sealed,
                     matched_control=matched_control,
+                    qual_environment=qual_environment,
                 ),
                 indent=2,
             )
@@ -1317,19 +1343,19 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
     )
     endpoint = config["endpoint"]
     snapshot = None
-    if stage == qualification.STAGE_DEVELOPMENT and candidate_id in {
-        qualification.CANDIDATE_P1,
-        qualification.CANDIDATE_P2C,
-    }:
+    session_pair = treatment_pair or control_pair
+    if stage == qualification.STAGE_DEVELOPMENT and session_pair is not None:
         from blackwell_lab.cloud.matched_control import (
             capture_development_session,
             require_snapshot_matches_control,
         )
 
         try:
-            snapshot = capture_development_session(results_dir, run_tag=args.run_tag)
-            if candidate_id == qualification.CANDIDATE_P2C:
-                require_snapshot_matches_control(snapshot, matched_control)
+            snapshot = capture_development_session(
+                results_dir, run_tag=args.run_tag, pair=session_pair
+            )
+            if treatment_pair is not None:
+                require_snapshot_matches_control(snapshot, matched_control, pair=treatment_pair)
         except qualification.QualificationError as exc:
             print(f"BLOCKED: {exc}", file=sys.stderr)
             return 1
@@ -1409,6 +1435,13 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             sealed_set=run_spec.sealed_set,
             sealed_tasks=sealed,
         )
+        qualification.require_w_catalog_execution(
+            candidate_id,
+            stage=stage,
+            template_ids=run_spec.template_ids,
+            sealed_set=run_spec.sealed_set,
+            sealed_tasks=sealed,
+        )
         client = OpenAICompatibleClient(
             endpoint["base_url"],
             endpoint["model"],
@@ -1467,7 +1500,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         if snapshot is not None:
             from blackwell_lab.cloud.matched_control import revalidate_development_session
 
-            revalidate_development_session(results_dir, snapshot)
+            revalidate_development_session(results_dir, snapshot, pair=session_pair)
         receipt = qualification.sanitized_receipt(
             run_label=cell_label,
             candidate_id=candidate_id,
@@ -1503,7 +1536,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             },
         )
         if (
-            candidate_id == qualification.CANDIDATE_P1
+            control_pair is not None
             and stage == qualification.STAGE_DEVELOPMENT
             and not gates["stopped"]
         ):
@@ -1524,6 +1557,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 receipt_sha256=receipt_sha256,
                 session_path=paths.session_path,
                 snapshot=snapshot,
+                pair=control_pair,
             )
     except Exception as exc:
         message = (
@@ -1535,6 +1569,318 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
 
     print(json.dumps(receipt, indent=2))
     return 1 if gates["stopped"] else 0
+
+
+# -- ten-task diagnostic canary (D-0031) ---------------------------------------
+
+
+def _canary_stop(message: str, *, results_dir: Path | None, run_label: str) -> int:
+    from blackwell_lab.cloud.artifacts import write_private_json
+    from blackwell_lab.cloud.canary import CANARY_ARTIFACT_FAMILY, CANARY_WORKFLOW
+    from blackwell_lab.cloud.qualification import failure_record
+
+    if results_dir is not None:
+        record = failure_record(message)
+        record["workflow"] = CANARY_WORKFLOW
+        record["artifact_family"] = CANARY_ARTIFACT_FAMILY
+        write_private_json(
+            results_dir / CANARY_ARTIFACT_FAMILY / f"{run_label}-failure.json",
+            record,
+        )
+    print(f"BLOCKED: {message}", file=sys.stderr)
+    return 1
+
+
+def cmd_canary_agent(args: argparse.Namespace) -> int:
+    """Ten-task diagnostic canary. Diagnostic only; authorizes nothing."""
+    from blackwell_lab.cloud import (
+        canary,
+        lifecycle,
+        provenance,
+        qual_env,
+        qualification,
+        realbench,
+        telemetry,
+    )
+    from blackwell_lab.workload.evidence import require_controller_binding
+    from blackwell_lab.workload.model_client import GenerationSettings
+    from blackwell_lab.workload.openai_client import OpenAICompatibleClient
+
+    validate_only = bool(getattr(args, "validate_only", False))
+    if not validate_only:
+        lifecycle.refuse_hosted_execution()
+    try:
+        from blackwell_lab.cloud.matched_control import require_qualification_run_tag
+
+        require_qualification_run_tag(args.run_tag)
+        run_label = qualification.require_safe_run_label(args.run_label)
+        candidate_id = args.candidate
+        canary.require_canary_candidate(candidate_id)
+        qual_environment = qual_env.require_qualification_environment(validate_only=validate_only)
+        spec = canary.require_canary_contract()
+        qualification.require_frozen_split()
+        canary.refuse_identities(
+            run_tag=args.run_tag,
+            run_label=run_label,
+            config={"candidate_id": candidate_id, "workflow": canary.CANARY_WORKFLOW},
+        )
+        config_path = qualification.require_external_config(args.config, _repo_root())
+        config, config_sha256 = canary.load_canary_config(config_path, candidate_id=candidate_id)
+        canary.refuse_identities(run_tag=args.run_tag, run_label=run_label, config=config)
+        if not validate_only:
+            canary.require_approval(
+                args.approve,
+                run_tag=args.run_tag,
+                run_label=run_label,
+                candidate_id=candidate_id,
+                config_sha256=config_sha256,
+            )
+            qualification.require_clean_canonical_commit(
+                config, git_head=_git_head(), tree_clean=_tree_clean()
+            )
+        require_controller_binding(
+            qualification.candidate_workload_version(candidate_id),
+            qualification.candidate_controller(candidate_id),
+        )
+        if candidate_id in qualification.WORKFLOW_CANDIDATES:
+            qualification.require_w_pair_contract()
+    except (ConfigError, qualification.QualificationError) as exc:
+        print(f"BLOCKED: {exc}", file=sys.stderr)
+        return 1
+
+    cell_label = canary.output_label(run_label, candidate_id)
+    if validate_only:
+        print(
+            json.dumps(
+                {
+                    "workflow": canary.CANARY_WORKFLOW,
+                    "mode": "validate-only",
+                    "executed": False,
+                    "approval_checked": False,
+                    "model_client_constructed": False,
+                    "endpoint_contacted": False,
+                    "candidate_id": candidate_id,
+                    "stage": canary.CANARY_STAGE,
+                    "config_sha256": config_sha256,
+                    "candidate_identity_sha256": qualification.candidate_identity_digest(
+                        candidate_id
+                    ),
+                    "workload_version": qualification.candidate_workload_version(candidate_id),
+                    "controller": qualification.candidate_controller(candidate_id),
+                    "schedule": {
+                        "tasks": spec["tasks"],
+                        "seed": spec["seed"],
+                        "templates": len(spec["template_ids"]),
+                        "quality_floor": spec["quality_floor"],
+                        "min_passes": spec["min_passes"],
+                    },
+                    "diagnostic_only": True,
+                    "authorizes_qualification": False,
+                    "creates_development_control": False,
+                    "qualification_environment": qual_environment,
+                    "note": (
+                        "Offline validation only: the canary config, candidate binding, "
+                        "schedule balance, and schedule disjointness were verified. Nothing "
+                        "was executed, no model client was constructed, no endpoint was "
+                        "contacted, and no credentials were used."
+                    ),
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    results_dir = _resolve_real_results_dir()
+    paths = lifecycle.lifecycle_paths(results_dir, args.run_tag)
+    if not paths.ledger_path.is_file():
+        return _canary_stop(
+            "the resource ledger is missing for this run. Run "
+            "'blackwell-cloud init', apply, and 'blackwell-cloud reconcile' "
+            "before any canary execution.",
+            results_dir=results_dir,
+            run_label=run_label,
+        )
+    ledger = lifecycle.load_ledger(paths.ledger_path)
+    blockers = lifecycle.pilot_blockers(ledger, pending=lifecycle.has_pending(paths))
+    if blockers:
+        return _canary_stop(
+            "the canary cannot run until every lifecycle gate passes. " + "; ".join(blockers),
+            results_dir=results_dir,
+            run_label=run_label,
+        )
+    endpoint = config["endpoint"]
+    lifecycle.record_session_event(
+        paths,
+        "canary_started",
+        {
+            "run_label": run_label,
+            "candidate_id": candidate_id,
+            "stage": canary.CANARY_STAGE,
+            "config_sha256": config_sha256,
+            "diagnostic_only": True,
+        },
+    )
+    try:
+        observed = provenance.verify_live_provenance(
+            run_tag=args.run_tag,
+            approved=config,
+            ledger=ledger,
+            artifact_dir=Path(config["model_verification"]["artifact_dir"]),
+            digest_manifest=Path(config["model_verification"]["digest_manifest"]),
+            serving_base_url=endpoint["base_url"],
+        )
+        if observed.model_artifact_hash != qualification.FROZEN_MODEL_ARTIFACT_HASH:
+            raise qualification.QualificationError(
+                "live model digest drifted from the frozen aggregate"
+            )
+        digest = str(observed.container_digest)
+        if digest not in {
+            qualification.FROZEN_CONTAINER_DIGEST,
+            qualification.FROZEN_VLLM_IMAGE_DIGEST,
+        } and not digest.endswith(qualification.FROZEN_VLLM_IMAGE_DIGEST):
+            raise qualification.QualificationError(
+                "live container digest drifted from the frozen image"
+            )
+        host = {**observed.host_facts, **observed.gpu_facts}
+        model = dict(config["model"])
+        model["artifact_hash"] = observed.model_artifact_hash
+        run_spec = realbench.RealRunSpec(
+            profile_name=spec["profile"],
+            concurrency=spec["concurrency"],
+            comparison_mode=qualification.FROZEN_COMPARISON_MODE,
+            instance_type=observed.instance["instance_type"],
+            region=observed.instance["region"],
+            list_price_usd_per_hour=config["cloud"]["list_price_usd_per_hour"],
+            price_source_date=config["cloud"]["price_source_date"],
+            model=model,
+            engine=config["serving"]["engine"],
+            engine_version=observed.engine_version,
+            container_digest=observed.container_digest,
+            container_cuda_runtime_version=observed.container_cuda_runtime_version,
+            repetitions=spec["repetitions"],
+            warmup_passes=spec["warmup_passes"],
+            tasks_per_repetition=spec["tasks"],
+            seed=spec["seed"],
+            run_label=cell_label,
+            generation=GenerationSettings(
+                temperature=qualification.candidate_temperature(candidate_id),
+                top_p=qualification.FROZEN_TOP_P,
+                seed=qualification.FROZEN_SEED,
+                reasoning_mode=qualification.FROZEN_REASONING_MODE,
+                workload_version=qualification.candidate_workload_version(candidate_id),
+            ),
+            template_ids=spec["template_ids"],
+            artifact_family=canary.CANARY_ARTIFACT_FAMILY,
+            workload_version=qualification.candidate_workload_version(candidate_id),
+            controller=qualification.candidate_controller(candidate_id),
+            sealed_set=None,
+        )
+        require_controller_binding(run_spec.workload_version, run_spec.controller)
+        if tuple(run_spec.template_ids or ()) != tuple(spec["template_ids"]):
+            raise qualification.QualificationError("the canary must schedule every incident class")
+        client = OpenAICompatibleClient(
+            endpoint["base_url"],
+            endpoint["model"],
+            api_key_env=endpoint.get("api_key_env"),
+        )
+        records = realbench.run_real_cell(
+            run_spec,
+            client,
+            host=host,
+            sampler_factory=telemetry.GpuSamplerThread,
+            results_dir=results_dir,
+            sealed_tasks=None,
+        )
+        if len(records) != spec["repetitions"]:
+            raise qualification.QualificationError(
+                "the canary must persist exactly one measured repetition"
+            )
+        outcomes = qualification.outcomes_from_records(records)
+        canary.require_complete_canary_evidence(outcomes)
+        for record in records:
+            result = getattr(record, "result", None)
+            manifest = getattr(record, "manifest", None)
+            measured = getattr(record, "measured_observations", None)
+            if result is None or manifest is None:
+                continue
+            validate_benchmark_result(result)
+            validate_run_manifest(manifest)
+            if isinstance(measured, dict):
+                validate_task_observations(measured)
+            validate_result_semantics(
+                manifest,
+                result,
+                measured_observations=measured if isinstance(measured, dict) else None,
+                warmup_observations=getattr(record, "warmup_observations", None),
+            )
+        metrics = qualification.compute_qualification_metrics(
+            outcomes,
+            provenance_ok=True,
+            verification_ok=True,
+            expected_template_ids=spec["template_ids"],
+        )
+        verdict = canary.evaluate_canary(metrics)
+        files = [name for record in records for name in getattr(record, "written_files", ())]
+        receipt = canary.sanitized_receipt(
+            run_label=cell_label,
+            candidate_id=candidate_id,
+            config_sha256=config_sha256,
+            identity_digest=qualification.candidate_identity_digest(candidate_id),
+            verdict=verdict,
+            files=files,
+            qualification_environment=qual_environment,
+        )
+        from blackwell_lab.cloud.artifacts import write_private_json
+
+        write_private_json(
+            results_dir / canary.CANARY_ARTIFACT_FAMILY / f"{cell_label}-receipt.json",
+            receipt,
+        )
+        lifecycle.record_session_event(
+            paths,
+            "canary_completed" if not verdict["stopped"] else "canary_stopped",
+            {
+                "stage": canary.CANARY_STAGE,
+                "candidate_id": candidate_id,
+                "run_label": run_label,
+                "config_sha256": config_sha256,
+                "stopped": bool(verdict["stopped"]),
+                "diagnostic_only": True,
+                "authorizes_qualification": False,
+            },
+        )
+    except Exception as exc:
+        message = (
+            str(exc)
+            if isinstance(exc, (qualification.QualificationError, ConfigError))
+            else f"canary aborted: {type(exc).__name__}"
+        )
+        return _canary_stop(message, results_dir=results_dir, run_label=run_label)
+
+    print(json.dumps(receipt, indent=2))
+    return 1 if verdict["stopped"] else 0
+
+
+# -- read-only qualification analysis (D-0031) ---------------------------------
+
+
+def cmd_analyze_qualification(args: argparse.Namespace) -> int:
+    """Read-only analysis of an existing qualification result. No provider contact."""
+    from blackwell_lab.cloud import analysis
+
+    try:
+        report = analysis.analyze(
+            results_dir=_resolve_real_results_dir(),
+            run_label=args.run_label,
+            candidate_id=args.candidate,
+            stage=args.stage,
+            write_report=bool(getattr(args, "write_report", False)),
+        )
+    except analysis.AnalysisError as exc:
+        print(f"BLOCKED: {exc}", file=sys.stderr)
+        return 1
+    print(analysis.render(report, fmt=getattr(args, "format", "text")))
+    return 0
 
 
 # -- external result verification ----------------------------------------------
@@ -1755,7 +2101,7 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2", "P2C"),
+        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2"),
         help=(
             "C1 (temperature 1.0, workload 2.4.0), "
             "C2 (temperature 0.2, workload 2.4.0), "
@@ -1763,8 +2109,11 @@ def build_parser() -> argparse.ArgumentParser:
             "controller), "
             "P2C (the controlled public-catalog version of P2: same workload "
             "2.5.0 and controller, every stage on the D-0019 catalog schedule "
-            "P1 uses; P1 is its control), or "
-            "P1, the workload 2.4.1 prompt-only variant at temperature 0.2."
+            "P1 uses; P1 is its control), "
+            "P1, the workload 2.4.1 prompt-only variant at temperature 0.2, "
+            "W1 (workload 2.6.0, workflow-controller-v1; the D-0031 control), or "
+            "W2 (workload 2.6.1, workflow-controller-v1 with the evidence-refs "
+            "treatment; W1 is its same-session control)."
         ),
     )
     qualify_parser.add_argument(
@@ -1806,6 +2155,69 @@ def build_parser() -> argparse.ArgumentParser:
             "P2 development/holdout) the selected custody stage. Constructs no "
             "model client, contacts no endpoint, touches no ledger, and uses "
             "no credentials. The approval phrase is not checked in this mode."
+        ),
+    )
+
+    canary_parser = sub.add_parser(
+        "canary-agent",
+        help=(
+            "Ten-task diagnostic canary (decision D-0031): one predeclared task per "
+            "incident class, fixed seed, disjoint from every official schedule, same "
+            "evaluator and 0.40 floor (four of ten). Diagnostic only: it never mints "
+            "a development control and never authorizes qualification, comparative, "
+            "or cross-cloud runs."
+        ),
+    )
+    canary_parser.add_argument("--run-tag", required=True)
+    canary_parser.add_argument("--run-label", required=True)
+    canary_parser.add_argument(
+        "--candidate",
+        required=True,
+        choices=("C1", "C2", "P1", "P2C", "W1", "W2"),
+        help="Public-catalog candidate to canary (P2 is sealed and refused).",
+    )
+    canary_parser.add_argument(
+        "--config",
+        required=True,
+        help=(
+            "Existing absolute path to the canary config JSON (a qualification "
+            "config with workflow canary-agent); must live outside this repository."
+        ),
+    )
+    canary_parser.add_argument(
+        "--approve",
+        help="The exact canary approval phrase naming run, candidate, and config digest.",
+    )
+    canary_parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Validate the config, schedule balance, and disjointness offline. Executes nothing.",
+    )
+
+    analyze_parser = sub.add_parser(
+        "analyze-qualification",
+        help=(
+            "Read-only analysis of one existing qualification result under "
+            "LAB_RESULTS_DIR: successful incidents, failed gates by task, aggregate "
+            "gate-failure counts. No provider, endpoint, client, or stream activity."
+        ),
+    )
+    analyze_parser.add_argument("--run-label", required=True)
+    analyze_parser.add_argument(
+        "--candidate", required=True, choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2")
+    )
+    analyze_parser.add_argument(
+        "--stage", default="development", choices=("development", "holdout", "freeze")
+    )
+    analyze_parser.add_argument(
+        "--format", default="text", choices=("text", "json"), help="Output format."
+    )
+    analyze_parser.add_argument(
+        "--write-report",
+        action="store_true",
+        help=(
+            "Also write the sanitized report under LAB_RESULTS_DIR/qualification-analysis/. "
+            "Source artifacts are never modified."
         ),
     )
 
@@ -1881,6 +2293,8 @@ _HANDLERS = {
     "pilot": cmd_pilot,
     "mvl-baseline": cmd_mvl_baseline,
     "qualify-agent": cmd_qualify_agent,
+    "canary-agent": cmd_canary_agent,
+    "analyze-qualification": cmd_analyze_qualification,
     "full-baseline": cmd_full_baseline,
     "verify-results": cmd_verify_results,
     "teardown-plan": cmd_teardown_plan,

@@ -145,8 +145,18 @@ explicitly revises them in writing.
    superseding only the D-0029 region lock. The same-session P1/P2C
    control requirement remains. There is no fallback list, automatic
    retry, or dynamic region selection. Advertised availability is
-   advisory and is not capacity proof. **Live MVL,
-   qualification, and Phase 4 engine/precision execution still require**
+   advisory and is not capacity proof. Decision **D-0031 authorizes
+   implementation** of the workflow-controlled candidate pair W1/W2
+   (workloads 2.6.0 / 2.6.1, `workflow-controller-v1`; W1 is W2's
+   same-session control), the ten-task diagnostic canary
+   (`blackwell-cloud canary-agent`, diagnostic only, own approval
+   phrase, authorizes nothing), the read-only
+   `blackwell-cloud analyze-qualification` command, and the isolated
+   qualification environment. P1 and P2C are preserved unchanged; the
+   20-task qualification and the 0.40 floor (40 percent) are
+   unchanged; previously successful tasks must never be selected as a
+   qualification set. **Live MVL,
+   qualification, canary, and Phase 4 engine/precision execution still require**
    their separate digest-bearing approval phrases. The D-0014 six-hour /
    $25 pilot envelope remains separately named. **Phase 4 live execution
    and later phases remain unauthorized.** Actual apply, pilot,

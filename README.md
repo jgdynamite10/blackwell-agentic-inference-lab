@@ -25,7 +25,12 @@ Decision **D-0019 authorizes implementation** of the bounded
 agent-quality qualification (`blackwell-cloud qualify-agent`). Decision
 **D-0020 authorizes implementation** of the provider-neutral
 engine/precision contract (`blackwell-cloud engine-contract`) only.
-**Live MVL, qualification, and Phase 4 engine/precision execution still
+Decision **D-0031 authorizes implementation** of the workflow-controlled
+candidate pair W1/W2, the ten-task diagnostic canary
+(`blackwell-cloud canary-agent`), the read-only
+`analyze-qualification` command, and the isolated qualification
+environment (`scripts/bootstrap_qual_env.sh`).
+**Live MVL, qualification, canary, and Phase 4 engine/precision execution still
 require** their separate digest-bearing approval phrases. Phase 4 live
 execution and later phases remain **unauthorized**
 ([docs/roadmap.md](docs/roadmap.md)).

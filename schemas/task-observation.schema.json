@@ -95,6 +95,73 @@
             "accepted_evidence_refs": { "type": ["integer", "null"], "minimum": 1 }
           }
         },
+        "workflow_control": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Sanitized workflow-controller accounting (workloads 2.6.0 / 2.6.1, controller workflow-controller-v1, decision D-0031). Counts and generic state names only: never observation IDs, payloads, prompts, completions, reasoning, queries, or scenario data. Absent for every other workload.",
+          "required": [
+            "controller",
+            "treatments",
+            "final_state",
+            "transitions",
+            "observations",
+            "eligible_observations",
+            "usable_log_observations",
+            "zero_match_searches",
+            "not_found_lookups",
+            "runbooks_found",
+            "terminal_attempts",
+            "rejected_terminal_attempts",
+            "rejection_categories",
+            "accepted_evidence_refs",
+            "remaining_turn_warnings"
+          ],
+          "properties": {
+            "controller": { "type": "string", "enum": ["workflow-controller-v1"] },
+            "treatments": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["evidence-refs"] },
+              "uniqueItems": true
+            },
+            "final_state": {
+              "type": "string",
+              "enum": [
+                "investigating",
+                "runbook_retrieved",
+                "evidence_collected",
+                "ready_for_terminal",
+                "terminal_accepted",
+                "budget_exhausted"
+              ]
+            },
+            "transitions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from", "to"],
+                "properties": {
+                  "from": { "type": "string" },
+                  "to": { "type": "string" }
+                }
+              }
+            },
+            "observations": { "type": "integer", "minimum": 0 },
+            "eligible_observations": { "type": "integer", "minimum": 0 },
+            "usable_log_observations": { "type": "integer", "minimum": 0 },
+            "zero_match_searches": { "type": "integer", "minimum": 0 },
+            "not_found_lookups": { "type": "integer", "minimum": 0 },
+            "runbooks_found": { "type": "integer", "minimum": 0 },
+            "terminal_attempts": { "type": "integer", "minimum": 0 },
+            "rejected_terminal_attempts": { "type": "integer", "minimum": 0 },
+            "rejection_categories": {
+              "type": "object",
+              "additionalProperties": { "type": "integer", "minimum": 1 }
+            },
+            "accepted_evidence_refs": { "type": ["integer", "null"], "minimum": 1 },
+            "remaining_turn_warnings": { "type": "integer", "minimum": 0 }
+          }
+        },
         "task_index": { "type": "integer", "minimum": 0, "description": "0-based submission order within the repetition." },
         "template_id": { "type": "string", "minLength": 1, "description": "Incident template (scenario) id." },
         "instance_id": { "type": "string", "minLength": 1, "description": "Seeded task-instance id (template_id#occurrence)." },
@@ -102,7 +169,7 @@
         "status": { "type": "string", "enum": ["completed", "error", "timeout"] },
         "error_category": {
           "type": ["string", "null"],
-          "description": "Sanitized execution-error category from the documented taxonomy (including direct_evidence_required for workload 2.5.0); null for completed tasks. Never contains raw exception text."
+          "description": "Sanitized execution-error category from the documented taxonomy (including direct_evidence_required for workload 2.5.0 and workflow_requirements_unmet for workloads 2.6.0 / 2.6.1); null for completed tasks. Never contains raw exception text."
         },
         "submitted_at_utc": { "type": "string", "format": "date-time" },
         "submitted_offset_ms": { "type": "number", "minimum": 0, "description": "Driver submission instant, monotonic offset from repetition start." },

@@ -128,6 +128,52 @@ pair isolates the effect of `evidence-grounding-v1`. P2C provides no
 blind-generalization evidence, and its catalog scores are not comparable
 with private sealed-set scores. P2 remains the sealed candidate.
 
+### Workloads 2.6.0 and 2.6.1 — generic workflow controller (decision D-0031)
+
+Private development evidence identified workflow-enforcement deficiencies
+requiring a new candidate: the minimal agent could reach the terminal tool
+without usable direct evidence and nothing required it to correct a
+zero-match search. Workloads **2.6.0** and **2.6.1** execute the
+unchanged `SYSTEM_PROMPT_V241` bytes and the 2.4.0 tool-description prose
+under the generic deterministic state machine **`workflow-controller-v1`**
+(`src/blackwell_lab/workload/workflow.py`):
+
+- States: `investigating` → `runbook_retrieved` / `evidence_collected` →
+  `ready_for_terminal` → `terminal_accepted` or `budget_exhausted`.
+- Zero-match `search_logs` results and `found: false` runbooks are
+  classified unusable and answered with generic corrective guidance; at
+  least one usable direct log observation and a valid runbook are
+  required before any terminal attempt; the remediation must be one the
+  retrieved runbook returned and the diagnosis one it published.
+- Premature, malformed, or invalid terminal attempts are rejected with a
+  typed rejection (`investigation_required`, `log_evidence_required`,
+  `runbook_required`, `remediation_not_in_runbook`,
+  `diagnosis_not_published`, `evidence_refs_required`,
+  `malformed_terminal`) and the model may correct within the **unchanged**
+  turn budget; a remaining-turn warning is issued at three turns; every
+  rejected attempt is recorded; budget exhaustion is the terminal failure
+  `workflow_requirements_unmet`.
+- The controller never reads accepted answers, evidence predicates, or
+  sealed material, never auto-selects a diagnosis or remediation, and
+  preserves exactly one native tool call per turn and the retry policy.
+  Observations gain a counts-only `workflow_control` summary.
+- 2.6.0 binds no treatment; 2.6.1 binds the single explicit treatment
+  `evidence-refs` (the 2.5.0 native tool schema with `evidence_refs`
+  required on the terminal call). `WORKLOAD_CONTROLLERS` and
+  `WORKLOAD_TREATMENTS` are closed tables.
+
+Candidates **W1** (2.6.0) and **W2** (2.6.1) are the authorized
+`qualify-agent` bindings: identical model, artifact, serving image, prompt
+bytes, generation pins, catalog, evaluator 3.1.0, 20-task development
+schedule, and controller; W1 is the control and W2 differs only by the
+`evidence-refs` treatment. P1 and P2C are not modified; their
+serializations and digests are unchanged. The 20-task gate and the 0.40
+floor (40 percent, at least eight of twenty) are unchanged, and no
+previously successful task may be selected as a qualification set. A
+separate ten-task **diagnostic canary** (`blackwell-cloud canary-agent`,
+fixed seed, one instance per template, disjoint from the official
+schedule) is diagnostic only and authorizes nothing.
+
 Each turn must produce exactly one native OpenAI-compatible function call.
 The six `TOOL_SPECS` contracts are projected onto deterministic OpenAI
 function definitions (`tools` on every chat-completions request;

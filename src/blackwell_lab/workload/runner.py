@@ -422,6 +422,7 @@ def _observation(outcome: TaskOutcome) -> dict:
             if execution.evidence_grounding
             else {}
         ),
+        **({"workflow_control": execution.workflow_control} if execution.workflow_control else {}),
         "evaluation": {
             "evaluator_version": outcome.evaluation.evaluator_version,
             "success": outcome.evaluation.success,

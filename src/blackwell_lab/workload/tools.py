@@ -74,6 +74,12 @@ TOOL_SPECS_BY_VERSION: dict[str, dict[str, dict[str, dict[str, type | tuple[type
     "2.4.0": TOOL_SPECS,
     "2.4.1": TOOL_SPECS,
     "2.5.0": TOOL_SPECS_V250,
+    # Workflow-controlled pair (decision D-0031): 2.6.0 (W1, control) keeps
+    # the original argument contract; 2.6.1 (W2, treatment) exposes the
+    # ``evidence_refs`` citation argument exactly as 2.5.0 does. The
+    # argument schema is the pair's only model-visible difference.
+    "2.6.0": TOOL_SPECS,
+    "2.6.1": TOOL_SPECS_V250,
 }
 
 
