@@ -171,8 +171,15 @@ serializations and digests are unchanged. The 20-task gate and the 0.40
 floor (40 percent, at least eight of twenty) are unchanged, and no
 previously successful task may be selected as a qualification set. A
 separate ten-task **diagnostic canary** (`blackwell-cloud canary-agent`,
-fixed seed, one instance per template, disjoint from the official
-schedule) is diagnostic only and authorizes nothing.
+measured seed `20261007`) draws every task from the six development
+templates only. Each of those templates appears at least once, and the
+four extra instances are the second occurrences of the first four
+templates in frozen-split order (round-robin, independent of results).
+The four holdout templates stay unseen until the official qualification.
+The schedule is disjoint from every official schedule. The canary is
+diagnostic only and authorizes nothing. Canary findings may support
+development correction. Official qualification findings must not be
+used to tune the candidate.
 
 Each turn must produce exactly one native OpenAI-compatible function call.
 The six `TOOL_SPECS` contracts are projected onto deterministic OpenAI

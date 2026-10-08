@@ -250,8 +250,9 @@ the agent loop consults on every turn for workloads 2.6.0 / 2.6.1
 (candidates W1/W2): it tracks observations, rejects premature or invalid
 terminal attempts with typed guidance within the existing turn budget,
 and never reads answers, predicates, or sealed material. D-0031 also
-adds `blackwell-cloud canary-agent` (ten-task diagnostic on the
-`canary-runs` family, own approval phrase, no control minting),
+adds `blackwell-cloud canary-agent` (ten-task diagnostic on the six
+development templates only, holdout excluded, `canary-runs` family, own
+approval phrase, no control minting),
 `blackwell-cloud analyze-qualification` (read-only, offline, sanitized
 analysis of one private qualification result under `LAB_RESULTS_DIR`),
 and the pinned qualification environment gate (`cloud/qual_env.py`,

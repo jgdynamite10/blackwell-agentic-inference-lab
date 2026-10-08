@@ -4,9 +4,13 @@ The canary is a cheap, predeclared smoke test of agent reliability that runs
 *before* an operator spends a full twenty-task development qualification. It
 is diagnostic only:
 
-* exactly ten tasks, one balanced predeclared instance per incident class
-  (every public catalog template), generated from a fixed canary seed in a
-  deterministic order;
+* exactly ten tasks, drawn only from the six frozen development templates,
+  generated from the fixed measured canary seed in a deterministic order;
+  each development template appears at least once, and the four extra
+  instances are the second occurrences of the first four templates in
+  frozen-split order (round-robin, independent of any result);
+* the four frozen holdout templates are excluded and stay unseen until
+  the official qualification;
 * every canary instance is disjoint from every instance of the official
   development, holdout, and freeze schedules (measured and warmup passes);
 * the same binary evaluator, the same tool contract, and the same 0.40
@@ -32,13 +36,16 @@ from typing import Any
 from blackwell_lab.cloud import qualification
 from blackwell_lab.cloud.qualification import QualificationError
 from blackwell_lab.workload.sampling import generate_task_instances
-from blackwell_lab.workload.scenarios import catalog
 from blackwell_lab.workload.validation import ConfigError
 
 CANARY_WORKFLOW = "canary-agent"
 CANARY_STAGE = "canary"
 CANARY_ARTIFACT_FAMILY = "canary-runs"
 CANARY_TASKS = 10
+#: How the four tasks beyond one-per-development-template are chosen.
+#: ``generate_task_instances`` assigns task ``i`` to template ``i mod 6``
+#: in frozen-split order. The choice reads no results.
+CANARY_ALLOCATION = "round-robin-frozen-split"
 CANARY_WARMUP_PASSES = 0
 CANARY_REPETITIONS = 1
 #: D-0031 measured schedule seed. ``run_real_cell`` executes measured
@@ -87,16 +94,42 @@ NEXT_STEP_MAY_APPROVE = (
 
 
 def canary_template_ids() -> tuple[str, ...]:
-    """Every public catalog template, in catalog order (one per incident class)."""
-    return tuple(catalog())
+    """The six frozen development templates, in frozen-split order.
+
+    Holdout templates are excluded. The canary never draws from them.
+    """
+    return qualification.DEVELOPMENT_TEMPLATE_IDS
+
+
+def canary_template_sequence() -> tuple[str, ...]:
+    """Predeclared template order for the ten canary tasks.
+
+    Round-robin over the frozen development templates: task ``i`` uses
+    template ``i mod 6``. Each of the six appears once, then the first
+    four in frozen-split order appear a second time. The sequence is a
+    function of the frozen split and the task count only.
+    """
+    templates = canary_template_ids()
+    if len(templates) != 6:
+        raise QualificationError("the canary draws from exactly six development templates")
+    return tuple(templates[index % len(templates)] for index in range(CANARY_TASKS))
 
 
 def canary_schedule() -> list:
-    """The ten predeclared, balanced, deterministically ordered instances."""
+    """The ten predeclared instances from the development templates only."""
     templates = canary_template_ids()
-    if len(templates) != CANARY_TASKS:
-        raise QualificationError("the canary needs exactly one task per catalog template")
-    return generate_task_instances(templates, CANARY_TASKS, CANARY_MEASURED_SEED)
+    holdout = set(qualification.HOLDOUT_TEMPLATE_IDS)
+    if set(templates) & holdout:
+        raise QualificationError("the canary must not include a holdout template")
+    if len(templates) != 6 or len(holdout) != 4:
+        raise QualificationError("the canary draws from exactly six development templates")
+    if tuple(templates) != qualification.DEVELOPMENT_TEMPLATE_IDS:
+        raise QualificationError("the canary must use the frozen development templates")
+    schedule = generate_task_instances(templates, CANARY_TASKS, CANARY_MEASURED_SEED)
+    expected = canary_template_sequence()
+    if [item.template_id for item in schedule] != list(expected):
+        raise QualificationError("the canary generator and the documented allocation diverged")
+    return schedule
 
 
 def canary_spec() -> dict[str, Any]:
@@ -134,11 +167,21 @@ def require_canary_balance(schedule: list | None = None) -> None:
     schedule = schedule if schedule is not None else canary_schedule()
     if len(schedule) != CANARY_TASKS:
         raise QualificationError(f"the canary must schedule exactly {CANARY_TASKS} tasks")
-    counts = Counter(instance.template_id for instance in schedule)
-    if set(counts) != set(canary_template_ids()) or any(count != 1 for count in counts.values()):
-        raise QualificationError("the canary must schedule exactly one task per incident class")
-    if [instance.template_id for instance in schedule] != list(canary_template_ids()):
-        raise QualificationError("the canary order must be the deterministic catalog order")
+    observed_ids = [instance.template_id for instance in schedule]
+    holdout = set(qualification.HOLDOUT_TEMPLATE_IDS)
+    if any(template_id in holdout for template_id in observed_ids):
+        raise QualificationError("the canary must not include a holdout template")
+    if set(observed_ids) != set(canary_template_ids()):
+        raise QualificationError("the canary must represent every development template")
+    expected = list(canary_template_sequence())
+    if Counter(observed_ids) != Counter(expected):
+        raise QualificationError(
+            "the canary must allocate the four extra tasks by frozen-split round-robin"
+        )
+    if observed_ids != expected:
+        raise QualificationError(
+            "the canary order must be the deterministic development-template round-robin"
+        )
 
 
 def require_canary_disjoint(schedule: list | None = None) -> None:
@@ -206,7 +249,7 @@ def require_measured_schedule(spec: object) -> list:
     ):
         raise QualificationError("the canary executes exactly ten measured tasks and no warmup")
     if tuple(getattr(spec, "template_ids", None) or ()) != canary_template_ids():
-        raise QualificationError("the canary must schedule every incident class once")
+        raise QualificationError("the canary must schedule only the six development templates")
     measured = measured_repetition_seed(int(spec.seed))
     if measured != CANARY_MEASURED_SEED:
         raise QualificationError("the canary measured seed must be 20261007")
@@ -216,6 +259,7 @@ def require_measured_schedule(spec: object) -> list:
         raise QualificationError(
             "the executed canary schedule does not match the declared schedule"
         )
+    require_canary_balance(executed)
     require_canary_disjoint(executed)
     return executed
 
@@ -364,11 +408,13 @@ def evaluate_canary(metrics: qualification.QualificationMetrics) -> dict[str, An
 def require_complete_canary_evidence(outcomes) -> None:
     if len(outcomes) != CANARY_TASKS:
         raise QualificationError(f"the canary must produce exactly {CANARY_TASKS} measured tasks")
-    observed = Counter(
-        str(qualification._field(outcome, "template_id") or "") for outcome in outcomes
-    )
-    if set(observed) != set(canary_template_ids()) or any(c != 1 for c in observed.values()):
-        raise QualificationError("the canary must observe exactly one task per incident class")
+    observed_ids = [str(qualification._field(outcome, "template_id") or "") for outcome in outcomes]
+    if any(template_id in set(qualification.HOLDOUT_TEMPLATE_IDS) for template_id in observed_ids):
+        raise QualificationError("the canary must not include a holdout template")
+    if Counter(observed_ids) != Counter(canary_template_sequence()):
+        raise QualificationError(
+            "the canary must observe the predeclared development-template allocation"
+        )
 
 
 def sanitized_receipt(
@@ -396,6 +442,9 @@ def sanitized_receipt(
             "tasks": CANARY_TASKS,
             "seed": CANARY_MEASURED_SEED,
             "templates": len(canary_template_ids()),
+            "template_source": "development",
+            "holdout_excluded": True,
+            "allocation": CANARY_ALLOCATION,
             "disjoint_from_official_schedules": True,
         },
         "verdict": verdict,

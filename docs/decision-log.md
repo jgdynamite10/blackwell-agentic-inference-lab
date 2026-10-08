@@ -1895,22 +1895,31 @@ only this sanitized category is recorded.
    derived only from its own fixed seed. Any `template_ids`,
    `scenario_ids`, `task_ids`, or `private_scenarios` key is refused.
 5. **Ten-task diagnostic canary.** `blackwell-cloud canary-agent` runs
-   ten tasks, exactly one pre-declared instance per catalog incident
-   template, with fixed seed `20261007` and deterministic order
-   (`CANARY_SEED`, `cloud/canary.py`). The schedule is disjoint from the
-   official 20-task development schedule by instance identity and seed,
-   and the disjointness is enforced before any client exists
-   (`require_canary_disjoint`). It uses the same binary evaluator and
-   the same 0.40 floor (at least four of ten). It is **diagnostic
-   only**: it writes to the separate `canary-runs` artifact family with
-   receipt kind `diagnostic-canary`, never creates a development control,
-   never authorizes P2C, W2, comparative, or cross-cloud execution, and
-   never launches the official qualification. It has its own
-   digest-bearing approval phrase, which a qualification phrase does not
-   satisfy and which satisfies no qualification. Fewer than four passes
-   is a stop. Four or more means the operator **may separately** approve
-   the official 20-task qualification with its own approval phrase; that
-   run still requires at least eight of twenty.
+   ten tasks drawn only from the six frozen development templates, with
+   measured seed `20261007` and deterministic order
+   (`CANARY_MEASURED_SEED`, `cloud/canary.py`). Each development
+   template appears at least once. The remaining four instances are the
+   second occurrences of the first four templates in frozen-split
+   order, assigned by the existing round-robin in
+   `generate_task_instances` (task `i` uses template `i mod 6`). That
+   allocation reads no results. The four frozen holdout templates are
+   excluded and remain unseen until the official qualification. The
+   schedule is disjoint from every official development, holdout, and
+   freeze instance by identity and seed, and the disjointness is
+   enforced before any client exists (`require_canary_disjoint`). It
+   uses the same binary evaluator and the same 0.40 floor (at least
+   four of ten). It is **diagnostic only**: it writes to the separate
+   `canary-runs` artifact family with receipt kind `diagnostic-canary`,
+   never creates a development control, never authorizes P2C, W2,
+   comparative, or cross-cloud execution, and never launches the
+   official qualification. It has its own digest-bearing approval
+   phrase, which a qualification phrase does not satisfy and which
+   satisfies no qualification. Fewer than four passes is a stop. Four
+   or more means the operator **may separately** approve the official
+   20-task qualification with its own approval phrase; that run still
+   requires at least eight of twenty. Canary findings may support
+   development correction of the agent. Official qualification findings
+   must not be used to tune the candidate.
 6. **Same-session control for the new pair.** W2 development requires a
    completed, verified **W1** development control from the same run tag,
    lifecycle ledger, resource identity, canonical commit, configuration
@@ -1940,6 +1949,18 @@ only this sanitized category is recorded.
    `qualify-agent`/`canary-agent` **fail closed before any inference**
    when the environment is incomplete. It never modifies system Python
    and places no credentials, models, or results in the repository.
+
+**Correction (2026-10-08), holdout protection.** Item 5 as first
+recorded scheduled one instance of every catalog template, which
+included the four frozen holdout templates. That selection is
+withdrawn. The canary uses development templates only. Holdout
+templates remain unseen until the official qualification. Canary
+findings may support development correction. Official qualification
+findings must not be used to tune the candidate. No live canary or
+official qualification result predates this correction; live execution
+remains unauthorized. The ten-task count, evaluator, accepted answers,
+evidence predicates, 0.40 floor, official 20-task D-0019 schedule, and
+the W1/W2 identity digests are unchanged.
 
 **Not authorized by this decision.** Live W1, W2, or canary execution on
 any provider; Terraform plan, apply, or destroy; downloads; holdout,

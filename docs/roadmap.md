@@ -127,10 +127,13 @@ requiring a new candidate, so candidates W1 (workload 2.6.0) and W2
 (workload 2.6.1) run under the generic `workflow-controller-v1` with W1
 as W2's same-session development control. P1 and P2C are not modified.
 The official qualification remains twenty tasks at the 0.40 floor (40
-percent, at least eight of twenty). The ten-task `canary-agent` is a
-diagnostic that stops below four passes and otherwise only permits the
-operator to approve the official qualification separately; it never
-mints a control and authorizes nothing. Live W1, W2, and canary runs
+percent, at least eight of twenty). The ten-task `canary-agent` draws
+only from the six development templates; holdout templates stay unseen
+until the official qualification. It is a diagnostic that stops below
+four passes and otherwise only permits the operator to approve the
+official qualification separately; it never mints a control and
+authorizes nothing. Canary findings may support development correction.
+Official qualification findings must not be used to tune the candidate. Live W1, W2, and canary runs
 still require their own digest-bearing phrases.
 Controlled-resource mode, additional engines, and a 12-cell matrix remain
 optional future work. Phase 4 live execution remains unauthorized. Every

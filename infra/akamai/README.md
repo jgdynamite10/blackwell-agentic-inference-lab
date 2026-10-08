@@ -467,18 +467,24 @@ blackwell-cloud canary-agent \
   --approve "I approve the Akamai diagnostic agent canary for run p3-qual-20260918a (qual-a) using candidate W1 config sha256:<digest-of-those-config-bytes>; the canary is diagnostic only and authorizes no qualification"
 ```
 
-The canary runs ten tasks — one fixed, pre-declared instance per catalog
-incident template, seed `20261007`, deterministic order, disjoint from
-the official 20-task development schedule — through the unchanged
-evaluator at the same 0.40 floor (at least four of ten). It writes only
-to the `canary-runs` family with receipt kind `diagnostic-canary`. It
-never creates a development control, never authorizes P2C, W2,
-comparative, or cross-cloud execution, and never launches the official
-qualification. Fewer than four passes is a **stop**. Four or more means
-the operator **may separately** approve the official twenty-task
-qualification with its own phrase; that run still requires at least
-eight of twenty. A qualification phrase never authorizes a canary and a
-canary phrase never authorizes a qualification.
+The canary runs ten tasks from the six development templates only
+(holdout templates excluded), measured seed `20261007`, deterministic
+round-robin order, disjoint from every official schedule — through the
+unchanged evaluator at the same 0.40 floor (at least four of ten). Each
+development template appears at least once; the four extra instances
+are the second occurrences of the first four templates in frozen-split
+order and do not depend on results. Holdout templates remain unseen
+until the official qualification. Canary findings may support
+development correction. Official qualification findings must not be
+used to tune the candidate. It writes only to the `canary-runs` family
+with receipt kind `diagnostic-canary`. It never creates a development
+control, never authorizes P2C, W2, comparative, or cross-cloud
+execution, and never launches the official qualification. Fewer than
+four passes is a **stop**. Four or more means the operator **may
+separately** approve the official twenty-task qualification with its
+own phrase; that run still requires at least eight of twenty. A
+qualification phrase never authorizes a canary and a canary phrase
+never authorizes a qualification.
 
 #### Read-only analysis of an existing qualification result
 

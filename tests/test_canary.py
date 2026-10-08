@@ -1,16 +1,19 @@
 """Ten-task diagnostic canary (decision D-0031).
 
-Covers balance (one task per incident class), fixed-seed determinism,
-disjointness from every official schedule, the shared 0.40 floor applied as
-four of ten, the diagnostic-only verdict, that a canary can never mint or
-authenticate a development control, its own approval phrase, config
-refusals, the untouched twenty-task gate, and the offline CLI paths.
+Covers the development-only schedule (six templates, ten tasks, holdout
+excluded), fixed-seed determinism, disjointness from every official
+schedule, the shared 0.40 floor applied as four of ten, the diagnostic-only
+verdict, that a canary can never mint or authenticate a development control,
+its own approval phrase, config refusals, the untouched twenty-task gate,
+and the offline CLI paths.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
+from dataclasses import replace
 
 import pytest
 from test_evidence_grounding import (
@@ -40,7 +43,13 @@ from blackwell_lab.cloud.canary import (
     validate_canary_config,
 )
 from blackwell_lab.cloud.cli import main
-from blackwell_lab.cloud.realbench import ALLOWED_ARTIFACT_FAMILIES, RealRunSpec
+from blackwell_lab.cloud.qualification import DEVELOPMENT_TEMPLATE_IDS, HOLDOUT_TEMPLATE_IDS
+from blackwell_lab.cloud.realbench import (
+    ALLOWED_ARTIFACT_FAMILIES,
+    RealRunSpec,
+    build_real_manifest,
+)
+from blackwell_lab.schemas import validate_run_manifest
 from blackwell_lab.workload.evaluator import EVALUATOR_VERSION
 from blackwell_lab.workload.model_client import GenerationSettings
 from blackwell_lab.workload.sampling import generate_task_instances, sample_design_summary
@@ -59,7 +68,7 @@ def _canary_config(candidate="W1"):
 
 
 def _outcomes(passes: int) -> list[dict]:
-    templates = list(canary.canary_template_ids())
+    templates = [instance.template_id for instance in canary.canary_schedule()]
     return [
         {
             "template_id": templates[index],
@@ -85,17 +94,62 @@ class TestSchedule:
         first = canary_schedule()
         second = canary_schedule()
         assert [i.instance_seed for i in first] == [i.instance_seed for i in second]
-        assert [i.template_id for i in first] == list(canary.canary_template_ids())
-        assert len({i.template_id for i in first}) == 10
+        assert [i.template_id for i in first] == list(canary.canary_template_sequence())
+        assert len(first) == CANARY_TASKS == 10
+        assert len({i.template_id for i in first}) == 6
         require_canary_balance(first)
+
+    def test_development_templates_only_with_round_robin_extras(self):
+        schedule = canary_schedule()
+        template_ids = [instance.template_id for instance in schedule]
+        assert len(schedule) == 10
+        assert tuple(canary.canary_template_ids()) == DEVELOPMENT_TEMPLATE_IDS
+        assert set(template_ids) == set(DEVELOPMENT_TEMPLATE_IDS)
+        assert len(set(template_ids)) == 6
+        assert set(template_ids).isdisjoint(HOLDOUT_TEMPLATE_IDS)
+        assert not any(instance.template_id in HOLDOUT_TEMPLATE_IDS for instance in schedule)
+        counts = Counter(template_ids)
+        assert [counts[template_id] for template_id in DEVELOPMENT_TEMPLATE_IDS] == [
+            2,
+            2,
+            2,
+            2,
+            1,
+            1,
+        ]
+        assert template_ids == [
+            DEVELOPMENT_TEMPLATE_IDS[index % 6] for index in range(CANARY_TASKS)
+        ]
+        official = qualification.stage_spec("development")
+        assert official["tasks"] == 20
+        assert official["template_ids"] == DEVELOPMENT_TEMPLATE_IDS
+        assert qualification.stage_spec("holdout")["template_ids"] == HOLDOUT_TEMPLATE_IDS
+
+    def test_no_holdout_template_or_instance(self):
+        schedule = canary_schedule()
+        canary_keys = {(i.template_id, i.instance_seed, i.tracking_id) for i in schedule}
+        assert len(canary_keys) == 10
+        holdout = qualification.stage_spec("holdout")
+        for seed in (
+            qualification.MEASURED_REPETITION_SEED,
+            *(qualification.FROZEN_SEED - index - 1 for index in range(holdout["warmup_passes"])),
+        ):
+            official = generate_task_instances(holdout["template_ids"], holdout["tasks"], seed)
+            official_keys = {(i.template_id, i.instance_seed, i.tracking_id) for i in official}
+            assert not canary_keys & official_keys
+            assert not {i.template_id for i in official} & {i.template_id for i in schedule}
+        bad = list(schedule)
+        bad[0] = replace(bad[0], template_id=HOLDOUT_TEMPLATE_IDS[0])
+        with pytest.raises(QualificationError, match="holdout template"):
+            require_canary_balance(bad)
 
     def test_unbalanced_or_reordered_schedules_are_refused(self):
         schedule = canary_schedule()
         with pytest.raises(QualificationError, match="exactly 10 tasks"):
             require_canary_balance(schedule[:9])
-        with pytest.raises(QualificationError, match="one task per incident class"):
+        with pytest.raises(QualificationError, match="frozen-split round-robin"):
             require_canary_balance([schedule[0], *schedule[:9]])
-        with pytest.raises(QualificationError, match="deterministic catalog order"):
+        with pytest.raises(QualificationError, match="development-template round-robin"):
             require_canary_balance(list(reversed(schedule)))
 
     def test_disjoint_from_every_official_schedule(self):
@@ -261,10 +315,14 @@ class TestCli:
         assert report["schedule"] == {
             "tasks": 10,
             "seed": CANARY_SEED,
-            "templates": 10,
+            "templates": 6,
+            "template_source": "development",
+            "holdout_excluded": True,
+            "allocation": canary.CANARY_ALLOCATION,
             "quality_floor": 0.40,
             "min_passes": 4,
         }
+        assert set(canary.canary_template_ids()).isdisjoint(HOLDOUT_TEMPLATE_IDS)
         assert report["authorizes_qualification"] is False
         assert report["creates_development_control"] is False
 
@@ -487,6 +545,37 @@ class TestRealCanaryValidation:
             files=[],
         )
         assert receipt["schedule"]["seed"] == design["seed"] == CANARY_SEED
+        assert receipt["schedule"]["tasks"] == design["tasks_per_repetition"] == 10
+        assert receipt["schedule"]["templates"] == design["unique_template_count"] == 6
+        assert receipt["schedule"]["template_source"] == "development"
+        assert receipt["schedule"]["holdout_excluded"] is True
+        assert receipt["schedule"]["allocation"] == canary.CANARY_ALLOCATION
+        assert set(item.template_id for item in executed) == set(DEVELOPMENT_TEMPLATE_IDS)
+        assert set(item.template_id for item in executed).isdisjoint(HOLDOUT_TEMPLATE_IDS)
+        profile = realbench._validate_spec(spec)
+        manifest = build_real_manifest(
+            spec=spec,
+            profile=profile,
+            run_id="canary-schedule-check",
+            host={
+                "operating_system": "Ubuntu 24.04 LTS",
+                "cpu_model": "Synthetic Test CPU",
+                "vcpu_count": 16,
+                "system_memory_gib": 176.0,
+                "gpu_model": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+                "gpu_count": 1,
+                "gpu_memory_gb": 96.0,
+                "driver_version": "580.65.06",
+                "driver_max_cuda_version": "13.0",
+            },
+            scenario_count=len(spec.template_ids),
+            repetition_index=1,
+            started_at_utc="2026-10-08T16:00:00+00:00",
+            ended_at_utc="2026-10-08T16:00:01+00:00",
+        )
+        validate_run_manifest(manifest)
+        assert manifest["workload"]["tasks_per_repetition"] == receipt["schedule"]["tasks"] == 10
+        assert manifest["workload"]["scenario_count"] == receipt["schedule"]["templates"] == 6
         assert (external / "canary-runs" / spec.run_label).is_dir()
         assert not (external / "qualification-runs").exists()
         assert not (external / "real-runs").exists()
@@ -549,3 +638,30 @@ class TestRealCanaryValidation:
         assert main(_argv(path)) == 1
         assert constructed == []
         assert "artifact_family" in capsys.readouterr().err
+
+    def test_holdout_templates_are_refused_before_the_client_is_constructed(
+        self, ready, tmp_path, monkeypatch, capsys
+    ):
+        constructed: list[str] = []
+
+        class BoomClient:
+            def __init__(self, *args, **kwargs):
+                constructed.append("client")
+                raise AssertionError("client constructed")
+
+        monkeypatch.setattr(
+            "blackwell_lab.workload.openai_client.OpenAICompatibleClient", BoomClient
+        )
+        monkeypatch.setattr(canary, "canary_template_ids", lambda: HOLDOUT_TEMPLATE_IDS)
+        path = tmp_path / "canary.json"
+        path.write_text(json.dumps(_canary_config("W1")), encoding="utf-8")
+        assert main(_argv(path)) == 1
+        assert constructed == []
+        assert "holdout template" in capsys.readouterr().err
+
+    def test_a_holdout_spec_is_refused_before_any_client_is_used(self):
+        spec = _canary_run_spec(template_ids=HOLDOUT_TEMPLATE_IDS)
+        client = _GuardClient()
+        with pytest.raises(QualificationError, match="six development templates"):
+            canary.require_measured_schedule(spec)
+        assert client.used is False

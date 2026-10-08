@@ -1671,6 +1671,9 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
                         "tasks": spec["tasks"],
                         "seed": spec["seed"],
                         "templates": len(spec["template_ids"]),
+                        "template_source": "development",
+                        "holdout_excluded": True,
+                        "allocation": canary.CANARY_ALLOCATION,
                         "quality_floor": spec["quality_floor"],
                         "min_passes": spec["min_passes"],
                     },
@@ -1779,7 +1782,9 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
         )
         require_controller_binding(run_spec.workload_version, run_spec.controller)
         if tuple(run_spec.template_ids or ()) != tuple(spec["template_ids"]):
-            raise qualification.QualificationError("the canary must schedule every incident class")
+            raise qualification.QualificationError(
+                "the canary must schedule only the six development templates"
+            )
         # Family allowlist and the measured schedule are checked before any
         # model client, stream, or inference. Provenance above verified the
         # already-running endpoint; it does not start a completion.
@@ -2168,11 +2173,12 @@ def build_parser() -> argparse.ArgumentParser:
     canary_parser = sub.add_parser(
         "canary-agent",
         help=(
-            "Ten-task diagnostic canary (decision D-0031): one predeclared task per "
-            "incident class, fixed seed, disjoint from every official schedule, same "
-            "evaluator and 0.40 floor (four of ten). Diagnostic only: it never mints "
-            "a development control and never authorizes qualification, comparative, "
-            "or cross-cloud runs."
+            "Ten-task diagnostic canary (decision D-0031): ten predeclared tasks from "
+            "the six development templates only, holdout excluded, measured seed "
+            "20261007, disjoint from every official schedule, same evaluator and "
+            "0.40 floor (four of ten). Diagnostic only: it never mints a development "
+            "control and never authorizes qualification, comparative, or cross-cloud "
+            "runs."
         ),
     )
     canary_parser.add_argument("--run-tag", required=True)
