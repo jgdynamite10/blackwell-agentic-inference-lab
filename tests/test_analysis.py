@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 from pathlib import Path
 
@@ -223,6 +224,58 @@ class TestAdversarialPaths:
         os.symlink(outside / "qualification-runs" / LABEL, family / LABEL)
         with pytest.raises(AnalysisError, match="symlink"):
             analyze(results_dir=results, run_label=RUN_LABEL, candidate_id="P1")
+
+    def test_symlinked_artifact_family_is_refused_before_any_read(
+        self, results, tmp_path, monkeypatch
+    ):
+        outside = tmp_path / "outside"
+        source = _write_cell(outside)
+        results.mkdir(parents=True)
+        os.symlink(outside / "qualification-runs", results / "qualification-runs")
+        opened: list[str] = []
+        real_read = Path.read_text
+
+        def spy(self, *args, **kwargs):
+            opened.append(self.name)
+            return real_read(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", spy)
+        with pytest.raises(AnalysisError, match=r"symlink|escapes"):
+            analyze(results_dir=results, run_label=RUN_LABEL, candidate_id="P1")
+        assert opened == []
+        assert source.read_bytes()  # source remains; the analyzer did not need it
+
+    def test_nested_symlink_escapes_are_refused_before_any_read(
+        self, results, tmp_path, monkeypatch
+    ):
+        path = _write_cell(results)
+        secret = tmp_path / "secret.observations.json"
+        secret.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+        path.unlink()
+        path.symlink_to(Path(os.path.relpath(secret, path.parent)))
+        opened: list[str] = []
+        real_read = Path.read_text
+
+        def spy(self, *args, **kwargs):
+            opened.append(self.name)
+            return real_read(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", spy)
+        with pytest.raises(AnalysisError, match=r"symlink|escapes"):
+            analyze(results_dir=results, run_label=RUN_LABEL, candidate_id="P1")
+        assert opened == []
+
+        family_target = tmp_path / "family-target"
+        _write_cell(family_target)
+        hop = tmp_path / "hop"
+        hop.symlink_to(family_target / "qualification-runs")
+        family = results / "qualification-runs"
+        shutil.rmtree(family)
+        family.symlink_to(hop)
+        opened.clear()
+        with pytest.raises(AnalysisError, match=r"symlink|escapes"):
+            analyze(results_dir=results, run_label=RUN_LABEL, candidate_id="P1")
+        assert opened == []
 
     def test_symlinked_observations_file_is_refused(self, results, tmp_path):
         outside = tmp_path / "outside"

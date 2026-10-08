@@ -375,16 +375,16 @@ class WorkflowController:
         return observation
 
     def annotate(self, payload: dict[str, Any], observation: Observation) -> dict[str, Any]:
-        """The tool payload returned to the agent: ID, usability, guidance, budget."""
+        """The tool payload returned to the agent: ID, usability, guidance, budget.
+
+        ``usable_evidence`` matches structural eligibility. Runbooks and
+        change records stay in the payload as remediation guidance and are
+        never marked usable: :meth:`_resolve_refs` rejects them as direct
+        evidence.
+        """
         block: dict[str, Any] = {"usable_evidence": observation.eligible}
-        if observation.tool == "retrieve_runbook":
-            # Runbooks are guidance, never direct evidence; the only
-            # correction they need is a found=false key.
-            block["usable_evidence"] = payload.get("found") is True
-            if payload.get("found") is not True:
-                block["guidance"] = RUNBOOK_NOT_FOUND_GUIDANCE
-        elif observation.tool == "check_recent_changes":
-            block["usable_evidence"] = isinstance(payload.get("changes"), list)
+        if observation.tool == "retrieve_runbook" and payload.get("found") is not True:
+            block["guidance"] = RUNBOOK_NOT_FOUND_GUIDANCE
         elif observation.eligibility in UNUSABLE_GUIDANCE:
             block["guidance"] = UNUSABLE_GUIDANCE[observation.eligibility]
         block.update(self._budget_block())
@@ -423,10 +423,15 @@ class WorkflowController:
         failures: list[str] = []
         if not isinstance(arguments, dict):
             return WorkflowVerdict(accepted=False, failure_categories=(REJECT_MALFORMED_TERMINAL,))
+        allowed = {"diagnosis_id", "rationale", "remediation_id"}
+        if self.requires_evidence_refs:
+            allowed.add(EVIDENCE_REFS_ARGUMENT)
         diagnosis = arguments.get("diagnosis_id")
         remediation = arguments.get("remediation_id")
         rationale = arguments.get("rationale")
-        if not all(_is_clean_string(v) for v in (diagnosis, remediation, rationale)):
+        if any(key not in allowed for key in arguments) or not all(
+            _is_clean_string(v) for v in (diagnosis, remediation, rationale)
+        ):
             failures.append(REJECT_MALFORMED_TERMINAL)
         if not self._observations:
             failures.append(REJECT_INVESTIGATION_REQUIRED)

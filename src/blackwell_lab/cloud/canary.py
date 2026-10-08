@@ -41,9 +41,14 @@ CANARY_ARTIFACT_FAMILY = "canary-runs"
 CANARY_TASKS = 10
 CANARY_WARMUP_PASSES = 0
 CANARY_REPETITIONS = 1
-#: Fixed, documented canary seed. It is distinct from every seed the official
-#: schedules derive from ``FROZEN_SEED`` (see :func:`require_canary_disjoint`).
-CANARY_SEED = 20261007
+#: D-0031 measured schedule seed. ``run_real_cell`` executes measured
+#: repetition ``i`` (1-based) at ``spec.seed + i``, so the RealRunSpec base
+#: seed is internal and one less than this value. Public schedules, the
+#: pre-client disjointness check, the instances passed to the runner, the
+#: result sample design, and the receipt all use the measured seed.
+CANARY_MEASURED_SEED = 20261007
+CANARY_SEED = CANARY_MEASURED_SEED
+CANARY_BASE_SEED = CANARY_MEASURED_SEED - 1
 CANARY_QUALITY_FLOOR = qualification.DEVELOPMENT_QUALITY_FLOOR
 CANARY_MIN_PASSES = 4
 CANARY_APPROVAL_TEMPLATE = (
@@ -91,7 +96,7 @@ def canary_schedule() -> list:
     templates = canary_template_ids()
     if len(templates) != CANARY_TASKS:
         raise QualificationError("the canary needs exactly one task per catalog template")
-    return generate_task_instances(templates, CANARY_TASKS, CANARY_SEED)
+    return generate_task_instances(templates, CANARY_TASKS, CANARY_MEASURED_SEED)
 
 
 def canary_spec() -> dict[str, Any]:
@@ -105,7 +110,7 @@ def canary_spec() -> dict[str, Any]:
         "concurrency": qualification.STAGE_CONCURRENCY,
         "quality_floor": CANARY_QUALITY_FLOOR,
         "min_passes": CANARY_MIN_PASSES,
-        "seed": CANARY_SEED,
+        "seed": CANARY_MEASURED_SEED,
         "apply_study_entry_gate": False,
         "diagnostic_only": True,
     }
@@ -160,10 +165,59 @@ def require_canary_contract() -> dict[str, Any]:
         raise QualificationError("the official development gate drifted")
     if CANARY_ARTIFACT_FAMILY == qualification.QUALIFICATION_ARTIFACT_FAMILY:
         raise QualificationError("canary artifacts must not share the qualification family")
+    if CANARY_ARTIFACT_FAMILY == "real-runs":
+        raise QualificationError("canary artifacts must not share the real-run family")
+    if CANARY_BASE_SEED + 1 != CANARY_MEASURED_SEED or CANARY_SEED != CANARY_MEASURED_SEED:
+        raise QualificationError("the canary base seed and measured seed diverged")
     schedule = canary_schedule()
     require_canary_balance(schedule)
     require_canary_disjoint(schedule)
     return canary_spec()
+
+
+def measured_repetition_seed(base_seed: int) -> int:
+    """Seed ``run_real_cell`` uses for the single measured repetition.
+
+    The runner computes ``spec.seed + repetition_index`` with
+    ``repetition_index`` starting at 1. This helper names that measured
+    seed; it does not change the runner's formula.
+    """
+    return base_seed + 1
+
+
+def _instance_key(instance: object) -> tuple[str, int, str]:
+    return (instance.template_id, instance.instance_seed, instance.tracking_id)
+
+
+def require_measured_schedule(spec: object) -> list:
+    """Fail closed unless the spec will execute the declared canary schedule.
+
+    Called before a model client exists. The instances compared here are the
+    ones ``run_real_cell`` derives for the measured repetition, not a
+    separately declared list that the runner might ignore.
+    """
+    family = getattr(spec, "artifact_family", None)
+    if family != CANARY_ARTIFACT_FAMILY:
+        raise QualificationError("canary artifacts must use the canary-runs family")
+    if (
+        getattr(spec, "warmup_passes", None) != CANARY_WARMUP_PASSES
+        or getattr(spec, "repetitions", None) != CANARY_REPETITIONS
+        or getattr(spec, "tasks_per_repetition", None) != CANARY_TASKS
+    ):
+        raise QualificationError("the canary executes exactly ten measured tasks and no warmup")
+    if tuple(getattr(spec, "template_ids", None) or ()) != canary_template_ids():
+        raise QualificationError("the canary must schedule every incident class once")
+    measured = measured_repetition_seed(int(spec.seed))
+    if measured != CANARY_MEASURED_SEED:
+        raise QualificationError("the canary measured seed must be 20261007")
+    executed = generate_task_instances(tuple(spec.template_ids), CANARY_TASKS, measured)
+    declared = canary_schedule()
+    if [_instance_key(item) for item in executed] != [_instance_key(item) for item in declared]:
+        raise QualificationError(
+            "the executed canary schedule does not match the declared schedule"
+        )
+    require_canary_disjoint(executed)
+    return executed
 
 
 def require_canary_candidate(candidate_id: str) -> None:
@@ -340,7 +394,7 @@ def sanitized_receipt(
         "treatments": list(qualification.candidate_treatments(candidate_id)),
         "schedule": {
             "tasks": CANARY_TASKS,
-            "seed": CANARY_SEED,
+            "seed": CANARY_MEASURED_SEED,
             "templates": len(canary_template_ids()),
             "disjoint_from_official_schedules": True,
         },

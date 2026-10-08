@@ -49,7 +49,11 @@ Category                        Meaning
                                 exist (native ``unknown_tool``).
 ``invalid_tool_arguments``      The tool exists but the arguments violate its
                                 contract (native ``invalid_arguments``, or a
-                                mock path that reaches the toolbox).
+                                mock path that reaches the toolbox). On
+                                workloads 2.6.0 and 2.6.1 a structurally
+                                invalid ``recommend_remediation`` is instead
+                                a workflow-controller rejection inside the
+                                same turn budget; it is not accepted.
 ``no_terminal_recommendation``  The agent exhausted ``max_turns`` without ever
                                 calling ``recommend_remediation``.
 ``direct_evidence_required``    Workload 2.5.0 only: the agent exhausted
@@ -102,6 +106,7 @@ from blackwell_lab.workload.tools import (
     InvalidToolArgumentsError,
     InvalidToolNameError,
     SimulatedToolbox,
+    workflow_terminal_schema_is_correctable,
 )
 
 #: Retry policy for measurement runs (measurement contract §7).
@@ -224,6 +229,15 @@ _OUTPUT_EVENT_KINDS = frozenset({"content_chunk", "reasoning_chunk", "native_too
 
 def _error_category_for_native(failure_category: str) -> str:
     return _NATIVE_ERROR_TAXONOMY.get(failure_category, "malformed_tool_call")
+
+
+def _workflow_can_correct_terminal(
+    controller: object, tool_name: str, workload_version: str
+) -> bool:
+    """Workflow-controlled terminal schema failures stay inside the turn budget."""
+    if getattr(controller, "controller_id", None) != "workflow-controller-v1":
+        return False
+    return workflow_terminal_schema_is_correctable(tool_name, workload_version)
 
 
 def _completed_turn_record(
@@ -540,7 +554,34 @@ def run_task(
         except InvalidToolNameError:
             return finish("error", "invalid_tool_name")
         except InvalidToolArgumentsError:
-            return finish("error", "invalid_tool_arguments")
+            if not _workflow_can_correct_terminal(controller, call.name, executed_version):
+                return finish("error", "invalid_tool_arguments")
+            # Structurally invalid terminal arguments never run the handler
+            # and are never accepted. The controller returns a typed
+            # rejection and the loop continues under the same max_turns.
+            verdict = controller.validate_terminal(call.arguments)
+            if verdict.accepted:
+                return finish("error", "invalid_tool_arguments")
+            payload = controller.rejection_payload(verdict)
+            latency_ms = toolbox.consume_latency(call.name)
+            execution.tool_trace.append(
+                ToolTrace(
+                    tool=call.name,
+                    arguments=dict(call.arguments),
+                    result=payload,
+                    simulated_latency_ms=latency_ms,
+                )
+            )
+            if clock.monotonic() >= deadline:
+                return finish("timeout", "task_timeout")
+            messages.append(
+                Message(
+                    "tool",
+                    content=json.dumps(payload, sort_keys=True),
+                    tool_call_id=call.call_id,
+                )
+            )
+            continue
         except Exception:
             return finish("error", "agent_runtime_error")
 

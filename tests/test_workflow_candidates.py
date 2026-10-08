@@ -66,6 +66,7 @@ from blackwell_lab.cloud.qualification import (
     experimental_behavior_fields,
     frozen_candidate_fields,
     is_catalog_candidate,
+    p2c_experiment_record,
     require_w_catalog_execution,
     require_w_config,
     require_w_pair_contract,
@@ -73,6 +74,7 @@ from blackwell_lab.cloud.qualification import (
     sanitized_receipt,
     stage_spec,
     validate_authorized_qualification_config,
+    w_pair_experiment_record,
 )
 from blackwell_lab.workload.validation import ConfigError
 
@@ -490,8 +492,84 @@ class TestCli:
         assert main(_qual_argv(path, candidate="W2", stage="development", approve=phrase)) == 0
         receipt = json.loads(capsys.readouterr().out)
         assert receipt["candidate_id"] == "W2"
+        assert receipt["controlled_experiment"] == w_pair_experiment_record("W2")
+        assert receipt["controlled_experiment"]["control_candidate"] == "W1"
+        assert receipt["controlled_experiment"]["role"] == "treatment"
+        assert receipt["controlled_experiment"]["treatments"] == ["evidence-refs"]
         assert receipt["matched_control"]["kind"] == W_CONTROL_KIND
         assert receipt["matched_control"]["w1_run_label"] == "qual-w1"
         assert "p1_run_label" not in json.dumps(receipt)
         # W2's completion never mints a control of its own.
         assert not list((ready / "qualification-runs").glob("*-w2-development-control.json"))
+
+
+class TestReceiptProvenance:
+    def _receipt(self, candidate: str, stage: str, **extra):
+        return sanitized_receipt(
+            run_label=f"qual-a-{candidate.lower()}-{stage}",
+            candidate_id=candidate,
+            stage=stage,
+            config_sha256="ab",
+            identity_digest=candidate_identity_digest(candidate),
+            gates={"stopped": False, "continue": True},
+            files=["measured.json"],
+            stopped=False,
+            **extra,
+        )
+
+    def test_w2_receipts_carry_the_pair_record_and_historical_receipts_do_not(self):
+        p2c_block = {
+            "kind": "controlled-public-catalog",
+            "control_candidate": "P1",
+            "treatment": "evidence-grounding-v1",
+            "task_source": "catalog",
+            "schedule": "d-0019-catalog",
+            "blind_generalization_evidence": False,
+            "comparable_with_private_sealed_scores": False,
+        }
+        w2_block = {
+            "kind": "workflow-controlled-pair",
+            "controller": "workflow-controller-v1",
+            "control_candidate": "W1",
+            "treatment_candidate": "W2",
+            "role": "treatment",
+            "treatments": ["evidence-refs"],
+            "task_source": "catalog",
+            "schedule": "d-0019-catalog",
+            "historical_candidates_unchanged": True,
+            "blind_generalization_evidence": False,
+            "comparable_with_private_sealed_scores": False,
+            "comparable_with_p1_p2c_scores": False,
+        }
+        assert p2c_experiment_record() == p2c_block
+        assert w_pair_experiment_record("W2") == w2_block
+        assert w_pair_experiment_record("W1")["role"] == "control"
+        assert w_pair_experiment_record("W1")["treatments"] == []
+
+        for stage in ("development", "holdout", "freeze"):
+            p1 = self._receipt("P1", stage)
+            assert "controlled_experiment" not in p1
+            assert "workflow-controlled-pair" not in json.dumps(p1)
+            p2c_extra = (
+                {"matched_control": {"kind": "matched-p1-development-control"}}
+                if stage == "development"
+                else {}
+            )
+            p2c = self._receipt("P2C", stage, **p2c_extra)
+            assert p2c["controlled_experiment"] == p2c_block
+            assert "workflow-controlled-pair" not in json.dumps(p2c)
+            expected_extra = {"controlled_experiment"}
+            if stage == "development":
+                expected_extra.add("matched_control")
+            assert set(p2c) - set(p1) == expected_extra
+            w1 = self._receipt("W1", stage)
+            assert "controlled_experiment" not in w1
+            w2_extra = (
+                {"matched_control": {"kind": W_CONTROL_KIND}} if stage == "development" else {}
+            )
+            w2 = self._receipt("W2", stage, **w2_extra)
+            assert w2["controlled_experiment"] == w2_block
+            if stage == "development":
+                assert w2["matched_control"] == {"kind": W_CONTROL_KIND}
+            else:
+                assert "matched_control" not in w2

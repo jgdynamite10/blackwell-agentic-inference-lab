@@ -1490,10 +1490,17 @@ def sanitized_receipt(
         # count). Present only for sealed cells so other receipts are unchanged.
         **({"sealed_set": sealed_set.provenance()} if sealed_set is not None else {}),
         # Controlled-experiment provenance (D-0026). Present only for P2C so
-        # every other receipt is unchanged.
+        # historical receipts stay byte-identical.
         **(
             {"controlled_experiment": p2c_experiment_record()}
             if candidate_id == CANDIDATE_P2C
+            else {}
+        ),
+        # D-0031: every live W2 receipt records the pair. W1 is the control
+        # and does not gain a treatment block. P1 and P2C are unchanged.
+        **(
+            {"controlled_experiment": w_pair_experiment_record(candidate_id)}
+            if candidate_id == CANDIDATE_W2
             else {}
         ),
         **({"matched_control": matched_control} if matched_control is not None else {}),

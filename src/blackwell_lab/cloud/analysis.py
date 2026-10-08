@@ -63,37 +63,69 @@ def _safe_label(run_label: str, candidate_id: str, stage: str) -> str:
         raise AnalysisError("composed qualification output label is unsafe") from exc
 
 
+def _resolve_strict(path: Path) -> Path:
+    try:
+        return path.resolve(strict=True)
+    except OSError as exc:
+        raise AnalysisError("qualification result path is unreadable") from exc
+
+
+def _refuse_symlink(path: Path, message: str) -> None:
+    if path.is_symlink():
+        raise AnalysisError(message)
+
+
 def result_directory(results_dir: Path, label: str) -> Path:
     """The cell directory, proven to lie directly inside the qualification family.
 
     The label has already passed the run-label regex, so it cannot carry a
-    separator or traversal component; the resolve check is a second,
-    independent guard against symlinked escapes.
+    separator or traversal component. The family directory itself must be a
+    real direct child of the resolved results root: a symlinked
+    ``qualification-runs`` is refused before any cell or file is opened.
     """
-    family = results_dir / qualification.QUALIFICATION_ARTIFACT_FAMILY
+    _refuse_symlink(results_dir, "results directory must not be a symlink")
+    family_name = qualification.QUALIFICATION_ARTIFACT_FAMILY
+    family = results_dir / family_name
+    _refuse_symlink(family, "qualification artifact family must not be a symlink")
+    if not family.is_dir():
+        raise AnalysisError("no qualification result directory exists for this label")
+    root_resolved = _resolve_strict(results_dir)
+    family_resolved = _resolve_strict(family)
+    if family_resolved.parent != root_resolved or family_resolved.name != family_name:
+        raise AnalysisError("qualification artifact family escapes the results directory")
     cell = family / label
-    if cell.is_symlink():
-        raise AnalysisError("qualification result directory must not be a symlink")
+    _refuse_symlink(cell, "qualification result directory must not be a symlink")
     if not cell.is_dir():
         raise AnalysisError("no qualification result directory exists for this label")
-    try:
-        resolved = cell.resolve(strict=True)
-        family_resolved = family.resolve(strict=True)
-    except OSError as exc:
-        raise AnalysisError("qualification result directory is unreadable") from exc
-    if resolved.parent != family_resolved or resolved.name != label:
+    cell_resolved = _resolve_strict(cell)
+    if cell_resolved.parent != family_resolved or cell_resolved.name != label:
+        raise AnalysisError("qualification result directory escapes the results directory")
+    if root_resolved not in cell_resolved.parents:
         raise AnalysisError("qualification result directory escapes the results directory")
     return cell
 
 
-def _observations(cell: Path) -> list[dict]:
+def _observations(cell: Path, *, results_dir: Path) -> list[dict]:
     files = sorted(path for path in cell.glob("*.observations.json") if path.is_file())
     if len(files) != 1:
         raise AnalysisError("expected exactly one observations file in the result directory")
-    if files[0].is_symlink():
-        raise AnalysisError("observations file must not be a symlink")
+    observations_path = files[0]
+    _refuse_symlink(observations_path, "observations file must not be a symlink")
+    # Reject a symlink on any component between the results root and the file
+    # before the file is opened, including a relative link that climbs out.
+    current = results_dir
+    for part in observations_path.relative_to(results_dir).parts:
+        if part in ("", ".", ".."):
+            raise AnalysisError("observations file escapes the results directory")
+        current = current / part
+        _refuse_symlink(current, "qualification result path must not traverse a symlink")
+    resolved = _resolve_strict(observations_path)
+    cell_resolved = _resolve_strict(cell)
+    root_resolved = _resolve_strict(results_dir)
+    if resolved.parent != cell_resolved or root_resolved not in resolved.parents:
+        raise AnalysisError("observations file escapes the results directory")
     try:
-        payload = json.loads(files[0].read_text(encoding="utf-8"))
+        payload = json.loads(observations_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise AnalysisError("observations file is unreadable") from exc
     observations = payload.get("observations") if isinstance(payload, dict) else None
@@ -186,7 +218,7 @@ def analyze(
     """Analyze one persisted qualification cell. Read-only on the source."""
     label = _safe_label(run_label, candidate_id, stage)
     cell = result_directory(results_dir, label)
-    observations = _observations(cell)
+    observations = _observations(cell, results_dir=results_dir)
     scenarios = catalog()
     rows: list[dict[str, Any]] = []
     for observation in observations:

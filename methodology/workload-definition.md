@@ -186,7 +186,13 @@ Tool arguments are strictly validated (`invalid_tool_arguments` on any
 violation): required strings must be non-empty, and every integer argument
 (`search_logs.limit`, `query_metrics.window_s`,
 `check_recent_changes.window_s`) must be a **positive integer** — booleans,
-zero, and negative values are rejected.
+zero, and negative values are rejected. On workloads 2.6.0 and 2.6.1 only,
+a structurally invalid `recommend_remediation` (empty strings, wrong types,
+missing required fields, or arguments the terminal schema does not allow)
+is not an immediate stop: the workflow controller rejects it with a typed
+payload and the model may correct it inside the same turn budget. The
+recommendation is still not accepted. Malformed non-terminal calls, invalid
+JSON, and every legacy workload remain `invalid_tool_arguments`.
 
 Tool responses are deterministic functions of (scenario, query). Tool
 latencies are simulated with fixed, documented values so tool-execution time

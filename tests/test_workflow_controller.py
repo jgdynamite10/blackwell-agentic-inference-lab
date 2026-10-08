@@ -44,8 +44,12 @@ from blackwell_lab.workload.evidence import (
     controller_for_workload,
     workload_treatments,
 )
-from blackwell_lab.workload.model_client import GenerationSettings
-from blackwell_lab.workload.native_tools import TOOL_DESCRIPTIONS_BY_VERSION
+from blackwell_lab.workload.model_client import (
+    GenerationSettings,
+    NativeToolCall,
+    NativeToolCallError,
+)
+from blackwell_lab.workload.native_tools import TOOL_DESCRIPTIONS_BY_VERSION, ToolCallAssembler
 from blackwell_lab.workload.scenarios import catalog
 from blackwell_lab.workload.tools import TERMINAL_TOOL, TOOL_SPECS, TOOL_SPECS_V250, tool_specs
 from blackwell_lab.workload.workflow import (
@@ -383,19 +387,156 @@ class TestRejectionsAndCorrection:
         assert not verdict.accepted
         assert REJECT_MALFORMED_TERMINAL in verdict.failure_categories
         assert "guidance" in verdict.tool_payload()
-        # Through the agent loop, schema-invalid arguments still hit the
-        # existing RETRIES=0 taxonomy before the controller: the policy is
-        # preserved, not relaxed.
+        assert RETRIES == 0 and DEFAULT_MAX_TURNS == 12
+
+    def test_structurally_malformed_terminals_stay_correctable_inside_the_turn_budget(self):
+        valid = {
+            "diagnosis_id": SCENARIO.accepted_diagnoses[0],
+            "rationale": "evidence-based rationale",
+            "remediation_id": SCENARIO.accepted_remediations[0],
+        }
+        cases = (
+            {**valid, "diagnosis_id": ""},
+            {**valid, "diagnosis_id": 12},
+            {"rationale": valid["rationale"], "remediation_id": valid["remediation_id"]},
+            {**valid, "evidence_refs": ["not-a-w1-argument"]},
+        )
+        for arguments in cases:
+            malformed = {"tool": TERMINAL_TOOL, "arguments": arguments}
+            execution, client = run(
+                [runbook(), search(USABLE_QUERY), malformed, terminal(omit_refs=True)],
+                settings=V260,
+            )
+            assert execution.status == "completed", arguments
+            assert execution.error_category is None
+            rejected = execution.tool_trace[2].result
+            assert rejected["accepted"] is False
+            assert REJECT_MALFORMED_TERMINAL in rejected["failure_categories"]
+            assert client.calls == 4
+            assert len(execution.turns) == 4
+            assert (
+                len([trace for trace in execution.tool_trace if trace.tool == TERMINAL_TOOL]) == 2
+            )
+        assert RETRIES == 0
+
+    def test_inappropriate_evidence_refs_are_correctable_and_not_usable_evidence(self):
+        def cite_guidance(messages):
+            ids = []
+            for message in messages:
+                if message.role != "tool":
+                    continue
+                payload = json.loads(message.content)
+                if "runbook" in payload or "changes" in payload:
+                    ids.append(payload["observation_id"])
+            return terminal(ids)
+
+        def cite_log(messages):
+            ids = []
+            for message in messages:
+                if message.role != "tool":
+                    continue
+                payload = json.loads(message.content)
+                if payload.get(WORKFLOW_FIELD, {}).get("usable_evidence") is True:
+                    ids.append(payload["observation_id"])
+            return terminal(ids)
+
+        execution, _ = run(
+            [runbook(), changes(), search(USABLE_QUERY)],
+            settings=V261,
+        )
+        assert execution.tool_trace[0].result["found"] is True
+        assert "remediation_ids" in execution.tool_trace[0].result["runbook"]
+        assert execution.tool_trace[0].result[WORKFLOW_FIELD]["usable_evidence"] is False
+        assert execution.tool_trace[1].result[WORKFLOW_FIELD]["usable_evidence"] is False
+        assert "changes" in execution.tool_trace[1].result
+
+        wrong_type = {
+            "tool": TERMINAL_TOOL,
+            "arguments": {
+                "diagnosis_id": SCENARIO.accepted_diagnoses[0],
+                "rationale": "evidence-based rationale",
+                "remediation_id": SCENARIO.accepted_remediations[0],
+                "evidence_refs": "not-a-list",
+            },
+        }
+        execution, client = run(
+            [runbook(), search(USABLE_QUERY), wrong_type, cite_log],
+            settings=V261,
+        )
+        assert execution.status == "completed"
+        assert REJECT_EVIDENCE_REFS_REQUIRED in execution.tool_trace[2].result["failure_categories"]
+        assert client.calls == 4
+
+        execution, _ = run(
+            [runbook(), changes(), search(USABLE_QUERY), cite_guidance, cite_log],
+            settings=V261,
+        )
+        assert execution.status == "completed"
+        assert REJECT_EVIDENCE_REFS_REQUIRED in execution.tool_trace[3].result["failure_categories"]
+        assert execution.diagnosis_id == SCENARIO.accepted_diagnoses[0]
+
+    def test_legacy_and_nonterminal_schema_failures_still_stop_the_task(self):
         malformed = {
             "tool": TERMINAL_TOOL,
             "arguments": {"diagnosis_id": "", "rationale": "", "remediation_id": ""},
         }
+        for version in ("2.4.1", "2.5.0"):
+            execution, _ = run([malformed], settings=GenerationSettings(workload_version=version))
+            assert execution.status == "error"
+            assert execution.error_category == "invalid_tool_arguments"
+            assert execution.tool_trace == []
         execution, _ = run(
-            [runbook(), search(USABLE_QUERY), malformed, terminal(omit_refs=True)], settings=V260
+            [{"tool": "query_metrics", "arguments": {"metric": 1}}],
+            settings=V260,
         )
         assert execution.status == "error"
         assert execution.error_category == "invalid_tool_arguments"
-        assert len(execution.tool_trace) == 2
+        assert execution.tool_trace == []
+
+    def test_assembler_defers_only_workflow_terminal_schema_failures(self):
+        def assemble(version: str, name: str, arguments: dict):
+            assembler = ToolCallAssembler(workload_version=version)
+            assembler.consume_delta(
+                {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call-1",
+                            "function": {"name": name, "arguments": json.dumps(arguments)},
+                        }
+                    ]
+                }
+            )
+            return assembler.finalize()
+
+        empty = {"diagnosis_id": "", "rationale": "r", "remediation_id": "x"}
+        assert isinstance(assemble("2.6.0", TERMINAL_TOOL, empty), NativeToolCall)
+        assert isinstance(assemble("2.6.1", TERMINAL_TOOL, empty), NativeToolCall)
+        legacy = assemble("2.5.0", TERMINAL_TOOL, empty)
+        assert isinstance(legacy, NativeToolCallError)
+        assert legacy.category == "invalid_arguments"
+        nonterminal = assemble("2.6.1", "query_metrics", {"metric": 1})
+        assert isinstance(nonterminal, NativeToolCallError)
+        assert nonterminal.category == "invalid_arguments"
+        parallel = ToolCallAssembler(workload_version="2.6.1")
+        for index in (0, 1):
+            parallel.consume_delta(
+                {
+                    "tool_calls": [
+                        {
+                            "index": index,
+                            "id": f"call-{index}",
+                            "function": {
+                                "name": TERMINAL_TOOL,
+                                "arguments": json.dumps(empty),
+                            },
+                        }
+                    ]
+                }
+            )
+        refused = parallel.finalize()
+        assert isinstance(refused, NativeToolCallError)
+        assert refused.category == "parallel_or_multiple_tool_calls"
 
     def test_rejected_attempts_consume_turns_and_the_budget_is_unchanged(self):
         execution, client = run(

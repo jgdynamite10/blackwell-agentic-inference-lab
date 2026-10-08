@@ -1760,7 +1760,9 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
             repetitions=spec["repetitions"],
             warmup_passes=spec["warmup_passes"],
             tasks_per_repetition=spec["tasks"],
-            seed=spec["seed"],
+            # Internal base seed. run_real_cell adds the 1-based repetition
+            # index, so the measured schedule seed stays CANARY_MEASURED_SEED.
+            seed=canary.CANARY_BASE_SEED,
             run_label=cell_label,
             generation=GenerationSettings(
                 temperature=qualification.candidate_temperature(candidate_id),
@@ -1778,6 +1780,11 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
         require_controller_binding(run_spec.workload_version, run_spec.controller)
         if tuple(run_spec.template_ids or ()) != tuple(spec["template_ids"]):
             raise qualification.QualificationError("the canary must schedule every incident class")
+        # Family allowlist and the measured schedule are checked before any
+        # model client, stream, or inference. Provenance above verified the
+        # already-running endpoint; it does not start a completion.
+        realbench._validate_spec(run_spec)
+        canary.require_measured_schedule(run_spec)
         client = OpenAICompatibleClient(
             endpoint["base_url"],
             endpoint["model"],

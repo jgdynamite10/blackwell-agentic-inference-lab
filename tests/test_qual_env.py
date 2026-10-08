@@ -199,3 +199,82 @@ class TestBootstrapScript:
         assert result.returncode == 1
         assert "outside the repository" in result.stderr
         assert not (REPO / ".qual-env").exists()
+
+    def test_header_does_not_require_the_environment_for_analysis(self):
+        header = " ".join(
+            self.SCRIPT.read_text(encoding="utf-8").split("set -euo pipefail", 1)[0].split()
+        )
+        assert "qualify-agent" in header and "canary-agent" in header
+        assert "analyze-qualification" in header
+        assert "does not use this environment" in header
+
+    def test_script_refuses_relative_nested_and_symlink_paths(self, tmp_path):
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path / "home"),
+            "BWLAB_QUAL_PYTHON": sys.executable,
+        }
+
+        def run(directory: str, *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["/bin/bash", str(self.SCRIPT)],
+                cwd=cwd or tmp_path,
+                env={**env, "BWLAB_QUAL_ENV_DIR": directory},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        relative = run(".qual-env-relative", cwd=REPO)
+        assert relative.returncode == 1
+        assert "outside the repository" in relative.stderr
+        assert not (REPO / ".qual-env-relative").exists()
+
+        nested = run(str(REPO / "src" / ".." / ".qual-env-nested"))
+        assert nested.returncode == 1
+        assert "outside the repository" in nested.stderr
+        assert not (REPO / ".qual-env-nested").exists()
+
+        link = tmp_path / "repo-link"
+        link.symlink_to(REPO)
+        mediated = run(str(link / "qual-env"))
+        assert mediated.returncode == 1
+        assert "outside the repository" in mediated.stderr
+        assert not (REPO / "qual-env").exists()
+
+        parent = tmp_path / "parent-link"
+        parent.symlink_to(REPO / "tests")
+        child = run(str(parent / "qual-env"))
+        assert child.returncode == 1
+        assert not (REPO / "tests" / "qual-env").exists()
+
+    def test_an_outside_path_passes_the_containment_check(self, tmp_path):
+        stub = tmp_path / "python-stub"
+        stub.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-m" ]; then\n'
+            '  echo "VENV_ATTEMPTED" >&2\n'
+            "  exit 42\n"
+            "fi\n"
+            f'exec "{sys.executable}" "$@"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        outside = tmp_path / "outside-env"
+        result = subprocess.run(
+            ["/bin/bash", str(self.SCRIPT)],
+            cwd=tmp_path,
+            env={
+                "PATH": "/usr/bin:/bin",
+                "HOME": str(tmp_path / "home"),
+                "BWLAB_QUAL_PYTHON": str(stub),
+                "BWLAB_QUAL_ENV_DIR": str(outside),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 42
+        assert "VENV_ATTEMPTED" in result.stderr
+        assert "outside the repository" not in result.stderr
+        assert not outside.exists()

@@ -40,8 +40,10 @@ from blackwell_lab.cloud.canary import (
     validate_canary_config,
 )
 from blackwell_lab.cloud.cli import main
+from blackwell_lab.cloud.realbench import ALLOWED_ARTIFACT_FAMILIES, RealRunSpec
 from blackwell_lab.workload.evaluator import EVALUATOR_VERSION
-from blackwell_lab.workload.sampling import generate_task_instances
+from blackwell_lab.workload.model_client import GenerationSettings
+from blackwell_lab.workload.sampling import generate_task_instances, sample_design_summary
 from blackwell_lab.workload.tools import TERMINAL_TOOL
 from blackwell_lab.workload.validation import ConfigError
 
@@ -290,7 +292,9 @@ class TestCli:
         receipt = json.loads(capsys.readouterr().out)
         spec = specs[0]
         assert spec.tasks_per_repetition == 10
-        assert spec.seed == CANARY_SEED
+        assert spec.seed == canary.CANARY_BASE_SEED
+        assert spec.seed + 1 == CANARY_SEED
+        assert receipt["schedule"]["seed"] == CANARY_SEED
         assert spec.warmup_passes == 0
         assert spec.artifact_family == CANARY_ARTIFACT_FAMILY
         assert tuple(spec.template_ids) == canary.canary_template_ids()
@@ -355,3 +359,193 @@ class TestCli:
         assert main(_argv(path)) == 1
         assert "exactly 10" in capsys.readouterr().err
         assert (ready / CANARY_ARTIFACT_FAMILY / "canary-a-failure.json").is_file()
+
+
+def _canary_run_spec(**overrides) -> RealRunSpec:
+    """A spec the real validator accepts, shaped like the canary CLI."""
+    defaults = dict(
+        profile_name="interactive",
+        concurrency=1,
+        comparison_mode="provider-native",
+        instance_type="g3-gpu-rtxpro6000-blackwell-1",
+        region="us-ord",
+        list_price_usd_per_hour=3.0,
+        price_source_date="2026-09-18",
+        model={
+            "artifact": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+            "revision": "0123456789abcdef0123456789abcdef01234567",
+            "artifact_hash": "sha256:" + "ab" * 32,
+            "precision": "bf16",
+        },
+        engine="vllm",
+        engine_version="0.27.1",
+        container_digest="docker.io/vllm/vllm-openai@sha256:" + "cd" * 32,
+        repetitions=1,
+        warmup_passes=0,
+        tasks_per_repetition=CANARY_TASKS,
+        seed=canary.CANARY_BASE_SEED,
+        run_label="canary-a-w1-canary",
+        generation=GenerationSettings(
+            temperature=0.2,
+            top_p=0.95,
+            seed=qualification.FROZEN_SEED,
+            reasoning_mode=True,
+            workload_version="2.6.0",
+        ),
+        template_ids=canary.canary_template_ids(),
+        artifact_family=CANARY_ARTIFACT_FAMILY,
+        workload_version="2.6.0",
+        controller="workflow-controller-v1",
+    )
+    defaults.update(overrides)
+    return RealRunSpec(**defaults)
+
+
+class _GuardClient:
+    def __init__(self) -> None:
+        self.used = False
+
+    def stream_turn(self, *args, **kwargs):
+        self.used = True
+        raise AssertionError("model client was used")
+
+
+class _Sampler:
+    def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+
+class TestRealCanaryValidation:
+    def test_canary_family_passes_real_validation_and_invalid_families_do_not(self):
+        assert CANARY_ARTIFACT_FAMILY == "canary-runs"
+        assert ALLOWED_ARTIFACT_FAMILIES == frozenset(
+            {"real-runs", "qualification-runs", "canary-runs"}
+        )
+        profile = realbench._validate_spec(_canary_run_spec())
+        assert profile.name == "interactive"
+        client = _GuardClient()
+        for family in ("not-a-family", "canary-runs-extra", "real-runs-canary", ""):
+            with pytest.raises(ConfigError, match="artifact_family"):
+                realbench._validate_spec(_canary_run_spec(artifact_family=family))
+            with pytest.raises(ConfigError, match="artifact_family"):
+                realbench.run_real_cell(
+                    _canary_run_spec(artifact_family=family),
+                    client,
+                    host={},
+                    sampler_factory=_Sampler,
+                )
+        assert client.used is False
+
+    def test_runner_executes_the_declared_measured_schedule(self, tmp_path, monkeypatch):
+        external = tmp_path / "external"
+        external.mkdir()
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        captured: dict[str, object] = {}
+
+        def capture_pass(*, instances, **kwargs):
+            captured["instances"] = list(instances)
+            captured["client"] = kwargs.get("client")
+            raise RuntimeError("stop-before-inference")
+
+        monkeypatch.setattr(realbench, "_run_pass", capture_pass)
+        spec = _canary_run_spec()
+        realbench._validate_spec(spec)
+        declared = canary.require_measured_schedule(spec)
+        client = _GuardClient()
+        with pytest.raises(RuntimeError, match="stop-before-inference"):
+            realbench.run_real_cell(
+                spec,
+                client,
+                host={"gpu_model": "synthetic"},
+                sampler_factory=_Sampler,
+                results_dir=external,
+            )
+        executed = captured["instances"]
+        assert client.used is False
+        assert captured["client"] is client
+
+        def keys(rows):
+            return [(item.template_id, item.instance_seed, item.tracking_id) for item in rows]
+
+        assert keys(executed) == keys(declared) == keys(canary_schedule())
+        measured_seed = spec.seed + 1
+        assert measured_seed == CANARY_SEED == 20261007
+        design = sample_design_summary(executed, measured_seed)
+        receipt = canary.sanitized_receipt(
+            run_label=spec.run_label,
+            candidate_id="W1",
+            config_sha256="0" * 64,
+            identity_digest="1" * 64,
+            verdict=canary.evaluate_canary(
+                qualification.compute_qualification_metrics(
+                    _outcomes(4), provenance_ok=True, verification_ok=True
+                )
+            ),
+            files=[],
+        )
+        assert receipt["schedule"]["seed"] == design["seed"] == CANARY_SEED
+        assert (external / "canary-runs" / spec.run_label).is_dir()
+        assert not (external / "qualification-runs").exists()
+        assert not (external / "real-runs").exists()
+
+    def test_executed_instances_are_disjoint_from_every_official_schedule(
+        self, tmp_path, monkeypatch
+    ):
+        external = tmp_path / "external"
+        external.mkdir()
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(external))
+        captured: list = []
+
+        def capture_pass(*, instances, **kwargs):
+            captured.extend(instances)
+            raise RuntimeError("stop-before-inference")
+
+        monkeypatch.setattr(realbench, "_run_pass", capture_pass)
+        with pytest.raises(RuntimeError, match="stop-before-inference"):
+            realbench.run_real_cell(
+                _canary_run_spec(),
+                _GuardClient(),
+                host={"gpu_model": "synthetic"},
+                sampler_factory=_Sampler,
+                results_dir=external,
+            )
+        executed_keys = {(i.template_id, i.instance_seed, i.tracking_id) for i in captured}
+        assert len(executed_keys) == CANARY_TASKS
+        for stage in qualification.AUTHORIZED_STAGES:
+            stage_spec = qualification.stage_spec(stage)
+            seeds = [qualification.MEASURED_REPETITION_SEED]
+            seeds.extend(
+                qualification.FROZEN_SEED - index - 1
+                for index in range(int(stage_spec["warmup_passes"]))
+            )
+            for seed in seeds:
+                official = {
+                    (i.template_id, i.instance_seed, i.tracking_id)
+                    for i in generate_task_instances(
+                        stage_spec["template_ids"], stage_spec["tasks"], seed
+                    )
+                }
+                assert not executed_keys & official, (stage, seed)
+
+    def test_invalid_family_is_refused_before_the_client_is_constructed(
+        self, ready, tmp_path, monkeypatch, capsys
+    ):
+        constructed: list[str] = []
+
+        class BoomClient:
+            def __init__(self, *args, **kwargs):
+                constructed.append("client")
+                raise AssertionError("client constructed")
+
+        monkeypatch.setattr(
+            "blackwell_lab.workload.openai_client.OpenAICompatibleClient", BoomClient
+        )
+        monkeypatch.setattr(canary, "CANARY_ARTIFACT_FAMILY", "bogus-runs")
+        path = tmp_path / "canary.json"
+        path.write_text(json.dumps(_canary_config("W1")), encoding="utf-8")
+        assert main(_argv(path)) == 1
+        assert constructed == []
+        assert "artifact_family" in capsys.readouterr().err
