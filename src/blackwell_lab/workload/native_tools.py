@@ -109,6 +109,14 @@ TOOL_DESCRIPTIONS_BY_VERSION: dict[str, dict[str, str]] = {
     # well; the workflow controller speaks only through tool-result payloads.
     "2.6.0": TOOL_DESCRIPTIONS_V240,
     "2.6.1": TOOL_DESCRIPTIONS_V240,
+    # 2.7.0 / 2.7.1 (decision D-0033) reuse the same tool text. The successor
+    # controller speaks only through tool-result payloads.
+    "2.7.0": TOOL_DESCRIPTIONS_V240,
+    "2.7.1": TOOL_DESCRIPTIONS_V240,
+    # 2.8.0 / 2.8.1 (decision D-0034) reuse the same tool text. Structured
+    # fields are explained in the system prompt and rendered on results.
+    "2.8.0": TOOL_DESCRIPTIONS_V240,
+    "2.8.1": TOOL_DESCRIPTIONS_V240,
 }
 
 #: Default catalog contract (workload 2.3.0). Callers that execute a

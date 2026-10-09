@@ -1,0 +1,158 @@
+{
+  "version": "1.0.0",
+  "description": "Closed normalizations for D-0034 public evidence. A rule may restate an explicit assertion already in a raw log or an exact returned health status. It must not map a symptom onto a cause, and it has no scenario or accepted-diagnosis branch.",
+  "health_rule": {
+    "id": "literal-component-status",
+    "condition_name": "{component}.status",
+    "subject_kind": "service",
+    "scope": "$task",
+    "role": "condition",
+    "polarity": "affirmed",
+    "certainty": "asserted",
+    "skip_statuses": ["", "unknown", "unknown-service", "unavailable"]
+  },
+  "log_rules": [
+    {
+      "id": "dns-servfail-symptom",
+      "emit": "finding",
+      "require_substrings": ["SERVFAIL", "not found", "badger-queue.svc.lab.example"],
+      "subject": {"kind": "dns-query", "id": "badger-queue.svc.lab.example", "scope": "$task"},
+      "condition": {"name": "resolution", "state": "SERVFAIL"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "symptom"
+    },
+    {
+      "id": "dns-target-mention",
+      "emit": "mention",
+      "require_substrings": ["badger-queue.svc.lab.example"],
+      "text": "badger-queue.svc.lab.example",
+      "role": "entity"
+    },
+    {
+      "id": "dns-search-domain-typo",
+      "emit": "finding",
+      "require_substrings": ["cfg-5150", "search domain", "typo"],
+      "subject": {"kind": "configuration", "id": "cfg-5150", "scope": "$task"},
+      "condition": {"name": "dns.search_domain", "state": "typo"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "condition"
+    },
+    {
+      "id": "oom-symptom",
+      "emit": "finding",
+      "require_substrings": ["worker killed", "out of memory"],
+      "subject": {"kind": "process", "id": "worker", "scope": "$task"},
+      "condition": {"name": "memory_pressure", "state": "oom"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "symptom"
+    },
+    {
+      "id": "cache-max-entries-zero",
+      "emit": "finding",
+      "require_substrings": ["cfg-3300", "cache_max_entries=0"],
+      "subject": {"kind": "configuration", "id": "cfg-3300", "scope": "$task"},
+      "condition": {"name": "cache_max_entries", "state": "0"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "condition"
+    },
+    {
+      "id": "cache-bound-unbounded",
+      "emit": "finding",
+      "require_substrings": ["cfg-3300", "(unbounded)"],
+      "subject": {"kind": "configuration", "id": "cfg-3300", "scope": "$task"},
+      "condition": {"name": "cache_bound", "state": "unbounded"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "condition"
+    },
+    {
+      "id": "readiness-failure-symptom",
+      "emit": "finding",
+      "require_substrings": ["readiness probe failing"],
+      "subject": {"kind": "probe", "id": "readiness", "scope": "ibis-notify"},
+      "condition": {"name": "readiness_result", "state": "failing"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "symptom"
+    },
+    {
+      "id": "required-migration-absent",
+      "emit": "finding",
+      "require_substrings": ["dep-9004", "migration 41 not applied"],
+      "subject": {"kind": "deployment", "id": "dep-9004", "scope": "$task"},
+      "condition": {"name": "required_migration", "state": "not_applied"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "condition"
+    },
+    {
+      "id": "upstream-service-role",
+      "emit": "finding",
+      "require_substrings": ["upstream heron-auth"],
+      "subject": {"kind": "service", "id": "heron-auth", "scope": "$task"},
+      "condition": {"name": "service_role", "state": "upstream"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "context"
+    },
+    {
+      "id": "uncapped-online-pool-admission",
+      "emit": "finding",
+      "require_substrings": ["embed-refresh-44", "without priority cap"],
+      "ground_scope": "host",
+      "subject": {"kind": "batch-job", "id": "embed-refresh-44", "scope": "$host"},
+      "condition": {"name": "online_gpu_pool_admission", "state": "without_priority_cap"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "condition"
+    },
+    {
+      "id": "kv-cache-allocator-saturated",
+      "emit": "finding",
+      "require_substrings": ["kv-cache", "allocator saturated"],
+      "ground_scope": "host",
+      "subject": {"kind": "allocator", "id": "kv-cache", "scope": "$host"},
+      "condition": {"name": "capacity", "state": "saturated"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "condition"
+    },
+    {
+      "id": "autoscaler-desired-replicas",
+      "emit": "finding",
+      "require_substrings": ["autoscaler", "desired replicas 40"],
+      "ground_scope": "host",
+      "subject": {"kind": "component", "id": "autoscaler", "scope": "$host"},
+      "condition": {"name": "desired_replicas", "state": "40"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "condition"
+    },
+    {
+      "id": "autoscaler-max-replicas",
+      "emit": "finding",
+      "require_substrings": ["autoscaler", "max_replicas=24"],
+      "ground_scope": "host",
+      "subject": {"kind": "component", "id": "autoscaler", "scope": "$host"},
+      "condition": {"name": "max_replicas", "state": "24"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "condition"
+    },
+    {
+      "id": "autoscaler-capped-by-ceiling",
+      "emit": "finding",
+      "require_substrings": ["autoscaler", "exceeds ceiling", "scaling capped"],
+      "ground_scope": "host",
+      "subject": {"kind": "component", "id": "autoscaler", "scope": "$host"},
+      "condition": {"name": "scaling", "state": "capped_by_ceiling"},
+      "polarity": "affirmed",
+      "certainty": "asserted",
+      "role": "condition"
+    }
+  ]
+}

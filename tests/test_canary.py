@@ -245,7 +245,7 @@ class TestApprovalAndConfig:
             )
 
     def test_candidates_are_public_catalog_only(self):
-        assert CANARY_CANDIDATES == ("C1", "C2", "P1", "P2C", "W1", "W2")
+        assert CANARY_CANDIDATES == ("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4", "W5", "W6")
         with pytest.raises(ConfigError, match="public-catalog"):
             validate_canary_config(_canary_config("W1"), candidate_id="P2")
 
@@ -325,6 +325,67 @@ class TestCli:
         assert set(canary.canary_template_ids()).isdisjoint(HOLDOUT_TEMPLATE_IDS)
         assert report["authorizes_qualification"] is False
         assert report["creates_development_control"] is False
+
+    def test_w5_validate_only_preflights_the_development_overlay(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from blackwell_lab.workload.public_metadata import evidence_contract
+
+        monkeypatch.setenv("LAB_RESULTS_DIR", str(tmp_path / "external"))
+        config = _canary_config("W5")
+        config["evidence_contract"] = evidence_contract()
+        path = self._write(tmp_path, config)
+        assert main(_argv(path, candidate="W5", validate_only=True)) == 0
+        report = json.loads(capsys.readouterr().out)
+        assert report["executed"] is False
+        assert report["model_client_constructed"] is False
+        assert report["endpoint_contacted"] is False
+        assert report["candidate_id"] == "W5"
+        assert report["workload_version"] == "2.8.0"
+        assert report["controller"] == "workflow-controller-v3"
+        assert report["schedule"]["tasks"] == 10
+        assert report["schedule"]["holdout_excluded"] is True
+        assert report["schedule"]["template_source"] == "development"
+        for stage in ("holdout", "freeze"):
+            spec = qualification.stage_spec(stage)
+            with pytest.raises(ConfigError, match="development catalog only"):
+                qualification.require_w_catalog_execution(
+                    "W5",
+                    stage=stage,
+                    template_ids=spec["template_ids"],
+                    sealed_set=None,
+                    sealed_tasks=None,
+                )
+
+    def test_w5_receipt_records_the_evidence_limits(self, ready, tmp_path, monkeypatch, capsys):
+        from blackwell_lab.workload.public_metadata import VALIDATION_SCOPE, evidence_contract
+
+        monkeypatch.setattr(realbench, "run_real_cell", lambda *a, **k: [_FakeRecord(_outcomes(4))])
+        config = _canary_config("W5")
+        config["evidence_contract"] = evidence_contract()
+        path = self._write(tmp_path, config)
+        assert main(_argv(path, candidate="W5")) == 0
+        receipt = json.loads(capsys.readouterr().out)
+        assert receipt["evidence_contract"] == evidence_contract()
+        assert receipt["validation_scope"] == VALIDATION_SCOPE
+        assert receipt["blind_generalization_evidence"] is False
+        stored = json.loads(
+            (ready / CANARY_ARTIFACT_FAMILY / "canary-a-w5-canary-receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert stored["evidence_contract"] == receipt["evidence_contract"]
+        assert stored["validation_scope"] == VALIDATION_SCOPE
+        assert stored["blind_generalization_evidence"] is False
+
+    def test_w1_receipt_omits_the_structured_binding(self, ready, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(realbench, "run_real_cell", lambda *a, **k: [_FakeRecord(_outcomes(4))])
+        path = self._write(tmp_path, _canary_config("W1"))
+        assert main(_argv(path, candidate="W1")) == 0
+        receipt = json.loads(capsys.readouterr().out)
+        assert "evidence_contract" not in receipt
+        assert "validation_scope" not in receipt
+        assert "blind_generalization_evidence" not in receipt
 
     def test_qualification_phrase_does_not_authorize_a_canary(self, ready, tmp_path, capsys):
         path = self._write(tmp_path, _canary_config())

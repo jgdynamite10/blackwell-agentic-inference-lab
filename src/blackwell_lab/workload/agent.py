@@ -108,6 +108,8 @@ from blackwell_lab.workload.tools import (
     SimulatedToolbox,
     workflow_terminal_schema_is_correctable,
 )
+from blackwell_lab.workload.workflow import WORKFLOW_CONTROLLER_IDS
+from blackwell_lab.workload.workflow_v3 import CONTROLLER_WORKFLOW_V3
 
 #: Retry policy for measurement runs (measurement contract §7).
 RETRIES = 0
@@ -235,7 +237,9 @@ def _workflow_can_correct_terminal(
     controller: object, tool_name: str, workload_version: str
 ) -> bool:
     """Workflow-controlled terminal schema failures stay inside the turn budget."""
-    if getattr(controller, "controller_id", None) != "workflow-controller-v1":
+    if getattr(controller, "controller_id", None) not in WORKFLOW_CONTROLLER_IDS | {
+        CONTROLLER_WORKFLOW_V3
+    }:
         return False
     return workflow_terminal_schema_is_correctable(tool_name, workload_version)
 
@@ -339,6 +343,14 @@ SYSTEM_PROMPTS_BY_VERSION = {
     # relative to P1, and it speaks only through tool-result payloads.
     "2.6.0": SYSTEM_PROMPT_V241,
     "2.6.1": SYSTEM_PROMPT_V241,
+    # Workloads 2.7.0 / 2.7.1 (decision D-0033) execute the same prompt bytes.
+    # Diagnosis relevance is enforced by workflow-controller-v2, not by prose.
+    "2.7.0": SYSTEM_PROMPT_V241,
+    "2.7.1": SYSTEM_PROMPT_V241,
+    # Workloads 2.8.0 / 2.8.1 execute the 2.4.1 system prompt byte for byte.
+    # The generic field explanation is appended by task_prompt.
+    "2.8.0": SYSTEM_PROMPT_V241,
+    "2.8.1": SYSTEM_PROMPT_V241,
 }
 
 
@@ -356,12 +368,21 @@ def system_prompt(scenario: Scenario, workload_version: str | None = None) -> st
     return SYSTEM_PROMPTS_BY_VERSION[require_workload_version(workload_version)]
 
 
-def task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
+def task_prompt(
+    scenario: Scenario,
+    instance: TaskInstance | None,
+    workload_version: str | None = None,
+) -> str:
     """User task prompt. Publishes diagnosis candidates only — never
-    remediation IDs (decision D-0019)."""
+    remediation IDs (decision D-0019).
+
+    Workloads 2.8.0 / 2.8.1 also append the generic structured-field
+    explanation and the reviewed hypothesis catalog. Older contracts omit
+    both, so their prompt bytes stay unchanged.
+    """
     candidates = "\n".join(f"- {d}" for d in scenario.candidate_diagnoses)
     surface = f"{instance.surface_variant_text()}\n" if instance is not None else ""
-    return (
+    prompt = (
         f"scenario_id: {scenario.scenario_id}\n"
         f"incident_class: {scenario.incident_class}\n"
         f"title: {scenario.title}\n"
@@ -369,14 +390,27 @@ def task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
         f"{scenario.description}\n\n"
         f"Candidate diagnosis ids (submit exactly one):\n{candidates}"
     )
+    from blackwell_lab.workload.native_tools import require_workload_version
+    from blackwell_lab.workload.public_metadata import (
+        STRUCTURED_FIELD_EXPLANATION,
+        hypothesis_prompt,
+        structured_evidence_workload,
+    )
+
+    if structured_evidence_workload(require_workload_version(workload_version)):
+        prompt += "\n\n" + STRUCTURED_FIELD_EXPLANATION
+        prompt += hypothesis_prompt(scenario)
+    return prompt
 
 
 def _system_prompt(scenario: Scenario, workload_version: str | None = None) -> str:
     return system_prompt(scenario, workload_version)
 
 
-def _task_prompt(scenario: Scenario, instance: TaskInstance | None) -> str:
-    return task_prompt(scenario, instance)
+def _task_prompt(
+    scenario: Scenario, instance: TaskInstance | None, workload_version: str | None = None
+) -> str:
+    return task_prompt(scenario, instance, workload_version)
 
 
 def run_task(
@@ -426,7 +460,7 @@ def run_task(
 
     messages: list[Message] = [
         Message("system", _system_prompt(scenario, executed_version)),
-        Message("user", _task_prompt(scenario, instance)),
+        Message("user", _task_prompt(scenario, instance, executed_version)),
     ]
 
     def finish(status: str, error_category: str | None = None) -> TaskExecution:

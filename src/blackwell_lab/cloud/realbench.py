@@ -57,6 +57,7 @@ from blackwell_lab.workload.native_tools import (
     TOOL_CALL_TRANSPORT,
     require_workload_version,
 )
+from blackwell_lab.workload.public_metadata import manifest_workload_binding
 from blackwell_lab.workload.runner import (
     DEFAULT_REPETITIONS,
     DEFAULT_TASKS_PER_REPETITION,
@@ -325,6 +326,7 @@ def build_real_manifest(
             "name": WORKLOAD_NAME,
             "version": require_workload_version(spec.workload_version),
             **({"controller": spec.controller} if spec.controller else {}),
+            **manifest_workload_binding(require_workload_version(spec.workload_version)),
             # Catalog and sealed provenance are mutually exclusive. A sealed
             # run records its stage aggregate only under task_source and
             # never touches catalog_digest, which keeps its public-catalog
