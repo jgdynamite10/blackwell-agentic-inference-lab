@@ -80,6 +80,10 @@ TOOL_SPECS_BY_VERSION: dict[str, dict[str, dict[str, dict[str, type | tuple[type
     # argument schema is the pair's only model-visible difference.
     "2.6.0": TOOL_SPECS,
     "2.6.1": TOOL_SPECS_V250,
+    # Successor pair (decision D-0033): 2.7.0 (W3, control) keeps the
+    # original argument contract; 2.7.1 (W4, treatment) exposes evidence_refs.
+    "2.7.0": TOOL_SPECS,
+    "2.7.1": TOOL_SPECS_V250,
 }
 
 
@@ -125,7 +129,7 @@ class ToolResult:
 
 #: Workloads whose terminal schema failures are a correctable controller
 #: rejection rather than an immediate ``invalid_tool_arguments`` stop.
-WORKFLOW_TERMINAL_VERSIONS = frozenset({"2.6.0", "2.6.1"})
+WORKFLOW_TERMINAL_VERSIONS = frozenset({"2.6.0", "2.6.1", "2.7.0", "2.7.1"})
 
 
 def workflow_terminal_schema_is_correctable(name: str, workload_version: str | None) -> bool:

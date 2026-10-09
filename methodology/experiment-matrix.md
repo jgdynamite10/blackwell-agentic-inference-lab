@@ -97,7 +97,14 @@ Before any full-baseline measurement, one short owner-approved
   (holdout templates stay unseen until the official qualification). It is
   diagnostic only and authorizes nothing. Canary findings may support
   development correction; official qualification findings must not be
-  used to tune the candidate. The Akamai
+  used to tune the candidate. Decision **D-0033** adds the successor pair
+  W3/W4 (workloads 2.7.0 / 2.7.1, `workflow-controller-v2`, W3 the
+  same-session control for W4) because generic log sufficiency did not
+  guarantee diagnosis-relevant evidence. A W3 control record is
+  schema-valid and authenticates only W4. Relevance uses the selected
+  diagnosis id, including short technical tokens and acronyms, and does
+  not copy runbook categories onto other published candidates. W1/W2 stay
+  historical. The Akamai
   qualification infrastructure region is fixed to `ca-central` (decision
   D-0032, superseding only the D-0030 region lock). The owner confirmed
   current capacity in `ca-central` by authorizing this region change on

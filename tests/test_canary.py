@@ -245,7 +245,7 @@ class TestApprovalAndConfig:
             )
 
     def test_candidates_are_public_catalog_only(self):
-        assert CANARY_CANDIDATES == ("C1", "C2", "P1", "P2C", "W1", "W2")
+        assert CANARY_CANDIDATES == ("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4")
         with pytest.raises(ConfigError, match="public-catalog"):
             validate_canary_config(_canary_config("W1"), candidate_id="P2")
 
