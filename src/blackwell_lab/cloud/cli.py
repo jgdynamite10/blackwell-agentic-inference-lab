@@ -1653,9 +1653,9 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
             qualification.require_successor_pair_contract()
         elif candidate_id in qualification.STRUCTURED_EVIDENCE_CANDIDATES:
             qualification.require_structured_pair_contract()
-            canary.preflight_canary_execution(
-                config, candidate_id=candidate_id, run_label=run_label
-            )
+            from blackwell_lab.cloud.structured_canary import preflight_canary_execution
+
+            preflight_canary_execution(config, candidate_id=candidate_id, run_label=run_label)
     except (ConfigError, qualification.QualificationError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 1
