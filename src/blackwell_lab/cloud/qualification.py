@@ -1007,7 +1007,7 @@ def require_successor_pair_contract() -> dict[str, Any]:
 
 def require_structured_pair_contract() -> dict[str, Any]:
     """Fail closed unless W5/W6 match and W1-W4 identities stay frozen."""
-    from blackwell_lab.workload.agent import RETRIES, SYSTEM_PROMPT_V241, system_prompt
+    from blackwell_lab.workload.agent import RETRIES, SYSTEM_PROMPT_V241, system_prompt, task_prompt
     from blackwell_lab.workload.public_metadata import (
         STRUCTURED_FIELD_EXPLANATION,
         evidence_contract,
@@ -1047,11 +1047,13 @@ def require_structured_pair_contract() -> dict[str, Any]:
         problems.append("historical pairing")
     if RETRIES != 0:
         problems.append("retries")
-    scenario = next(iter(catalog().values()))
-    expected_prompt = SYSTEM_PROMPT_V241 + "\n\n" + STRUCTURED_FIELD_EXPLANATION
+    scenario = catalog()[DEVELOPMENT_TEMPLATE_IDS[0]]
     for candidate in STRUCTURED_EVIDENCE_CANDIDATES:
-        if system_prompt(scenario, candidate_workload_version(candidate)) != expected_prompt:
+        version = candidate_workload_version(candidate)
+        if system_prompt(scenario, version) != SYSTEM_PROMPT_V241:
             problems.append("system prompt")
+        if STRUCTURED_FIELD_EXPLANATION not in task_prompt(scenario, None, version):
+            problems.append("task prompt")
     contract = evidence_contract()
     if contract["controller_id"] != W_STRUCTURED_CONTROLLER:
         problems.append("evidence contract")

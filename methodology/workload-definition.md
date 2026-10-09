@@ -193,10 +193,13 @@ canary seed `20261007` are unchanged.
 
 ### Workloads 2.8.0 and 2.8.1 — structured public evidence (decision D-0034)
 
-Workloads **2.8.0** and **2.8.1** bind **`workflow-controller-v3`**. They
-add a reviewed public-evidence overlay for the six development templates:
-hypothesis claims on the task prompt and on a successful runbook, and
-`finding` / `mentions` arrays on returned logs and health. The controller
+Workloads **2.8.0** and **2.8.1** bind **`workflow-controller-v3`**. Their
+system prompt stays byte-identical to the 2.4.1 prompt. The task prompt
+adds a generic explanation of structured fields, which names no scenario,
+plus the reviewed hypothesis catalog. The overlay covers the six
+development templates: hypothesis claims on the task prompt and on a
+successful runbook, and `finding` / `mentions` arrays on returned logs
+and health. The controller
 checks whether the selected hypothesis's declared evidence pattern is
 covered. It does not decide that the hypothesis is the correct or unique
 cause. The evaluator, predicates, accepted answers, schedules, floors,

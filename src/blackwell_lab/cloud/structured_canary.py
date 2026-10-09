@@ -92,3 +92,18 @@ def preflight_canary_execution(config: dict, *, candidate_id: str, run_label: st
             if "diagnosis_hypotheses" not in rendered:
                 raise QualificationError("the development overlay did not publish hypotheses")
     return executed
+
+
+def enrich_canary_receipt(receipt: dict) -> dict:
+    """Add the evidence contract and validation limits to a W5/W6 canary receipt.
+
+    Historical canary receipts are built by ``canary.sanitized_receipt`` and
+    are not passed through this function.
+    """
+    from blackwell_lab.workload.public_metadata import VALIDATION_SCOPE, evidence_contract
+
+    enriched = dict(receipt)
+    enriched["evidence_contract"] = evidence_contract()
+    enriched["validation_scope"] = VALIDATION_SCOPE
+    enriched["blind_generalization_evidence"] = False
+    return enriched

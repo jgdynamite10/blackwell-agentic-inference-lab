@@ -406,6 +406,32 @@
           "else": {
             "required": ["catalog_digest"]
           }
+        },
+        {
+          "$comment": "Decision D-0034: workloads 2.8.0 and 2.8.1, and any manifest that binds workflow-controller-v3, must record evidence_contract, validation_scope, and blind_generalization_evidence. Earlier workloads omit those fields and remain valid.",
+          "if": {
+            "anyOf": [
+              {
+                "required": ["version"],
+                "properties": {
+                  "version": { "enum": ["2.8.0", "2.8.1"] }
+                }
+              },
+              {
+                "required": ["controller"],
+                "properties": {
+                  "controller": { "const": "workflow-controller-v3" }
+                }
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "evidence_contract",
+              "validation_scope",
+              "blind_generalization_evidence"
+            ]
+          }
         }
       ],
       "properties": {

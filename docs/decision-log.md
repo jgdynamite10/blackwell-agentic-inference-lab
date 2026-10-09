@@ -2174,9 +2174,16 @@ W5 mints only `matched-w5-development-control` (schema 2.0.0) and
 authenticates only W6. A canary cannot mint it. W1 cannot authenticate W4
 or W6. W3 cannot authenticate W2 or W6. W5 cannot authenticate W2 or W4.
 Historical prompts, tool payloads, and controller behavior for W1-W4 stay
-on their existing versions. Identity digests below were recomputed with
-`candidate_identity_digest` after this implementation. The D-0033 W1-W4
-cells stay the current contract for those candidates.
+on their existing versions. The W5/W6 system prompt is byte-identical to
+`SYSTEM_PROMPT_V241`. The generic structured-field explanation is on the
+task prompt. The controller hash covers observation eligibility, and the
+renderer hash covers task rendering and tool-payload dispatch. Identity
+digests below were recomputed with `candidate_identity_digest` after that
+review correction. The Python 3.12.2 full suite passed at
+`bc58cc87dd26e0443bd9973810f3eb7bf11fddd3` (ended 2026-10-09T17:45:15Z) and
+the Python 3.10.19 full suite passed at the same commit (ended
+2026-10-09T18:27:01Z). Those suites predate this correction. The D-0033
+W1-W4 cells stay the current contract for those candidates.
 
 | Candidate | D-0034 (`ca-central`, recomputed) |
 | --- | --- |
@@ -2184,16 +2191,17 @@ cells stay the current contract for those candidates.
 | W2 | `06d673972a696efcddc9ce00d6c9f6a15a032e0c516d4dc8b54f01dbba0917a2` |
 | W3 | `bdb9947bf5c0934833d077536ae85740857c36bfd08d88f7fee8b7b54f0f857e` |
 | W4 | `66df267f60f062f867678331fc466305cde5432bc9cba861ebe90e8cef108414` |
-| W5 | `e16bd151b79623faccf41965761cffe5cfde6dfc8f32f25600a790322ccb7e7e` |
-| W6 | `9dda8ec877fb52ba060616848fb17863a581d3b011d143ceb7f0054672d14281` |
+| W5 | `4aaec2742359ce7d35f04ed5b167132e68783dc073b3d8516c30851a8f7e5f27` |
+| W6 | `cbff1ba63b6f43e2b4b672ee5559b95ebcdb464ab9ec6ea1b6b2f288a32c541a` |
 
 The shared evidence contract records
 `evidence_schema_sha256=4ae2ad3d28b806d20c5452cfd306cca8baca3706d3bf63962f952e4bca90f8ed`,
 `public_metadata_sha256=78160f7f0b8d8f96bc20248d742e4e156b4f3934fd60fd5bbb21ed898ba208cf`,
 `normalization_policy_sha256=d847fcceddfa29fe83ac53e6e74839644ae123f24a4cd0cad8d70c2869b57d7b`,
-`controller_sha256=69cb0c42499e5c0e898168ee2e682df2ceab191246829ff2b9051a3bfafea831`,
+`controller_sha256=1b0ebd2deff2b91e2f87f1dfee2e4e9ff59b6cec5a669dda65ce8ec1999fa97e`,
 and
-`surface_renderer_sha256=2da56507759b930d2a0b58fe7564670a686cde9d51aac5f8d4b9dbecee76c6ed`.
+`surface_renderer_sha256=c966ae7652105128a2e0355bd2d6774d8c1222cc7cb33440cb85513e772619db`.
+Both candidates record `system_prompt_sha256=37b3a4fb615dc21c8d39a5301dc4318870fea3498fbed196c50bfcbe67de1bd3`.
 Manifests for these workloads set
 `validation_scope=public-catalog-pre-exposed-holdout` and
 `blind_generalization_evidence=false`.

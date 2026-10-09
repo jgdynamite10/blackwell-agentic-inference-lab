@@ -23,8 +23,9 @@ CONTRACT_VERSION = "1.0.0"
 VALIDATION_SCOPE = "public-catalog-pre-exposed-holdout"
 STRUCTURED_WORKLOADS = frozenset({"2.8.0", "2.8.1"})
 
-#: Generic explanation shared by the 2.8.0 and 2.8.1 system prompts.
-#: It names no scenario, diagnosis, query, or accepted answer.
+#: Generic explanation appended to the 2.8.0 and 2.8.1 task prompts.
+#: The system prompt stays the 2.4.1 text. This names no scenario,
+#: diagnosis, query, or accepted answer.
 STRUCTURED_FIELD_EXPLANATION = " ".join(
     [
         "Structured public evidence may appear on search_logs lines and",
@@ -43,8 +44,13 @@ CONTROLLER_CLOSURE = (
     "src/blackwell_lab/workload/relevance_v3.py",
     "src/blackwell_lab/workload/workflow_v3.py",
     "src/blackwell_lab/workload/workflow.py",
+    "src/blackwell_lab/workload/evidence.py",
 )
-RENDERER_CLOSURE = ("src/blackwell_lab/workload/public_metadata/__init__.py",)
+RENDERER_CLOSURE = (
+    "src/blackwell_lab/workload/public_metadata/__init__.py",
+    "src/blackwell_lab/workload/tools.py",
+    "src/blackwell_lab/workload/agent.py",
+)
 
 _PACKAGE = Path(__file__).resolve().parent
 _REPO = _PACKAGE.parents[3]
@@ -102,11 +108,21 @@ def normalization_policy_sha256() -> str:
     return content_sha256(_policy())
 
 
-def _hash_files(relative_paths: tuple[str, ...]) -> str:
+def hash_files(
+    relative_paths: tuple[str, ...],
+    replacements: dict[str, bytes] | None = None,
+) -> str:
+    """Hash a closure. ``replacements`` substitute file bytes for mutation tests."""
     digest = hashlib.sha256()
+    overrides = replacements or {}
     for relative in relative_paths:
-        path = _REPO / relative
-        data = path.read_bytes()
+        if relative in overrides:
+            data = overrides[relative]
+        else:
+            path = _REPO / relative
+            if not path.is_file():
+                raise PublicMetadataError(f"missing contract dependency {relative}")
+            data = path.read_bytes()
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
         digest.update(str(len(data)).encode("ascii"))
@@ -116,11 +132,11 @@ def _hash_files(relative_paths: tuple[str, ...]) -> str:
 
 
 def controller_sha256() -> str:
-    return _hash_files(CONTROLLER_CLOSURE)
+    return hash_files(CONTROLLER_CLOSURE)
 
 
 def surface_renderer_sha256() -> str:
-    return _hash_files(RENDERER_CLOSURE)
+    return hash_files(RENDERER_CLOSURE)
 
 
 def _span(message: str) -> dict[str, Any]:
@@ -325,6 +341,26 @@ def manifest_workload_binding(workload_version: str | None) -> dict[str, Any]:
         "validation_scope": VALIDATION_SCOPE,
         "blind_generalization_evidence": False,
     }
+
+
+def require_manifest_binding(workload: dict[str, Any]) -> None:
+    """Require the live evidence binding on 2.8.x and v3 manifests.
+
+    Historical workloads omit the fields and are accepted unchanged.
+    """
+    version = workload.get("version")
+    controller = workload.get("controller")
+    structured = structured_evidence_workload(version) if isinstance(version, str) else False
+    if not structured and controller != CONTROLLER_ID:
+        return
+    expected = manifest_workload_binding("2.8.0")
+    actual = {
+        "evidence_contract": workload.get("evidence_contract"),
+        "validation_scope": workload.get("validation_scope"),
+        "blind_generalization_evidence": workload.get("blind_generalization_evidence"),
+    }
+    if actual != expected:
+        raise PublicMetadataError("manifest evidence binding does not match the implementation")
 
 
 def _template(scenario_id: str) -> dict[str, Any]:

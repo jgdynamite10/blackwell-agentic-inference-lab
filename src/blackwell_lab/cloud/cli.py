@@ -1854,6 +1854,10 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
             files=files,
             qualification_environment=qual_environment,
         )
+        if candidate_id in qualification.STRUCTURED_EVIDENCE_CANDIDATES:
+            from blackwell_lab.cloud.structured_canary import enrich_canary_receipt
+
+            receipt = enrich_canary_receipt(receipt)
         from blackwell_lab.cloud.artifacts import write_private_json
 
         write_private_json(

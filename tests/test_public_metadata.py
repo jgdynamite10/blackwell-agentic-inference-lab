@@ -12,12 +12,21 @@ from blackwell_lab.cloud.qualification import (
     candidate_identity_digest,
     frozen_candidate_fields,
 )
+from blackwell_lab.schemas import validate_run_manifest
+from blackwell_lab.workload.agent import SYSTEM_PROMPT_V241, system_prompt, task_prompt
 from blackwell_lab.workload.public_metadata import (
+    CONTROLLER_CLOSURE,
+    RENDERER_CLOSURE,
+    STRUCTURED_FIELD_EXPLANATION,
     PublicMetadataError,
+    controller_sha256,
     evidence_contract,
+    hash_files,
     load_overlay,
+    manifest_workload_binding,
     render_tool_payload,
     require_evidence_contract,
+    surface_renderer_sha256,
 )
 from blackwell_lab.workload.scenarios import catalog
 from blackwell_lab.workload.tools import SimulatedToolbox
@@ -144,6 +153,108 @@ def test_historical_identities_and_w5_w6_binding():
     tampered["controller_sha256"] = "0" * 64
     with pytest.raises(PublicMetadataError, match="does not match"):
         require_evidence_contract(tampered)
+
+
+def test_observation_eligibility_changes_the_controller_binding():
+    evidence = next(path for path in CONTROLLER_CLOSURE if path.endswith("evidence.py"))
+    source = (ROOT / evidence).read_bytes()
+    needle = b"_UNUSABLE_HEALTH_STATUSES"
+    assert needle in source
+    mutated = source.replace(needle, b"_USABLE_HEALTH_STATUSES", 1)
+    changed = hash_files(CONTROLLER_CLOSURE, {evidence: mutated})
+    assert changed != controller_sha256()
+    assert hash_files(tuple(path for path in CONTROLLER_CLOSURE if path != evidence)) != (
+        controller_sha256()
+    )
+    stale = dict(evidence_contract())
+    stale["controller_sha256"] = changed
+    with pytest.raises(PublicMetadataError, match="does not match"):
+        require_evidence_contract(stale)
+
+
+def test_task_rendering_and_dispatch_change_the_renderer_binding():
+    tools = next(path for path in RENDERER_CLOSURE if path.endswith("tools.py"))
+    agent = next(path for path in RENDERER_CLOSURE if path.endswith("agent.py"))
+    tools_bytes = (ROOT / tools).read_bytes()
+    agent_bytes = (ROOT / agent).read_bytes()
+    dispatch = b"payload = render_tool_payload(self._scenario, name, payload)"
+    explanation = b"STRUCTURED_FIELD_EXPLANATION"
+    assert dispatch in tools_bytes
+    assert explanation in agent_bytes
+    dispatched = tools_bytes.replace(dispatch, b"payload = payload", 1)
+    assert hash_files(RENDERER_CLOSURE, {tools: dispatched}) != surface_renderer_sha256()
+    assert (
+        hash_files(
+            RENDERER_CLOSURE,
+            {agent: agent_bytes.replace(explanation, b"STRUCTURED_FIELD_OMITTED", 1)},
+        )
+        != surface_renderer_sha256()
+    )
+    stale = dict(evidence_contract())
+    stale["surface_renderer_sha256"] = "f" * 64
+    with pytest.raises(PublicMetadataError, match="does not match"):
+        require_evidence_contract(stale)
+
+
+def test_structured_explanation_is_on_the_task_prompt():
+    from blackwell_lab.cloud.qualification import DEVELOPMENT_TEMPLATE_IDS
+
+    scenario = catalog()[DEVELOPMENT_TEMPLATE_IDS[0]]
+    for version in ("2.8.0", "2.8.1"):
+        assert system_prompt(scenario, version) == SYSTEM_PROMPT_V241
+        rendered = task_prompt(scenario, None, version)
+        assert STRUCTURED_FIELD_EXPLANATION in rendered
+        assert "Diagnosis hypotheses" in rendered
+    historical = task_prompt(scenario, None, "2.7.0")
+    assert STRUCTURED_FIELD_EXPLANATION not in historical
+    assert system_prompt(scenario, "2.7.0") == SYSTEM_PROMPT_V241
+
+
+def _example_manifest() -> dict:
+    return json.loads((ROOT / "examples" / "example-run-manifest.json").read_text(encoding="utf-8"))
+
+
+def _structured_manifest(version: str = "2.8.0") -> dict:
+    document = _example_manifest()
+    document["workload"]["version"] = version
+    document["workload"]["controller"] = "workflow-controller-v3"
+    document["workload"].update(manifest_workload_binding(version))
+    return document
+
+
+def test_historical_manifest_omits_the_v3_binding():
+    document = _example_manifest()
+    assert "evidence_contract" not in document["workload"]
+    validate_run_manifest(document)
+    document["workload"]["version"] = "2.7.0"
+    document["workload"]["controller"] = "workflow-controller-v2"
+    validate_run_manifest(document)
+
+
+def test_v3_manifest_requires_the_evidence_binding():
+    for version in ("2.8.0", "2.8.1"):
+        document = _example_manifest()
+        document["workload"]["version"] = version
+        document["workload"]["controller"] = "workflow-controller-v3"
+        with pytest.raises(jsonschema.ValidationError):
+            validate_run_manifest(document)
+    controller_only = _example_manifest()
+    controller_only["workload"]["controller"] = "workflow-controller-v3"
+    with pytest.raises(jsonschema.ValidationError):
+        validate_run_manifest(controller_only)
+    bound = _structured_manifest()
+    validate_run_manifest(bound)
+    bound["workload"]["validation_scope"] = "holdout"
+    with pytest.raises(jsonschema.ValidationError):
+        validate_run_manifest(bound)
+    mismatched = _structured_manifest("2.8.1")
+    mismatched["workload"]["blind_generalization_evidence"] = True
+    with pytest.raises(jsonschema.ValidationError):
+        validate_run_manifest(mismatched)
+    stale = _structured_manifest()
+    stale["workload"]["evidence_contract"]["controller_sha256"] = "0" * 64
+    with pytest.raises(PublicMetadataError, match="does not match"):
+        validate_run_manifest(stale)
 
 
 def test_annotation_modules_do_not_name_evaluator_answers():

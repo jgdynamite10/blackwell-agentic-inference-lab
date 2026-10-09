@@ -357,6 +357,36 @@ class TestCli:
                     sealed_tasks=None,
                 )
 
+    def test_w5_receipt_records_the_evidence_limits(self, ready, tmp_path, monkeypatch, capsys):
+        from blackwell_lab.workload.public_metadata import VALIDATION_SCOPE, evidence_contract
+
+        monkeypatch.setattr(realbench, "run_real_cell", lambda *a, **k: [_FakeRecord(_outcomes(4))])
+        config = _canary_config("W5")
+        config["evidence_contract"] = evidence_contract()
+        path = self._write(tmp_path, config)
+        assert main(_argv(path, candidate="W5")) == 0
+        receipt = json.loads(capsys.readouterr().out)
+        assert receipt["evidence_contract"] == evidence_contract()
+        assert receipt["validation_scope"] == VALIDATION_SCOPE
+        assert receipt["blind_generalization_evidence"] is False
+        stored = json.loads(
+            (ready / CANARY_ARTIFACT_FAMILY / "canary-a-w5-canary-receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert stored["evidence_contract"] == receipt["evidence_contract"]
+        assert stored["validation_scope"] == VALIDATION_SCOPE
+        assert stored["blind_generalization_evidence"] is False
+
+    def test_w1_receipt_omits_the_structured_binding(self, ready, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(realbench, "run_real_cell", lambda *a, **k: [_FakeRecord(_outcomes(4))])
+        path = self._write(tmp_path, _canary_config("W1"))
+        assert main(_argv(path, candidate="W1")) == 0
+        receipt = json.loads(capsys.readouterr().out)
+        assert "evidence_contract" not in receipt
+        assert "validation_scope" not in receipt
+        assert "blind_generalization_evidence" not in receipt
+
     def test_qualification_phrase_does_not_authorize_a_canary(self, ready, tmp_path, capsys):
         path = self._write(tmp_path, _canary_config())
         digest = hashlib.sha256(path.read_bytes()).hexdigest()

@@ -99,7 +99,6 @@ from blackwell_lab.workload.model_client import (
     NativeToolCall,
     NativeToolCallError,
 )
-from blackwell_lab.workload.public_metadata import STRUCTURED_FIELD_EXPLANATION
 from blackwell_lab.workload.sampling import TaskInstance
 from blackwell_lab.workload.scenarios import Scenario
 from blackwell_lab.workload.tools import (
@@ -348,10 +347,10 @@ SYSTEM_PROMPTS_BY_VERSION = {
     # Diagnosis relevance is enforced by workflow-controller-v2, not by prose.
     "2.7.0": SYSTEM_PROMPT_V241,
     "2.7.1": SYSTEM_PROMPT_V241,
-    # Workloads 2.8.0 / 2.8.1 share one prompt: the 2.4.1 text plus a generic
-    # explanation of structured findings. The explanation names no scenario.
-    "2.8.0": SYSTEM_PROMPT_V241 + "\n\n" + STRUCTURED_FIELD_EXPLANATION,
-    "2.8.1": SYSTEM_PROMPT_V241 + "\n\n" + STRUCTURED_FIELD_EXPLANATION,
+    # Workloads 2.8.0 / 2.8.1 execute the 2.4.1 system prompt byte for byte.
+    # The generic field explanation is appended by task_prompt.
+    "2.8.0": SYSTEM_PROMPT_V241,
+    "2.8.1": SYSTEM_PROMPT_V241,
 }
 
 
@@ -377,8 +376,9 @@ def task_prompt(
     """User task prompt. Publishes diagnosis candidates only — never
     remediation IDs (decision D-0019).
 
-    Workloads 2.8.0 / 2.8.1 also publish the reviewed hypothesis catalog.
-    Older contracts omit that block, so their prompt bytes stay unchanged.
+    Workloads 2.8.0 / 2.8.1 also append the generic structured-field
+    explanation and the reviewed hypothesis catalog. Older contracts omit
+    both, so their prompt bytes stay unchanged.
     """
     candidates = "\n".join(f"- {d}" for d in scenario.candidate_diagnoses)
     surface = f"{instance.surface_variant_text()}\n" if instance is not None else ""
@@ -392,11 +392,13 @@ def task_prompt(
     )
     from blackwell_lab.workload.native_tools import require_workload_version
     from blackwell_lab.workload.public_metadata import (
+        STRUCTURED_FIELD_EXPLANATION,
         hypothesis_prompt,
         structured_evidence_workload,
     )
 
     if structured_evidence_workload(require_workload_version(workload_version)):
+        prompt += "\n\n" + STRUCTURED_FIELD_EXPLANATION
         prompt += hypothesis_prompt(scenario)
     return prompt
 
