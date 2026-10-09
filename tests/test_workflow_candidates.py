@@ -124,9 +124,19 @@ class TestCandidateTables:
 
     def test_workflow_pair_lives_in_its_own_tables(self):
         assert WORKFLOW_CANDIDATES == ("W1", "W2")
-        assert ALL_AUTHORIZED_CANDIDATES == ("C1", "C2", "P1", "P2", "P2C", "W1", "W2")
+        assert ALL_AUTHORIZED_CANDIDATES == (
+            "C1",
+            "C2",
+            "P1",
+            "P2",
+            "P2C",
+            "W1",
+            "W2",
+            "W3",
+            "W4",
+        )
         assert not set(WORKFLOW_CANDIDATES) & set(AUTHORIZED_CANDIDATES)
-        assert DEVELOPMENT_CONTROL_PAIRS == {"P2C": "P1", "W2": "W1"}
+        assert DEVELOPMENT_CONTROL_PAIRS == {"P2C": "P1", "W2": "W1", "W4": "W3"}
         for candidate in WORKFLOW_CANDIDATES:
             assert is_catalog_candidate(candidate)
             assert candidate_controller(candidate) == "workflow-controller-v1"
@@ -140,7 +150,7 @@ class TestCandidateTables:
 
     def test_workflow_identities_are_distinct_and_pinned(self):
         digests = {c: candidate_identity_digest(c) for c in ALL_AUTHORIZED_CANDIDATES}
-        assert len(set(digests.values())) == 7
+        assert len(set(digests.values())) == 9
         for candidate, digest in CA_CENTRAL_IDENTITY_DIGESTS.items():
             assert digests[candidate] == digest, candidate
         for candidate, digest in WORKFLOW_IDENTITY_DIGESTS.items():
@@ -181,10 +191,10 @@ class TestCandidateTables:
         assert len(spec["template_ids"]) == 6
 
     def test_unknown_candidate_messages_name_the_pair(self):
-        with pytest.raises(ConfigError, match="W1, or W2"):
-            frozen_candidate_fields("W3")
-        with pytest.raises(ConfigError, match="W1, or W2"):
-            candidate_controller("W3")
+        with pytest.raises(ConfigError, match="W3, or W4"):
+            frozen_candidate_fields("W5")
+        with pytest.raises(ConfigError, match="W3, or W4"):
+            candidate_controller("W5")
 
 
 class TestConfigs:
@@ -296,7 +306,7 @@ class TestPairs:
         assert pair_for_treatment("W2") is W1_W2_PAIR
         assert pair_for_control("P1") is P1_P2C_PAIR
         assert pair_for_control("W1") is W1_W2_PAIR
-        for other in ("C1", "C2", "P2", "W3"):
+        for other in ("C1", "C2", "P2", "W5"):
             assert pair_for_treatment(other) is None and pair_for_control(other) is None
         assert P1_P2C_PAIR.kind == CONTROL_KIND == "matched-p1-development-control"
         assert W1_W2_PAIR.kind == W_CONTROL_KIND == "matched-w1-development-control"

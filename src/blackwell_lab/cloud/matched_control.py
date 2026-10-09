@@ -20,6 +20,11 @@ same-session development control for W2. Every function takes a
 record kind, section keys, and refusal messages are byte-identical to the
 D-0027 contract. W1 records carry a distinct kind and ``w1_``-prefixed keys
 so neither pair can authenticate the other.
+
+Decision D-0033 adds a third pair: W3 is the same-session development
+control for W4. Its kind and ``w3_``-prefixed keys match neither the P1
+pair nor the W1 pair, so a W1 control cannot authenticate W4 and a W3
+control cannot authenticate W2.
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ from blackwell_lab.workload.validation import ConfigError
 CONTROL_SCHEMA_VERSION = "1.0.0"
 CONTROL_KIND = "matched-p1-development-control"
 W_CONTROL_KIND = "matched-w1-development-control"
+W3_CONTROL_KIND = "matched-w3-development-control"
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -87,7 +93,9 @@ class ControlPair:
 P1_P2C_PAIR = ControlPair(control="P1", treatment="P2C", kind=CONTROL_KIND, prefix="p1")
 #: Workflow-controlled pair (D-0031).
 W1_W2_PAIR = ControlPair(control="W1", treatment="W2", kind=W_CONTROL_KIND, prefix="w1")
-CONTROL_PAIRS: tuple[ControlPair, ...] = (P1_P2C_PAIR, W1_W2_PAIR)
+#: Diagnosis-relevant successor pair (D-0033). Distinct kind and prefix.
+W3_W4_PAIR = ControlPair(control="W3", treatment="W4", kind=W3_CONTROL_KIND, prefix="w3")
+CONTROL_PAIRS: tuple[ControlPair, ...] = (P1_P2C_PAIR, W1_W2_PAIR, W3_W4_PAIR)
 
 
 def pair_for_treatment(candidate_id: object) -> ControlPair | None:
@@ -554,6 +562,8 @@ def require_development_control_section(config: dict, *, candidate_id: str, stag
         if section is not None:
             if candidate_id in (W1_W2_PAIR.control, W1_W2_PAIR.treatment):
                 raise ConfigError("development_control is valid only on W2 development")
+            if candidate_id in (W3_W4_PAIR.control, W3_W4_PAIR.treatment):
+                raise ConfigError("development_control is valid only on W4 development")
             raise ConfigError("development_control is valid only on P2C development")
         return
     if not isinstance(section, dict):

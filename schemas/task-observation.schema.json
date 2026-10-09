@@ -98,7 +98,7 @@
         "workflow_control": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Sanitized workflow-controller accounting (workloads 2.6.0 / 2.6.1, controller workflow-controller-v1, decision D-0031). Counts and generic state names only: never observation IDs, payloads, prompts, completions, reasoning, queries, or scenario data. Absent for every other workload.",
+          "description": "Sanitized workflow-controller accounting (workloads 2.6.0 / 2.6.1, controller workflow-controller-v1, decision D-0031; workloads 2.7.0 / 2.7.1, controller workflow-controller-v2, decision D-0033). Counts and generic state names only: never observation IDs, payloads, prompts, completions, reasoning, queries, or scenario data. Absent for every other workload.",
           "required": [
             "controller",
             "treatments",
@@ -117,7 +117,10 @@
             "remaining_turn_warnings"
           ],
           "properties": {
-            "controller": { "type": "string", "enum": ["workflow-controller-v1"] },
+            "controller": {
+              "type": "string",
+              "enum": ["workflow-controller-v1", "workflow-controller-v2"]
+            },
             "treatments": {
               "type": "array",
               "items": { "type": "string", "enum": ["evidence-refs"] },
@@ -159,7 +162,8 @@
               "additionalProperties": { "type": "integer", "minimum": 1 }
             },
             "accepted_evidence_refs": { "type": ["integer", "null"], "minimum": 1 },
-            "remaining_turn_warnings": { "type": "integer", "minimum": 0 }
+            "remaining_turn_warnings": { "type": "integer", "minimum": 0 },
+            "repeated_zero_match_searches": { "type": "integer", "minimum": 0 }
           }
         },
         "task_index": { "type": "integer", "minimum": 0, "description": "0-based submission order within the repetition." },

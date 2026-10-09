@@ -2079,3 +2079,58 @@ matching the region, or reusing the aborted run tag, is not enough.
 Tested with synthetic fixtures only. No provider, credential, inference
 endpoint, download, private result, custody package, publication system,
 plan, apply, or the secondary repository was accessed.
+
+## 2026-10-08 — D-0033: Diagnosis-relevant evidence successor W3/W4
+
+**Decision.** Add a versioned successor candidate pair. **W3** (workload
+2.7.0, control) and **W4** (workload 2.7.1, `evidence-refs` treatment)
+bind `workflow-controller-v2`. W1 and W2 stay on `workflow-controller-v1`
+with workloads 2.6.0 and 2.6.1. Their identities are unchanged. W3 is the
+same-session development control for W4. That pair does not authenticate
+across generations: a W1 control cannot bind W4, and a W3 control cannot
+bind W2.
+
+The successor keeps the usable-log and valid-runbook requirements. It also
+requires at least one usable direct log observation relevant to the
+diagnosis selected in `recommend_remediation`. Relevance is a generic
+category or diagnosis-id token overlap computed only from public tool,
+diagnosis, and runbook metadata. W4's `evidence_refs` must include one
+such log. Runbook and recent-change observations stay ineligible as direct
+evidence. A repeated equivalent zero-match search receives a typed
+correctable rejection that tells the model to change the query, source, or
+diagnostic hypothesis. `max_turns` stays 12, one native call per turn,
+`RETRIES` stays 0, and the remaining-turn warning stays at three. If
+relevant evidence is never found, the terminal is rejected and budget
+exhaustion is `workflow_requirements_unmet`.
+
+A ten-task development canary passed 3 of 10. Six controller-accepted
+terminals missed diagnosis-relevant evidence, and one task exhausted the
+turn budget with no infrastructure, endpoint, timeout, or model-serving
+failure. generic log sufficiency did not guarantee diagnosis-relevant
+evidence.
+
+The evaluator, the 0.40 floor, the ten-task canary schedule, the measured
+canary seed `20261007`, the official 20-task schedule, holdout protection,
+task fixtures, and the `ca-central` region lock are unchanged. D-0027
+through D-0032 are not rewritten.
+
+Identity digests below were recomputed with `candidate_identity_digest`.
+The D-0032 W1 and W2 cells stay the current contract for those candidates.
+
+| Candidate | D-0033 (`ca-central`, recomputed) |
+| --- | --- |
+| W1 | `2b7c5745084f4459af66e58fa5701d5c513108a9536385acbed00722c02e68cf` |
+| W2 | `06d673972a696efcddc9ce00d6c9f6a15a032e0c516d4dc8b54f01dbba0917a2` |
+| W3 | `bdb9947bf5c0934833d077536ae85740857c36bfd08d88f7fee8b7b54f0f857e` |
+| W4 | `66df267f60f062f867678331fc466305cde5432bc9cba861ebe90e8cef108414` |
+
+**This decision does not authorize** a canary rerun, qualification,
+holdout, freeze, provisioning, downloads, or live execution. Those still
+require their own decisions and exact approval phrases.
+
+**Rationale.** The frozen controller treated any successful log observation
+as sufficient for the selected diagnosis. A separate controller version is
+what keeps that historical behavior attached to W1 and W2. Tested with
+synthetic fixtures only. No provider, credential, inference endpoint,
+download, private result, custody package, publication system, plan,
+apply, destroy, or the secondary repository was accessed.

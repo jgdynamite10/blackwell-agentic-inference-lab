@@ -1158,6 +1158,11 @@ def _sealed_validation_report(
             if candidate_id in qualification.WORKFLOW_CANDIDATES
             else {}
         ),
+        **(
+            {"controlled_experiment": qualification.successor_pair_experiment_record(candidate_id)}
+            if candidate_id in qualification.SUCCESSOR_WORKFLOW_CANDIDATES
+            else {}
+        ),
         **({"qualification_environment": qual_environment} if qual_environment is not None else {}),
         **({"matched_control": matched_control} if matched_control is not None else {}),
         **(
@@ -1644,6 +1649,8 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
         )
         if candidate_id in qualification.WORKFLOW_CANDIDATES:
             qualification.require_w_pair_contract()
+        elif candidate_id in qualification.SUCCESSOR_WORKFLOW_CANDIDATES:
+            qualification.require_successor_pair_contract()
     except (ConfigError, qualification.QualificationError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 1
@@ -2113,7 +2120,7 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2"),
+        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4"),
         help=(
             "C1 (temperature 1.0, workload 2.4.0), "
             "C2 (temperature 0.2, workload 2.4.0), "
@@ -2123,9 +2130,12 @@ def build_parser() -> argparse.ArgumentParser:
             "2.5.0 and controller, every stage on the D-0019 catalog schedule "
             "P1 uses; P1 is its control), "
             "P1, the workload 2.4.1 prompt-only variant at temperature 0.2, "
-            "W1 (workload 2.6.0, workflow-controller-v1; the D-0031 control), or "
+            "W1 (workload 2.6.0, workflow-controller-v1; the D-0031 control), "
             "W2 (workload 2.6.1, workflow-controller-v1 with the evidence-refs "
-            "treatment; W1 is its same-session control)."
+            "treatment; W1 is its same-session control), "
+            "W3 (workload 2.7.0, workflow-controller-v2; the D-0033 control), or "
+            "W4 (workload 2.7.1, workflow-controller-v2 with evidence-refs that "
+            "must cite a diagnosis-relevant log; W3 is its same-session control)."
         ),
     )
     qualify_parser.add_argument(
@@ -2186,7 +2196,7 @@ def build_parser() -> argparse.ArgumentParser:
     canary_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2C", "W1", "W2"),
+        choices=("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4"),
         help="Public-catalog candidate to canary (P2 is sealed and refused).",
     )
     canary_parser.add_argument(
@@ -2217,7 +2227,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze_parser.add_argument("--run-label", required=True)
     analyze_parser.add_argument(
-        "--candidate", required=True, choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2")
+        "--candidate",
+        required=True,
+        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4"),
     )
     analyze_parser.add_argument(
         "--stage", default="development", choices=("development", "holdout", "freeze")

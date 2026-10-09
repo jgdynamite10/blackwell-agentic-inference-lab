@@ -108,6 +108,7 @@ from blackwell_lab.workload.tools import (
     SimulatedToolbox,
     workflow_terminal_schema_is_correctable,
 )
+from blackwell_lab.workload.workflow import WORKFLOW_CONTROLLER_IDS
 
 #: Retry policy for measurement runs (measurement contract §7).
 RETRIES = 0
@@ -235,7 +236,7 @@ def _workflow_can_correct_terminal(
     controller: object, tool_name: str, workload_version: str
 ) -> bool:
     """Workflow-controlled terminal schema failures stay inside the turn budget."""
-    if getattr(controller, "controller_id", None) != "workflow-controller-v1":
+    if getattr(controller, "controller_id", None) not in WORKFLOW_CONTROLLER_IDS:
         return False
     return workflow_terminal_schema_is_correctable(tool_name, workload_version)
 
@@ -339,6 +340,10 @@ SYSTEM_PROMPTS_BY_VERSION = {
     # relative to P1, and it speaks only through tool-result payloads.
     "2.6.0": SYSTEM_PROMPT_V241,
     "2.6.1": SYSTEM_PROMPT_V241,
+    # Workloads 2.7.0 / 2.7.1 (decision D-0033) execute the same prompt bytes.
+    # Diagnosis relevance is enforced by workflow-controller-v2, not by prose.
+    "2.7.0": SYSTEM_PROMPT_V241,
+    "2.7.1": SYSTEM_PROMPT_V241,
 }
 
 

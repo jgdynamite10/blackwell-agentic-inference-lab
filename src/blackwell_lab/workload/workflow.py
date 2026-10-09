@@ -36,6 +36,11 @@ introduced: every reference must resolve to an earlier eligible observation
 of this task. It is the **only** difference between the W1 and W2 members
 of the candidate pair.
 
+Successor ``workflow-controller-v2`` (workloads 2.7.0 / 2.7.1, candidates
+W3/W4, decision D-0033) is a separate class. It keeps every rule above and
+also rejects a terminal whose usable logs are not relevant to the selected
+diagnosis. W1 and W2 stay on this class and do not inherit that check.
+
 What the controller never does
 ------------------------------
 It receives no scenario, no accepted diagnosis or remediation, no evaluator
@@ -61,10 +66,22 @@ from blackwell_lab.workload.evidence import (
     classify_observation,
     observation_id,
 )
+from blackwell_lab.workload.relevance import (
+    categories_in_text,
+    classify_usable_log,
+    diagnosis_tokens,
+    equivalent_query_key,
+    evidence_relevant,
+    log_message_tokens,
+    runbook_categories,
+)
 from blackwell_lab.workload.tools import EVIDENCE_REFS_ARGUMENT, TERMINAL_TOOL
 
 #: Controller identity recorded in manifests, candidate identity, receipts.
 CONTROLLER_WORKFLOW_V1 = "workflow-controller-v1"
+#: Successor controller (decision D-0033). Not bound to workloads 2.6.0 / 2.6.1.
+CONTROLLER_WORKFLOW_V2 = "workflow-controller-v2"
+WORKFLOW_CONTROLLER_IDS = frozenset({CONTROLLER_WORKFLOW_V1, CONTROLLER_WORKFLOW_V2})
 
 #: The single optional treatment: require the ``evidence_refs`` citation.
 TREATMENT_EVIDENCE_REFS = "evidence-refs"
@@ -106,6 +123,11 @@ REJECT_REMEDIATION_NOT_IN_RUNBOOK = "remediation_not_in_runbook"
 REJECT_DIAGNOSIS_NOT_PUBLISHED = "diagnosis_not_published"
 REJECT_EVIDENCE_REFS_REQUIRED = "evidence_refs_required"
 REJECT_MALFORMED_TERMINAL = "malformed_terminal"
+#: Successor-only terminal categories (workflow-controller-v2). v1 never emits them.
+REJECT_DIAGNOSIS_RELEVANT_EVIDENCE = "diagnosis_relevant_evidence_required"
+REJECT_RELEVANT_EVIDENCE_REF = "relevant_evidence_ref_required"
+#: Non-terminal rejection for a repeated equivalent zero-match search (v2 only).
+REJECT_REPEATED_ZERO_MATCH = "repeated_zero_match_search"
 REJECTION_CATEGORIES = (
     REJECT_INVESTIGATION_REQUIRED,
     REJECT_LOG_EVIDENCE_REQUIRED,
@@ -114,6 +136,8 @@ REJECTION_CATEGORIES = (
     REJECT_DIAGNOSIS_NOT_PUBLISHED,
     REJECT_EVIDENCE_REFS_REQUIRED,
     REJECT_MALFORMED_TERMINAL,
+    REJECT_DIAGNOSIS_RELEVANT_EVIDENCE,
+    REJECT_RELEVANT_EVIDENCE_REF,
 )
 
 #: Generic corrective guidance. Every sentence is scenario-independent: it
@@ -152,7 +176,26 @@ GUIDANCE: dict[str, str] = {
         "The recommendation is structurally invalid. diagnosis_id, "
         "rationale, and remediation_id must be non-empty strings."
     ),
+    REJECT_DIAGNOSIS_RELEVANT_EVIDENCE: (
+        "No usable direct log observation is relevant to the selected diagnosis. "
+        "A successful search that does not support that diagnosis is not sufficient. "
+        "Collect a direct log observation relevant to the selected diagnosis, or "
+        "select a diagnosis that the recorded logs support, then resubmit."
+    ),
+    REJECT_RELEVANT_EVIDENCE_REF: (
+        "evidence_refs must include the observation_id of a usable direct log "
+        "observation relevant to the selected diagnosis. Runbook lookups and "
+        "recent-change lookups are not direct evidence."
+    ),
 }
+
+#: Corrective text for a repeated equivalent zero-match search. It names no
+#: answer, service, query, predicate, or remediation.
+REPEATED_ZERO_MATCH_GUIDANCE = (
+    "This search repeats an earlier zero-match query, so it is not usable "
+    "evidence. Change the query, the log source, or the diagnostic hypothesis. "
+    "Do not repeat an equivalent search."
+)
 
 #: Generic guidance attached to unusable non-terminal results.
 UNUSABLE_GUIDANCE: dict[str, str] = {
@@ -512,3 +555,122 @@ class WorkflowController:
             "accepted_evidence_refs": self._accepted_refs,
             "remaining_turn_warnings": self._warnings_issued,
         }
+
+
+class DiagnosisRelevantWorkflowController(WorkflowController):
+    """``workflow-controller-v2``: v1 rules plus diagnosis-relevant logs.
+
+    A usable log is not enough. At least one usable direct-log observation
+    must be relevant to the diagnosis selected in ``recommend_remediation``.
+    The treatment additionally requires ``evidence_refs`` to cite one of
+    those relevant logs. Runbook and recent-change observations stay
+    ineligible as direct evidence. Repeated equivalent zero-match searches
+    are rejected with generic corrective text. W1 and W2 never construct
+    this class.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.controller_id = CONTROLLER_WORKFLOW_V2
+        self._log_categories: dict[str, frozenset[str]] = {}
+        self._log_tokens: dict[str, frozenset[str]] = {}
+        self._published_categories: dict[str, set[str]] = {}
+        self._zero_match_keys: set[str] = set()
+        self._repeated_zero_match_ids: set[str] = set()
+        self._repeated_zero_match_searches = 0
+
+    def record(self, tool: str, payload: object) -> Observation:
+        repeated = False
+        if tool == "search_logs" and isinstance(payload, dict):
+            if classify_observation(tool, payload) == INELIGIBLE_ZERO_MATCH_SEARCH:
+                key = equivalent_query_key(payload.get("query"))
+                if key is not None and key in self._zero_match_keys:
+                    repeated = True
+                if key is not None:
+                    self._zero_match_keys.add(key)
+        observation = super().record(tool, payload)
+        if repeated:
+            self._repeated_zero_match_ids.add(observation.observation_id)
+            self._repeated_zero_match_searches += 1
+        usable_log = (
+            tool == "search_logs"
+            and observation.eligibility == ELIGIBLE
+            and isinstance(payload, dict)
+        )
+        if usable_log:
+            self._log_categories[observation.observation_id] = classify_usable_log(payload)
+            self._log_tokens[observation.observation_id] = log_message_tokens(payload)
+        if tool == "retrieve_runbook" and isinstance(payload, dict):
+            self._note_runbook(payload)
+        return observation
+
+    def annotate(self, payload: dict[str, Any], observation: Observation) -> dict[str, Any]:
+        annotated = super().annotate(payload, observation)
+        if observation.observation_id not in self._repeated_zero_match_ids:
+            return annotated
+        block = dict(annotated[WORKFLOW_FIELD])
+        block["failure_category"] = REJECT_REPEATED_ZERO_MATCH
+        block["failure_categories"] = [REJECT_REPEATED_ZERO_MATCH]
+        block["guidance"] = REPEATED_ZERO_MATCH_GUIDANCE
+        return {**annotated, WORKFLOW_FIELD: block}
+
+    def _note_runbook(self, payload: dict[str, Any]) -> None:
+        if payload.get("found") is not True:
+            return
+        runbook = payload.get("runbook")
+        if not isinstance(runbook, dict):
+            return
+        categories = runbook_categories(runbook)
+        candidates = payload.get("diagnosis_candidates")
+        if not isinstance(candidates, list):
+            return
+        for candidate in candidates:
+            if _is_clean_string(candidate):
+                self._published_categories.setdefault(candidate, set()).update(categories)
+
+    def _relevant_log_ids(self, diagnosis: str) -> set[str]:
+        diagnosis_categories = set(categories_in_text(diagnosis))
+        diagnosis_categories.update(self._published_categories.get(diagnosis, ()))
+        tokens = diagnosis_tokens(diagnosis)
+        relevant: set[str] = set()
+        frozen_categories = frozenset(diagnosis_categories)
+        for obs_id, categories in self._log_categories.items():
+            if evidence_relevant(
+                diagnosis_categories=frozen_categories,
+                diagnosis_id_tokens=tokens,
+                log_categories=categories,
+                log_tokens=self._log_tokens.get(obs_id, frozenset()),
+            ):
+                relevant.add(obs_id)
+        return relevant
+
+    def _judge(self, arguments: object) -> WorkflowVerdict:
+        verdict = super()._judge(arguments)
+        if not isinstance(arguments, dict):
+            return verdict
+        failures = list(verdict.failure_categories)
+        diagnosis = arguments.get("diagnosis_id")
+        relevant: set[str] = set()
+        if _is_clean_string(diagnosis):
+            relevant = self._relevant_log_ids(diagnosis)
+            if not relevant:
+                failures.append(REJECT_DIAGNOSIS_RELEVANT_EVIDENCE)
+        if (
+            self.requires_evidence_refs
+            and REJECT_EVIDENCE_REFS_REQUIRED not in failures
+            and REJECT_MALFORMED_TERMINAL not in failures
+        ):
+            refs = arguments.get(EVIDENCE_REFS_ARGUMENT)
+            cited_relevant = isinstance(refs, list) and any(
+                isinstance(ref, str) and ref in relevant for ref in refs
+            )
+            if not cited_relevant:
+                failures.append(REJECT_RELEVANT_EVIDENCE_REF)
+        if failures:
+            return WorkflowVerdict(accepted=False, failure_categories=tuple(failures))
+        return verdict
+
+    def summary(self) -> dict[str, Any]:
+        base = super().summary()
+        base["repeated_zero_match_searches"] = self._repeated_zero_match_searches
+        return base

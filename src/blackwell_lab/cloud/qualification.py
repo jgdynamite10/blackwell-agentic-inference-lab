@@ -45,6 +45,7 @@ from blackwell_lab.cloud.sealed_binding import (
 from blackwell_lab.workload.evidence import (
     CONTROLLER_EVIDENCE_GROUNDING_V1,
     CONTROLLER_WORKFLOW_V1,
+    CONTROLLER_WORKFLOW_V2,
     require_controller_binding,
     workload_treatments,
 )
@@ -94,8 +95,17 @@ AUTHORIZED_CANDIDATES = (
 CANDIDATE_W1 = "W1"
 CANDIDATE_W2 = "W2"
 WORKFLOW_CANDIDATES = (CANDIDATE_W1, CANDIDATE_W2)
+#: Successor pair (decision D-0033): W3 is the control, W4 the treatment.
+#: Kept out of :data:`WORKFLOW_CANDIDATES` so the D-0031 pair stays closed.
+CANDIDATE_W3 = "W3"
+CANDIDATE_W4 = "W4"
+SUCCESSOR_WORKFLOW_CANDIDATES = (CANDIDATE_W3, CANDIDATE_W4)
 #: Every candidate any qualification command may name.
-ALL_AUTHORIZED_CANDIDATES = (*AUTHORIZED_CANDIDATES, *WORKFLOW_CANDIDATES)
+ALL_AUTHORIZED_CANDIDATES = (
+    *AUTHORIZED_CANDIDATES,
+    *WORKFLOW_CANDIDATES,
+    *SUCCESSOR_WORKFLOW_CANDIDATES,
+)
 C1_TEMPERATURE = 1.0
 C2_TEMPERATURE = 0.2
 P1_TEMPERATURE = C2_TEMPERATURE
@@ -320,13 +330,30 @@ WORKFLOW_CANDIDATE_CONTROLLERS: dict[str, str] = {
     CANDIDATE_W1: W_CONTROLLER,
     CANDIDATE_W2: W_CONTROLLER,
 }
+#: Successor pair (D-0033). Workload and controller are new; the treatment
+#: name matches W2 so the citation argument stays the one explicit difference.
+W3_WORKLOAD_VERSION = "2.7.0"
+W4_WORKLOAD_VERSION = "2.7.1"
+W_SUCCESSOR_CONTROLLER = CONTROLLER_WORKFLOW_V2
+W4_TREATMENT = W2_TREATMENT
+W4_CONTROL_CANDIDATE = CANDIDATE_W3
+SUCCESSOR_CANDIDATE_WORKLOAD_VERSIONS: dict[str, str] = {
+    CANDIDATE_W3: W3_WORKLOAD_VERSION,
+    CANDIDATE_W4: W4_WORKLOAD_VERSION,
+}
+SUCCESSOR_CANDIDATE_CONTROLLERS: dict[str, str] = {
+    CANDIDATE_W3: W_SUCCESSOR_CONTROLLER,
+    CANDIDATE_W4: W_SUCCESSOR_CONTROLLER,
+}
 #: Treatment candidate -> its same-session development control (D-0027 for
-#: P1/P2C; D-0031 for W1/W2). A control candidate never appears as a key.
+#: P1/P2C; D-0031 for W1/W2; D-0033 for W3/W4). A control candidate never
+#: appears as a key, and pairs do not cross generations.
 DEVELOPMENT_CONTROL_PAIRS: dict[str, str] = {
     CANDIDATE_P2C: CANDIDATE_P1,
     CANDIDATE_W2: CANDIDATE_W1,
+    CANDIDATE_W4: CANDIDATE_W3,
 }
-UNKNOWN_CANDIDATE_MESSAGE = "qualification candidate must be C1, C2, P1, P2, P2C, W1, or W2"
+UNKNOWN_CANDIDATE_MESSAGE = "qualification candidate must be C1, C2, P1, P2, P2C, W1, W2, W3, or W4"
 _UNKNOWN_CANDIDATE = UNKNOWN_CANDIDATE_MESSAGE
 
 #: Candidates whose every stage executes the public catalog schedule.
@@ -335,9 +362,14 @@ _UNKNOWN_CANDIDATE = UNKNOWN_CANDIDATE_MESSAGE
 CATALOG_CANDIDATES = (CANDIDATE_C1, CANDIDATE_C2, CANDIDATE_P1, CANDIDATE_P2C)
 
 
+def is_workflow_family(candidate_id: str) -> bool:
+    """True for the D-0031 pair and the D-0033 successor pair."""
+    return candidate_id in WORKFLOW_CANDIDATES or candidate_id in SUCCESSOR_WORKFLOW_CANDIDATES
+
+
 def is_catalog_candidate(candidate_id: str) -> bool:
     """True for every candidate whose stages execute the public catalog."""
-    return candidate_id in CATALOG_CANDIDATES or candidate_id in WORKFLOW_CANDIDATES
+    return candidate_id in CATALOG_CANDIDATES or is_workflow_family(candidate_id)
 
 
 def control_candidate_for(candidate_id: str) -> str | None:
@@ -391,7 +423,11 @@ P2C_CONTRACT: dict[str, Any] = {
 def candidate_workload_version(candidate_id: str) -> str:
     """Workload contract bound to one authorized qualification candidate."""
     try:
-        return {**CANDIDATE_WORKLOAD_VERSIONS, **WORKFLOW_CANDIDATE_WORKLOAD_VERSIONS}[candidate_id]
+        return {
+            **CANDIDATE_WORKLOAD_VERSIONS,
+            **WORKFLOW_CANDIDATE_WORKLOAD_VERSIONS,
+            **SUCCESSOR_CANDIDATE_WORKLOAD_VERSIONS,
+        }[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
 
@@ -403,7 +439,11 @@ def candidate_controller(candidate_id: str) -> str | None:
     so no P2 run can start with a controller the workload does not bind.
     """
     try:
-        controller = {**CANDIDATE_CONTROLLERS, **WORKFLOW_CANDIDATE_CONTROLLERS}[candidate_id]
+        controller = {
+            **CANDIDATE_CONTROLLERS,
+            **WORKFLOW_CANDIDATE_CONTROLLERS,
+            **SUCCESSOR_CANDIDATE_CONTROLLERS,
+        }[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
     return require_controller_binding(candidate_workload_version(candidate_id), controller)
@@ -425,7 +465,7 @@ def candidate_temperature(candidate_id: str) -> float:
         return P2_TEMPERATURE
     if candidate_id == CANDIDATE_P2C:
         return P2C_TEMPERATURE
-    if candidate_id in WORKFLOW_CANDIDATES:
+    if is_workflow_family(candidate_id):
         return W_TEMPERATURE
     raise ConfigError(_UNKNOWN_CANDIDATE)
 
@@ -807,9 +847,113 @@ def require_w_pair_contract() -> dict[str, Any]:
     return dict(W_PAIR_CONTRACT)
 
 
+def successor_pair_experiment_record(candidate_id: str) -> dict[str, Any]:
+    """Content-free provenance of the D-0033 successor pair."""
+    if candidate_id not in SUCCESSOR_WORKFLOW_CANDIDATES:
+        raise ConfigError(_UNKNOWN_CANDIDATE)
+    return {
+        "kind": "diagnosis-relevant-workflow-pair",
+        "controller": W_SUCCESSOR_CONTROLLER,
+        "control_candidate": CANDIDATE_W3,
+        "treatment_candidate": CANDIDATE_W4,
+        "role": "control" if candidate_id == CANDIDATE_W3 else "treatment",
+        "treatments": list(candidate_treatments(candidate_id)),
+        "task_source": W_TASK_SOURCE,
+        "schedule": "d-0019-catalog",
+        "historical_candidates_unchanged": True,
+        "historical_pair_unchanged": True,
+        "blind_generalization_evidence": False,
+        "comparable_with_private_sealed_scores": False,
+        "comparable_with_p1_p2c_scores": False,
+        "comparable_with_w1_w2_scores": False,
+    }
+
+
+def require_successor_pair_contract() -> dict[str, Any]:
+    """Fail closed unless W3/W4 match and the frozen W1/W2 pair is intact.
+
+    The successor shares prompt bytes, generation pins, evaluator, catalog
+    source, schedules, and the single ``evidence-refs`` treatment difference.
+    It binds ``workflow-controller-v2`` and workloads 2.7.0 / 2.7.1. Calling
+    :func:`require_w_pair_contract` first refuses any drift of W1 or W2.
+    """
+    from blackwell_lab.workload.agent import SYSTEM_PROMPT_V241, system_prompt
+    from blackwell_lab.workload.evaluator import EVALUATOR_VERSION
+    from blackwell_lab.workload.tools import TOOL_SPECS, TOOL_SPECS_V250, tool_specs
+
+    require_w_pair_contract()
+    problems: list[str] = []
+    if SUCCESSOR_WORKFLOW_CANDIDATES != (CANDIDATE_W3, CANDIDATE_W4):
+        problems.append("candidate table")
+    if set(SUCCESSOR_WORKFLOW_CANDIDATES) & set(WORKFLOW_CANDIDATES):
+        problems.append("historical pair")
+    if set(SUCCESSOR_WORKFLOW_CANDIDATES) & set(AUTHORIZED_CANDIDATES):
+        problems.append("historical table")
+    if candidate_workload_version(CANDIDATE_W3) != W3_WORKLOAD_VERSION:
+        problems.append("control workload_version")
+    if candidate_workload_version(CANDIDATE_W4) != W4_WORKLOAD_VERSION:
+        problems.append("treatment workload_version")
+    for candidate in SUCCESSOR_WORKFLOW_CANDIDATES:
+        if candidate_controller(candidate) != W_SUCCESSOR_CONTROLLER:
+            problems.append("controller")
+        if candidate_temperature(candidate) != W_PAIR_CONTRACT["temperature"]:
+            problems.append("temperature")
+    if list(candidate_treatments(CANDIDATE_W3)) != []:
+        problems.append("control treatments")
+    if list(candidate_treatments(CANDIDATE_W4)) != [W4_TREATMENT]:
+        problems.append("treatment treatments")
+    if control_candidate_for(CANDIDATE_W4) != CANDIDATE_W3:
+        problems.append("control pairing")
+    if control_candidate_for(CANDIDATE_W3) or control_candidate_for(CANDIDATE_W2) != CANDIDATE_W1:
+        problems.append("cross-generation pairing")
+    if control_candidate_for(CANDIDATE_W4) == CANDIDATE_W1:
+        problems.append("cross-generation pairing")
+    if EVALUATOR_VERSION != W_PAIR_CONTRACT["evaluator_version"]:
+        problems.append("evaluator")
+    scenario = next(iter(catalog().values()))
+    prompts = {
+        system_prompt(scenario, candidate_workload_version(c))
+        for c in SUCCESSOR_WORKFLOW_CANDIDATES
+    }
+    if prompts != {SYSTEM_PROMPT_V241}:
+        problems.append("system_prompt")
+    if tool_specs(W3_WORKLOAD_VERSION) is not TOOL_SPECS:
+        problems.append("control tool contract")
+    if tool_specs(W4_WORKLOAD_VERSION) is not TOOL_SPECS_V250:
+        problems.append("treatment tool contract")
+    if any(
+        candidate in SEALED_CANDIDATES or requires_sealed_set(candidate, stage)
+        for candidate in SUCCESSOR_WORKFLOW_CANDIDATES
+        for stage in AUTHORIZED_STAGES
+    ):
+        problems.append("task_source")
+    if stage_spec(STAGE_DEVELOPMENT)["tasks"] != DEVELOPMENT_TASKS or DEVELOPMENT_TASKS != 20:
+        problems.append("development tasks")
+    if DEVELOPMENT_QUALITY_FLOOR != 0.40:
+        problems.append("development floor")
+    if W_PAIR_CONTRACT["max_turns"] != 12:
+        problems.append("max_turns")
+    if problems:
+        raise QualificationError(
+            "W3/W4 pair contract drift: "
+            + ", ".join(dict.fromkeys(problems))
+            + "; nothing was executed"
+        )
+    return {
+        "control_candidate": CANDIDATE_W3,
+        "treatment_candidate": CANDIDATE_W4,
+        "controller": W_SUCCESSOR_CONTROLLER,
+        "control_workload_version": W3_WORKLOAD_VERSION,
+        "treatment_workload_version": W4_WORKLOAD_VERSION,
+        "control_treatments": [],
+        "treatment_treatments": [W4_TREATMENT],
+        "max_turns": 12,
+    }
+
+
 def require_w_config(config: dict, *, candidate_id: str) -> None:
-    """W1/W2 configs carry no sealed, custody, private-scenario, or schedule keys."""
-    if candidate_id not in WORKFLOW_CANDIDATES:
+    """Workflow-family configs carry no sealed, custody, or schedule keys."""
+    if not is_workflow_family(candidate_id):
         return
     present = sorted(key for key in W_FORBIDDEN_CONFIG_KEYS if key in config)
     if present:
@@ -822,8 +966,11 @@ def require_w_config(config: dict, *, candidate_id: str) -> None:
         raise ConfigError(
             f"qualify-agent {candidate_id} workload_version must equal {expected_version}"
         )
-    if config.get("controller") not in (None, W_CONTROLLER):
-        raise ConfigError(f"qualify-agent {candidate_id} controller must equal {W_CONTROLLER}")
+    expected_controller = candidate_controller(candidate_id)
+    if config.get("controller") not in (None, expected_controller):
+        raise ConfigError(
+            f"qualify-agent {candidate_id} controller must equal {expected_controller}"
+        )
     if "treatments" in config and list(config.get("treatments") or []) != list(
         candidate_treatments(candidate_id)
     ):
@@ -842,12 +989,15 @@ def require_w_config(config: dict, *, candidate_id: str) -> None:
     for key in ("system_prompt", "prompt", "evaluator_version", "evaluator", "max_turns"):
         if key in config or key in generation:
             raise ConfigError(f"qualify-agent {candidate_id} does not accept a {key} override")
-    require_w_pair_contract()
+    if candidate_id in SUCCESSOR_WORKFLOW_CANDIDATES:
+        require_successor_pair_contract()
+    else:
+        require_w_pair_contract()
 
 
 def require_w_runtime(candidate_id: str, *, custody_dir: str | None) -> None:
     """``--custody-dir`` is refused for the pair before the config is even read."""
-    if candidate_id in WORKFLOW_CANDIDATES and custody_dir is not None:
+    if is_workflow_family(candidate_id) and custody_dir is not None:
         raise ConfigError(
             f"{candidate_id} executes the public catalog schedule; --custody-dir is refused"
         )
@@ -861,8 +1011,8 @@ def require_w_catalog_execution(
     sealed_set: object,
     sealed_tasks: object,
 ) -> None:
-    """The assembled W1/W2 cell must be exactly the catalog cell of its stage."""
-    if candidate_id not in WORKFLOW_CANDIDATES:
+    """The assembled workflow-family cell must be exactly the catalog cell of its stage."""
+    if not is_workflow_family(candidate_id):
         return
     if sealed_set is not None or sealed_tasks is not None:
         raise ConfigError(f"{candidate_id} must not execute sealed input")
@@ -1501,6 +1651,11 @@ def sanitized_receipt(
         **(
             {"controlled_experiment": w_pair_experiment_record(candidate_id)}
             if candidate_id == CANDIDATE_W2
+            else {}
+        ),
+        **(
+            {"controlled_experiment": successor_pair_experiment_record(candidate_id)}
+            if candidate_id == CANDIDATE_W4
             else {}
         ),
         **({"matched_control": matched_control} if matched_control is not None else {}),
