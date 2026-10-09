@@ -2147,3 +2147,71 @@ what keeps that historical behavior attached to W1 and W2. Tested with
 synthetic fixtures only. No provider, credential, inference endpoint,
 download, private result, custody package, publication system, plan,
 apply, destroy, or the secondary repository was accessed.
+
+## 2026-10-09 — D-0034: Structured public evidence for W5/W6
+
+**Decision.** Add a versioned pair on top of the pinned D-0033 head.
+**W5** (workload 2.8.0, control) and **W6** (workload 2.8.1,
+`evidence-refs` treatment) bind `workflow-controller-v3` and public
+evidence schema 1.0.0. The controller accepts a terminal only when the
+selected hypothesis's declared `support_all_of` pattern is covered by
+eligible earlier log and health findings. Coverage is exact on witness
+type, role, subject, scope, condition name, condition state, affirmed
+polarity, and asserted certainty. Mentions, symptoms, and context cannot
+be the whole pattern. A covered pattern is not a proof of unique cause.
+The unchanged evaluator still decides diagnosis correctness, remediation
+correctness, and every frozen evidence predicate.
+
+W6 `evidence_refs` must cite every required witness. Uncited observations
+still count for contradictions. Metrics, runbooks, and change records
+cannot replace a required log or health witness. The GPU hypothesis still
+says contention. Its support pattern requires uncapped admission of
+`embed-refresh-44` and a saturated KV-cache allocator on the same returned
+host. The upstream hypothesis requires returned `heron-auth` API status
+`unhealthy` and a log finding that names that service as an upstream.
+
+W5 mints only `matched-w5-development-control` (schema 2.0.0) and
+authenticates only W6. A canary cannot mint it. W1 cannot authenticate W4
+or W6. W3 cannot authenticate W2 or W6. W5 cannot authenticate W2 or W4.
+Historical prompts, tool payloads, and controller behavior for W1-W4 stay
+on their existing versions. Identity digests below were recomputed with
+`candidate_identity_digest` after this implementation. The D-0033 W1-W4
+cells stay the current contract for those candidates.
+
+| Candidate | D-0034 (`ca-central`, recomputed) |
+| --- | --- |
+| W1 | `2b7c5745084f4459af66e58fa5701d5c513108a9536385acbed00722c02e68cf` |
+| W2 | `06d673972a696efcddc9ce00d6c9f6a15a032e0c516d4dc8b54f01dbba0917a2` |
+| W3 | `bdb9947bf5c0934833d077536ae85740857c36bfd08d88f7fee8b7b54f0f857e` |
+| W4 | `66df267f60f062f867678331fc466305cde5432bc9cba861ebe90e8cef108414` |
+| W5 | `e16bd151b79623faccf41965761cffe5cfde6dfc8f32f25600a790322ccb7e7e` |
+| W6 | `9dda8ec877fb52ba060616848fb17863a581d3b011d143ceb7f0054672d14281` |
+
+The shared evidence contract records
+`evidence_schema_sha256=4ae2ad3d28b806d20c5452cfd306cca8baca3706d3bf63962f952e4bca90f8ed`,
+`public_metadata_sha256=78160f7f0b8d8f96bc20248d742e4e156b4f3934fd60fd5bbb21ed898ba208cf`,
+`normalization_policy_sha256=d847fcceddfa29fe83ac53e6e74839644ae123f24a4cd0cad8d70c2869b57d7b`,
+`controller_sha256=69cb0c42499e5c0e898168ee2e682df2ceab191246829ff2b9051a3bfafea831`,
+and
+`surface_renderer_sha256=2da56507759b930d2a0b58fe7564670a686cde9d51aac5f8d4b9dbecee76c6ed`.
+Manifests for these workloads set
+`validation_scope=public-catalog-pre-exposed-holdout` and
+`blind_generalization_evidence=false`.
+
+Holdout and freeze stages are not executable on W5/W6 in this revision.
+The development overlay does not annotate holdout templates, and the
+implementation refuses those stages instead of inventing findings. The
+scheduled holdout and its 0.50 floor remain defined.
+
+**This decision does not authorize** a canary, qualification, holdout,
+freeze, provisioning, downloads, publication, or live execution.
+
+**Rationale.** Workload 2.7.x treats a shared token or category as support.
+The public log fields cannot separate a mention from a finding without new
+metadata. Revision 0.2 publishes that metadata for the development catalog
+and leaves diagnosis correctness with the evaluator. Tested with synthetic
+fixtures only. No provider, credential, inference endpoint, download,
+private result, custody package, publication system, plan, apply, destroy,
+or the secondary repository was accessed. Results that predate this change
+are the W1 canary at commit `47b6d742` and the D-0033 implementation at
+`8888927`; neither used this overlay.

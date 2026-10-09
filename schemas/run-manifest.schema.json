@@ -419,8 +419,45 @@
         },
         "controller": {
           "type": "string",
-          "enum": ["evidence-grounding-v1", "workflow-controller-v1", "workflow-controller-v2"],
-          "description": "Agent controller bound to the executed workload contract (workload 2.5.0 binds evidence-grounding-v1; workloads 2.6.0 / 2.6.1 bind workflow-controller-v1, decision D-0031; workloads 2.7.0 / 2.7.1 bind workflow-controller-v2, decision D-0033). Omitted for controller-free workloads; existing 2.3.0/2.4.0/2.4.1 manifests omit this field and remain valid."
+          "enum": ["evidence-grounding-v1", "workflow-controller-v1", "workflow-controller-v2", "workflow-controller-v3"],
+          "description": "Agent controller bound to the executed workload contract (workload 2.5.0 binds evidence-grounding-v1; workloads 2.6.0 / 2.6.1 bind workflow-controller-v1, decision D-0031; workloads 2.7.0 / 2.7.1 bind workflow-controller-v2, decision D-0033; workloads 2.8.0 / 2.8.1 bind workflow-controller-v3, decision D-0034). Omitted for controller-free workloads; existing 2.3.0/2.4.0/2.4.1 manifests omit this field and remain valid."
+        },
+        "evidence_contract": {
+          "type": "object",
+          "description": "D-0034 evidence binding for workloads 2.8.0 / 2.8.1. Omitted by every earlier workload.",
+          "additionalProperties": false,
+          "required": [
+            "contract_version",
+            "evidence_schema_version",
+            "evidence_schema_sha256",
+            "public_metadata_version",
+            "public_metadata_sha256",
+            "normalization_policy_sha256",
+            "controller_id",
+            "controller_sha256",
+            "surface_renderer_sha256"
+          ],
+          "properties": {
+            "contract_version": { "type": "string", "const": "1.0.0" },
+            "evidence_schema_version": { "type": "string", "const": "1.0.0" },
+            "evidence_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "public_metadata_version": { "type": "string", "const": "1.0.0" },
+            "public_metadata_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "normalization_policy_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "controller_id": { "type": "string", "const": "workflow-controller-v3" },
+            "controller_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "surface_renderer_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "validation_scope": {
+          "type": "string",
+          "const": "public-catalog-pre-exposed-holdout",
+          "description": "D-0034 validation limit. Omitted by every earlier workload."
+        },
+        "blind_generalization_evidence": {
+          "type": "boolean",
+          "const": false,
+          "description": "D-0034: this catalog cannot support an unseen-generalization claim."
         },
         "catalog_digest": {
           "type": "string",

@@ -47,6 +47,8 @@ CONTROL_SCHEMA_VERSION = "1.0.0"
 CONTROL_KIND = "matched-p1-development-control"
 W_CONTROL_KIND = "matched-w1-development-control"
 W3_CONTROL_KIND = "matched-w3-development-control"
+W5_CONTROL_KIND = "matched-w5-development-control"
+CONTROL_SCHEMA_VERSION_V2 = "2.0.0"
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -58,6 +60,7 @@ class ControlPair:
     treatment: str
     kind: str
     prefix: str
+    schema_version: str = CONTROL_SCHEMA_VERSION
 
     @property
     def label_key(self) -> str:
@@ -65,7 +68,7 @@ class ControlPair:
 
     @property
     def section_keys(self) -> tuple[str, ...]:
-        return (
+        keys = (
             "schema_version",
             "run_tag",
             self.label_key,
@@ -77,6 +80,9 @@ class ControlPair:
             "resource_identity_sha256",
             "ledger_sha256",
         )
+        if self.schema_version == CONTROL_SCHEMA_VERSION_V2:
+            return (*keys, "evidence_contract")
+        return keys
 
     @property
     def control_suffix(self) -> str:
@@ -96,7 +102,15 @@ P1_P2C_PAIR = ControlPair(control="P1", treatment="P2C", kind=CONTROL_KIND, pref
 W1_W2_PAIR = ControlPair(control="W1", treatment="W2", kind=W_CONTROL_KIND, prefix="w1")
 #: Diagnosis-relevant successor pair (D-0033). Distinct kind and prefix.
 W3_W4_PAIR = ControlPair(control="W3", treatment="W4", kind=W3_CONTROL_KIND, prefix="w3")
-CONTROL_PAIRS: tuple[ControlPair, ...] = (P1_P2C_PAIR, W1_W2_PAIR, W3_W4_PAIR)
+#: Structured-evidence pair (D-0034). Schema 2.0.0 so historical records stay on 1.0.0.
+W5_W6_PAIR = ControlPair(
+    control="W5",
+    treatment="W6",
+    kind=W5_CONTROL_KIND,
+    prefix="w5",
+    schema_version=CONTROL_SCHEMA_VERSION_V2,
+)
+CONTROL_PAIRS: tuple[ControlPair, ...] = (P1_P2C_PAIR, W1_W2_PAIR, W3_W4_PAIR, W5_W6_PAIR)
 
 
 def pair_for_treatment(candidate_id: object) -> ControlPair | None:
@@ -167,6 +181,11 @@ _UNSAFE = P1_P2C_PAIR.message("unsafe")
 def schema_path() -> Path:
     root = Path(__file__).resolve().parents[3]
     return root / "schemas" / "matched-development-control.schema.json"
+
+
+def schema_path_v2() -> Path:
+    root = Path(__file__).resolve().parents[3]
+    return root / "schemas" / "matched-development-control-v2.schema.json"
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -479,8 +498,9 @@ def result_dir_for(
     return results_dir / QUALIFICATION_ARTIFACT_FAMILY / label
 
 
-def _load_schema() -> dict:
-    return json.loads(schema_path().read_text(encoding="utf-8"))
+def _load_schema(pair: ControlPair = P1_P2C_PAIR) -> dict:
+    path = schema_path_v2() if pair.schema_version == CONTROL_SCHEMA_VERSION_V2 else schema_path()
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _reject_private_strings(record: dict) -> None:
@@ -545,7 +565,18 @@ def _pin_record(pair: ControlPair = P1_P2C_PAIR) -> dict[str, Any]:
         "max_tokens": FROZEN_MAX_TOKENS,
         "reasoning_mode": True,
         "identity_sha256": candidate_identity_digest(control),
+        **(
+            {"evidence_contract": _evidence_contract()}
+            if pair.schema_version == CONTROL_SCHEMA_VERSION_V2
+            else {}
+        ),
     }
+
+
+def _evidence_contract() -> dict[str, Any]:
+    from blackwell_lab.workload.public_metadata import evidence_contract
+
+    return evidence_contract()
 
 
 def require_development_control_section(config: dict, *, candidate_id: str, stage: str) -> None:
@@ -565,14 +596,25 @@ def require_development_control_section(config: dict, *, candidate_id: str, stag
                 raise ConfigError("development_control is valid only on W2 development")
             if candidate_id in (W3_W4_PAIR.control, W3_W4_PAIR.treatment):
                 raise ConfigError("development_control is valid only on W4 development")
+            if candidate_id in (W5_W6_PAIR.control, W5_W6_PAIR.treatment):
+                raise ConfigError("development_control is valid only on W6 development")
             raise ConfigError("development_control is valid only on P2C development")
         return
     if not isinstance(section, dict):
         raise ConfigError(pair.message("missing"))
     if set(section) != set(pair.section_keys):
         raise ConfigError("development_control has unexpected or missing fields")
-    if section.get("schema_version") != CONTROL_SCHEMA_VERSION:
-        raise ConfigError("development_control schema_version must equal 1.0.0")
+    if section.get("schema_version") != pair.schema_version:
+        if pair.schema_version == CONTROL_SCHEMA_VERSION:
+            raise ConfigError("development_control schema_version must equal 1.0.0")
+        raise ConfigError("development_control schema_version must equal 2.0.0")
+    if pair.schema_version == CONTROL_SCHEMA_VERSION_V2:
+        from blackwell_lab.workload.public_metadata import evidence_contract
+
+        if section.get("evidence_contract") != evidence_contract():
+            raise ConfigError(
+                "development_control evidence_contract does not match the implementation"
+            )
     run_tag = section.get("run_tag")
     try:
         if not isinstance(run_tag, str):
@@ -674,6 +716,11 @@ def _require_completed_receipt(
         _fail(pair.message("pins"))
     if receipt.get("controller") != candidate_controller(control):
         _fail(pair.message("pins"))
+    if pair.schema_version == CONTROL_SCHEMA_VERSION_V2:
+        if receipt.get("diagnostic_only") is True or receipt.get("workflow") == "canary-agent":
+            _fail("a diagnostic canary cannot mint a W5 development control")
+        if receipt.get("evidence_contract") != _evidence_contract():
+            _fail(pair.message("pins"))
     gates = receipt.get("gates")
     if (
         receipt.get("stopped") is not False
@@ -833,7 +880,7 @@ def _compose_record(
     if pins["evaluator_version"] != pins["expected_evaluator"]:
         _fail(pair.message("pins"))
     return {
-        "schema_version": CONTROL_SCHEMA_VERSION,
+        "schema_version": pair.schema_version,
         "kind": pair.kind,
         "run_tag": run_tag,
         "run_label": p1_run_label,
@@ -870,6 +917,11 @@ def _compose_record(
         "terminal_event": "qualification_completed",
         "failure_record": False,
         "identity_sha256": pins["identity_sha256"],
+        **(
+            {"evidence_contract": pins["evidence_contract"]}
+            if pair.schema_version == CONTROL_SCHEMA_VERSION_V2
+            else {}
+        ),
     }
 
 
@@ -879,7 +931,7 @@ def receipt_block(
     """Content-free provenance copied onto a treatment development receipt."""
     prefix = pair.prefix
     return {
-        "schema_version": CONTROL_SCHEMA_VERSION,
+        "schema_version": pair.schema_version,
         "kind": pair.kind,
         pair.label_key: record["run_label"],
         "control_record_sha256": control_record_sha256,
@@ -897,14 +949,19 @@ def receipt_block(
         "terminal_event_sha256": record["terminal_event_sha256"],
         "stopped": record["stopped"],
         "terminal_event": record["terminal_event"],
+        **(
+            {"evidence_contract": record["evidence_contract"]}
+            if pair.schema_version == CONTROL_SCHEMA_VERSION_V2
+            else {}
+        ),
     }
 
 
 def section_from_record(
     record: dict, control_record_sha256: str, *, pair: ControlPair = P1_P2C_PAIR
 ) -> dict[str, Any]:
-    return {
-        "schema_version": CONTROL_SCHEMA_VERSION,
+    section = {
+        "schema_version": pair.schema_version,
         "run_tag": record["run_tag"],
         pair.label_key: record["run_label"],
         "canonical_commit": record["canonical_commit"],
@@ -915,6 +972,9 @@ def section_from_record(
         "resource_identity_sha256": record["resource_identity_sha256"],
         "ledger_sha256": record["ledger_sha256"],
     }
+    if pair.schema_version == CONTROL_SCHEMA_VERSION_V2:
+        section["evidence_contract"] = record["evidence_contract"]
+    return section
 
 
 def persist_completed_p1_development_control(
@@ -1058,7 +1118,7 @@ def install_verified_p1_development_control(
 
 def _validate_record(record: dict, *, pair: ControlPair = P1_P2C_PAIR) -> None:
     try:
-        jsonschema.validate(record, _load_schema())
+        jsonschema.validate(record, _load_schema(pair))
     except jsonschema.ValidationError:
         _fail(pair.message("malformed"))
     # The schema admits every registered pair kind; the pair in scope admits only its own.
@@ -1089,6 +1149,7 @@ def _require_pins(record: dict, *, pair: ControlPair = P1_P2C_PAIR) -> None:
         "max_tokens",
         "reasoning_mode",
         "identity_sha256",
+        *(("evidence_contract",) if pair.schema_version == CONTROL_SCHEMA_VERSION_V2 else ()),
     )
     for key in comparable:
         if record.get(key) != pins[key]:

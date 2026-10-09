@@ -79,6 +79,18 @@ SUCCESSOR_WORKLOAD_TREATMENTS: dict[str, tuple[str, ...]] = {
     "2.7.0": (),
     "2.7.1": ("evidence-refs",),
 }
+#: Structured-evidence pair (decision D-0034). A separate table so the
+#: 2.6 and 2.7 bindings stay byte-identical. Both members bind
+#: ``workflow-controller-v3``; 2.8.1 adds the same ``evidence-refs`` treatment.
+CONTROLLER_WORKFLOW_V3 = "workflow-controller-v3"
+STRUCTURED_WORKLOAD_CONTROLLERS: dict[str, str] = {
+    "2.8.0": CONTROLLER_WORKFLOW_V3,
+    "2.8.1": CONTROLLER_WORKFLOW_V3,
+}
+STRUCTURED_WORKLOAD_TREATMENTS: dict[str, tuple[str, ...]] = {
+    "2.8.0": (),
+    "2.8.1": ("evidence-refs",),
+}
 
 
 def all_workload_controllers() -> dict[str, str | None]:
@@ -87,6 +99,7 @@ def all_workload_controllers() -> dict[str, str | None]:
         **WORKLOAD_CONTROLLERS,
         **WORKFLOW_WORKLOAD_CONTROLLERS,
         **SUCCESSOR_WORKLOAD_CONTROLLERS,
+        **STRUCTURED_WORKLOAD_CONTROLLERS,
     }
 
 
@@ -95,6 +108,8 @@ def workload_treatments(workload_version: str | None) -> tuple[str, ...]:
     from blackwell_lab.workload.native_tools import require_workload_version
 
     resolved = require_workload_version(workload_version)
+    if resolved in STRUCTURED_WORKLOAD_TREATMENTS:
+        return STRUCTURED_WORKLOAD_TREATMENTS[resolved]
     if resolved in SUCCESSOR_WORKLOAD_TREATMENTS:
         return SUCCESSOR_WORKLOAD_TREATMENTS[resolved]
     return WORKFLOW_WORKLOAD_TREATMENTS.get(resolved, ())
@@ -378,7 +393,9 @@ def build_controller(workload_version: str | None, context: str) -> object | Non
     :class:`blackwell_lab.workload.workflow.WorkflowController` for workloads
     2.6.0 / 2.6.1, and a
     :class:`blackwell_lab.workload.workflow.DiagnosisRelevantWorkflowController`
-    for workloads 2.7.0 / 2.7.1.
+    for workloads 2.7.0 / 2.7.1, and a
+    :class:`blackwell_lab.workload.workflow_v3.StructuredEvidenceWorkflowController`
+    for workloads 2.8.0 / 2.8.1.
     """
     controller = controller_for_workload(workload_version)
     if controller is None:
@@ -393,6 +410,17 @@ def build_controller(workload_version: str | None, context: str) -> object | Non
         from blackwell_lab.workload.workflow import DiagnosisRelevantWorkflowController
 
         return DiagnosisRelevantWorkflowController(
+            context=context, treatments=workload_treatments(workload_version)
+        )
+    if controller == CONTROLLER_WORKFLOW_V3:
+        from blackwell_lab.workload.public_metadata import (
+            evidence_contract,
+            require_evidence_contract,
+        )
+        from blackwell_lab.workload.workflow_v3 import StructuredEvidenceWorkflowController
+
+        require_evidence_contract(evidence_contract())
+        return StructuredEvidenceWorkflowController(
             context=context, treatments=workload_treatments(workload_version)
         )
     raise ValueError(f"no implementation registered for controller {controller!r}")

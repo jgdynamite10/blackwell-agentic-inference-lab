@@ -46,6 +46,7 @@ from blackwell_lab.workload.evidence import (
     CONTROLLER_EVIDENCE_GROUNDING_V1,
     CONTROLLER_WORKFLOW_V1,
     CONTROLLER_WORKFLOW_V2,
+    CONTROLLER_WORKFLOW_V3,
     require_controller_binding,
     workload_treatments,
 )
@@ -100,11 +101,17 @@ WORKFLOW_CANDIDATES = (CANDIDATE_W1, CANDIDATE_W2)
 CANDIDATE_W3 = "W3"
 CANDIDATE_W4 = "W4"
 SUCCESSOR_WORKFLOW_CANDIDATES = (CANDIDATE_W3, CANDIDATE_W4)
+#: Structured-evidence pair (decision D-0034). Kept out of the earlier pair
+#: tables so W1-W4 identities and controllers stay closed.
+CANDIDATE_W5 = "W5"
+CANDIDATE_W6 = "W6"
+STRUCTURED_EVIDENCE_CANDIDATES = (CANDIDATE_W5, CANDIDATE_W6)
 #: Every candidate any qualification command may name.
 ALL_AUTHORIZED_CANDIDATES = (
     *AUTHORIZED_CANDIDATES,
     *WORKFLOW_CANDIDATES,
     *SUCCESSOR_WORKFLOW_CANDIDATES,
+    *STRUCTURED_EVIDENCE_CANDIDATES,
 )
 C1_TEMPERATURE = 1.0
 C2_TEMPERATURE = 0.2
@@ -345,6 +352,19 @@ SUCCESSOR_CANDIDATE_CONTROLLERS: dict[str, str] = {
     CANDIDATE_W3: W_SUCCESSOR_CONTROLLER,
     CANDIDATE_W4: W_SUCCESSOR_CONTROLLER,
 }
+W5_WORKLOAD_VERSION = "2.8.0"
+W6_WORKLOAD_VERSION = "2.8.1"
+W_STRUCTURED_CONTROLLER = CONTROLLER_WORKFLOW_V3
+W6_TREATMENT = W2_TREATMENT
+W6_CONTROL_CANDIDATE = CANDIDATE_W5
+STRUCTURED_CANDIDATE_WORKLOAD_VERSIONS: dict[str, str] = {
+    CANDIDATE_W5: W5_WORKLOAD_VERSION,
+    CANDIDATE_W6: W6_WORKLOAD_VERSION,
+}
+STRUCTURED_CANDIDATE_CONTROLLERS: dict[str, str] = {
+    CANDIDATE_W5: W_STRUCTURED_CONTROLLER,
+    CANDIDATE_W6: W_STRUCTURED_CONTROLLER,
+}
 #: Treatment candidate -> its same-session development control (D-0027 for
 #: P1/P2C; D-0031 for W1/W2; D-0033 for W3/W4). A control candidate never
 #: appears as a key, and pairs do not cross generations.
@@ -352,8 +372,11 @@ DEVELOPMENT_CONTROL_PAIRS: dict[str, str] = {
     CANDIDATE_P2C: CANDIDATE_P1,
     CANDIDATE_W2: CANDIDATE_W1,
     CANDIDATE_W4: CANDIDATE_W3,
+    CANDIDATE_W6: CANDIDATE_W5,
 }
-UNKNOWN_CANDIDATE_MESSAGE = "qualification candidate must be C1, C2, P1, P2, P2C, W1, W2, W3, or W4"
+UNKNOWN_CANDIDATE_MESSAGE = (
+    "qualification candidate must be C1, C2, P1, P2, P2C, W1, W2, W3, W4, W5, or W6"
+)
 _UNKNOWN_CANDIDATE = UNKNOWN_CANDIDATE_MESSAGE
 
 #: Candidates whose every stage executes the public catalog schedule.
@@ -363,8 +386,12 @@ CATALOG_CANDIDATES = (CANDIDATE_C1, CANDIDATE_C2, CANDIDATE_P1, CANDIDATE_P2C)
 
 
 def is_workflow_family(candidate_id: str) -> bool:
-    """True for the D-0031 pair and the D-0033 successor pair."""
-    return candidate_id in WORKFLOW_CANDIDATES or candidate_id in SUCCESSOR_WORKFLOW_CANDIDATES
+    """True for the D-0031, D-0033, and D-0034 workflow pairs."""
+    return (
+        candidate_id in WORKFLOW_CANDIDATES
+        or candidate_id in SUCCESSOR_WORKFLOW_CANDIDATES
+        or candidate_id in STRUCTURED_EVIDENCE_CANDIDATES
+    )
 
 
 def is_catalog_candidate(candidate_id: str) -> bool:
@@ -427,6 +454,7 @@ def candidate_workload_version(candidate_id: str) -> str:
             **CANDIDATE_WORKLOAD_VERSIONS,
             **WORKFLOW_CANDIDATE_WORKLOAD_VERSIONS,
             **SUCCESSOR_CANDIDATE_WORKLOAD_VERSIONS,
+            **STRUCTURED_CANDIDATE_WORKLOAD_VERSIONS,
         }[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
@@ -443,6 +471,7 @@ def candidate_controller(candidate_id: str) -> str | None:
             **CANDIDATE_CONTROLLERS,
             **WORKFLOW_CANDIDATE_CONTROLLERS,
             **SUCCESSOR_CANDIDATE_CONTROLLERS,
+            **STRUCTURED_CANDIDATE_CONTROLLERS,
         }[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
@@ -512,6 +541,31 @@ def frozen_candidate_fields(candidate_id: str) -> dict[str, Any]:
             "seed": FROZEN_SEED,
             "reasoning_mode": FROZEN_REASONING_MODE,
         },
+        **_structured_identity_fields(candidate_id),
+    }
+
+
+def _structured_identity_fields(candidate_id: str) -> dict[str, Any]:
+    """Evidence binding for W5/W6 only. Other candidates gain no fields."""
+    if candidate_id not in STRUCTURED_EVIDENCE_CANDIDATES:
+        return {}
+    from blackwell_lab.workload.agent import system_prompt
+    from blackwell_lab.workload.native_tools import openai_tool_definitions
+    from blackwell_lab.workload.public_metadata import evidence_contract
+
+    version = candidate_workload_version(candidate_id)
+    scenario = next(iter(catalog().values()))
+    prompt = system_prompt(scenario, version).encode("utf-8")
+    tools = json.dumps(
+        openai_tool_definitions(version),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return {
+        "evidence_contract": evidence_contract(),
+        "system_prompt_sha256": hashlib.sha256(prompt).hexdigest(),
+        "native_tool_contract_sha256": hashlib.sha256(tools).hexdigest(),
     }
 
 
@@ -951,6 +1005,75 @@ def require_successor_pair_contract() -> dict[str, Any]:
     }
 
 
+def require_structured_pair_contract() -> dict[str, Any]:
+    """Fail closed unless W5/W6 match and W1-W4 identities stay frozen."""
+    from blackwell_lab.workload.agent import RETRIES, SYSTEM_PROMPT_V241, system_prompt
+    from blackwell_lab.workload.public_metadata import (
+        STRUCTURED_FIELD_EXPLANATION,
+        evidence_contract,
+    )
+
+    require_successor_pair_contract()
+    problems: list[str] = []
+    frozen = {
+        CANDIDATE_W1: "2b7c5745084f4459af66e58fa5701d5c513108a9536385acbed00722c02e68cf",
+        CANDIDATE_W2: "06d673972a696efcddc9ce00d6c9f6a15a032e0c516d4dc8b54f01dbba0917a2",
+        CANDIDATE_W3: "bdb9947bf5c0934833d077536ae85740857c36bfd08d88f7fee8b7b54f0f857e",
+        CANDIDATE_W4: "66df267f60f062f867678331fc466305cde5432bc9cba861ebe90e8cef108414",
+    }
+    for candidate, digest in frozen.items():
+        if candidate_identity_digest(candidate) != digest:
+            problems.append(f"{candidate} identity")
+    if STRUCTURED_EVIDENCE_CANDIDATES != (CANDIDATE_W5, CANDIDATE_W6):
+        problems.append("candidate table")
+    if set(STRUCTURED_EVIDENCE_CANDIDATES) & set(SUCCESSOR_WORKFLOW_CANDIDATES):
+        problems.append("successor overlap")
+    if candidate_workload_version(CANDIDATE_W5) != W5_WORKLOAD_VERSION:
+        problems.append("control workload_version")
+    if candidate_workload_version(CANDIDATE_W6) != W6_WORKLOAD_VERSION:
+        problems.append("treatment workload_version")
+    for candidate in STRUCTURED_EVIDENCE_CANDIDATES:
+        if candidate_controller(candidate) != W_STRUCTURED_CONTROLLER:
+            problems.append("controller")
+    if list(candidate_treatments(CANDIDATE_W5)) != []:
+        problems.append("control treatments")
+    if list(candidate_treatments(CANDIDATE_W6)) != [W6_TREATMENT]:
+        problems.append("treatment treatments")
+    if control_candidate_for(CANDIDATE_W6) != CANDIDATE_W5:
+        problems.append("control pairing")
+    if control_candidate_for(CANDIDATE_W5) is not None:
+        problems.append("control is not a treatment")
+    if control_candidate_for(CANDIDATE_W4) != CANDIDATE_W3:
+        problems.append("historical pairing")
+    if RETRIES != 0:
+        problems.append("retries")
+    scenario = next(iter(catalog().values()))
+    expected_prompt = SYSTEM_PROMPT_V241 + "\n\n" + STRUCTURED_FIELD_EXPLANATION
+    for candidate in STRUCTURED_EVIDENCE_CANDIDATES:
+        if system_prompt(scenario, candidate_workload_version(candidate)) != expected_prompt:
+            problems.append("system prompt")
+    contract = evidence_contract()
+    if contract["controller_id"] != W_STRUCTURED_CONTROLLER:
+        problems.append("evidence contract")
+    if problems:
+        raise QualificationError(
+            "W5/W6 pair contract drift: "
+            + ", ".join(dict.fromkeys(problems))
+            + "; nothing was executed"
+        )
+    return {
+        "control_candidate": CANDIDATE_W5,
+        "treatment_candidate": CANDIDATE_W6,
+        "controller": W_STRUCTURED_CONTROLLER,
+        "control_workload_version": W5_WORKLOAD_VERSION,
+        "treatment_workload_version": W6_WORKLOAD_VERSION,
+        "control_treatments": [],
+        "treatment_treatments": [W6_TREATMENT],
+        "evidence_contract": contract,
+        "max_turns": 12,
+    }
+
+
 def require_w_config(config: dict, *, candidate_id: str) -> None:
     """Workflow-family configs carry no sealed, custody, or schedule keys."""
     if not is_workflow_family(candidate_id):
@@ -991,6 +1114,14 @@ def require_w_config(config: dict, *, candidate_id: str) -> None:
             raise ConfigError(f"qualify-agent {candidate_id} does not accept a {key} override")
     if candidate_id in SUCCESSOR_WORKFLOW_CANDIDATES:
         require_successor_pair_contract()
+    elif candidate_id in STRUCTURED_EVIDENCE_CANDIDATES:
+        require_structured_pair_contract()
+        from blackwell_lab.workload.public_metadata import evidence_contract
+
+        if config.get("evidence_contract") != evidence_contract():
+            raise ConfigError(
+                f"qualify-agent {candidate_id} evidence_contract does not match the implementation"
+            )
     else:
         require_w_pair_contract()
 
@@ -1019,6 +1150,11 @@ def require_w_catalog_execution(
     if template_ids is None or tuple(template_ids) != tuple(stage_spec(stage)["template_ids"]):
         raise ConfigError(
             f"{candidate_id} {stage} must schedule exactly the frozen catalog templates"
+        )
+    if candidate_id in STRUCTURED_EVIDENCE_CANDIDATES and stage != STAGE_DEVELOPMENT:
+        raise ConfigError(
+            "W5/W6 public metadata covers the development catalog only; "
+            "holdout and freeze execution are outside this contract revision"
         )
 
 
@@ -1619,10 +1755,20 @@ def sanitized_receipt(
             f"{candidate_id} development receipt requires matched-control provenance"
         )
     if matched_control is not None and not development_binding:
+        if candidate_id in STRUCTURED_EVIDENCE_CANDIDATES:
+            raise QualificationError("matched-control provenance is valid only for W6 development")
         raise QualificationError(
             "matched-control provenance is valid only for P2C or W2 development"
         )
-    return {
+    structured_binding: dict[str, Any] = {}
+    if candidate_id in STRUCTURED_EVIDENCE_CANDIDATES:
+        from blackwell_lab.workload.public_metadata import VALIDATION_SCOPE, evidence_contract
+
+        structured_binding = {
+            "evidence_contract": evidence_contract(),
+            "validation_scope": VALIDATION_SCOPE,
+        }
+    receipt = {
         "workflow": QUALIFICATION_WORKFLOW,
         "artifact_family": QUALIFICATION_ARTIFACT_FAMILY,
         "diagnostic_label": QUALIFICATION_LABEL,
@@ -1636,6 +1782,7 @@ def sanitized_receipt(
         "workload_version": candidate_workload_version(candidate_id),
         "controller": candidate_controller(candidate_id),
         "catalog_workload_version": CATALOG_WORKLOAD_VERSION,
+        **structured_binding,
         # Content-free sealed-stage provenance (digests, identity, stage,
         # count). Present only for sealed cells so other receipts are unchanged.
         **({"sealed_set": sealed_set.provenance()} if sealed_set is not None else {}),
@@ -1672,6 +1819,7 @@ def sanitized_receipt(
             )
         ),
     }
+    return receipt
 
 
 def failure_record(message: str) -> dict[str, Any]:

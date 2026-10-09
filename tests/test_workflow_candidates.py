@@ -39,6 +39,8 @@ from blackwell_lab.cloud.matched_control import (
     W1_W2_PAIR,
     W3_CONTROL_KIND,
     W3_W4_PAIR,
+    W5_CONTROL_KIND,
+    W5_W6_PAIR,
     W_CONTROL_KIND,
     audit_matched_controls,
     authenticate_matched_development_control,
@@ -136,9 +138,11 @@ class TestCandidateTables:
             "W2",
             "W3",
             "W4",
+            "W5",
+            "W6",
         )
         assert not set(WORKFLOW_CANDIDATES) & set(AUTHORIZED_CANDIDATES)
-        assert DEVELOPMENT_CONTROL_PAIRS == {"P2C": "P1", "W2": "W1", "W4": "W3"}
+        assert DEVELOPMENT_CONTROL_PAIRS == {"P2C": "P1", "W2": "W1", "W4": "W3", "W6": "W5"}
         for candidate in WORKFLOW_CANDIDATES:
             assert is_catalog_candidate(candidate)
             assert candidate_controller(candidate) == "workflow-controller-v1"
@@ -152,7 +156,7 @@ class TestCandidateTables:
 
     def test_workflow_identities_are_distinct_and_pinned(self):
         digests = {c: candidate_identity_digest(c) for c in ALL_AUTHORIZED_CANDIDATES}
-        assert len(set(digests.values())) == 9
+        assert len(set(digests.values())) == 11
         for candidate, digest in CA_CENTRAL_IDENTITY_DIGESTS.items():
             assert digests[candidate] == digest, candidate
         for candidate, digest in WORKFLOW_IDENTITY_DIGESTS.items():
@@ -193,10 +197,10 @@ class TestCandidateTables:
         assert len(spec["template_ids"]) == 6
 
     def test_unknown_candidate_messages_name_the_pair(self):
-        with pytest.raises(ConfigError, match="W3, or W4"):
-            frozen_candidate_fields("W5")
-        with pytest.raises(ConfigError, match="W3, or W4"):
-            candidate_controller("W5")
+        with pytest.raises(ConfigError, match="W5, or W6"):
+            frozen_candidate_fields("W7")
+        with pytest.raises(ConfigError, match="W5, or W6"):
+            candidate_controller("W7")
 
 
 class TestConfigs:
@@ -268,6 +272,23 @@ class TestConfigs:
             require_w_catalog_execution(
                 "W1", stage="holdout", template_ids=None, sealed_set=object(), sealed_tasks=None
             )
+        for candidate in ("W5", "W6"):
+            require_w_catalog_execution(
+                candidate,
+                stage="development",
+                template_ids=spec["template_ids"],
+                sealed_set=None,
+                sealed_tasks=None,
+            )
+            for blocked in ("holdout", "freeze"):
+                with pytest.raises(ConfigError, match="development catalog only"):
+                    require_w_catalog_execution(
+                        candidate,
+                        stage=blocked,
+                        template_ids=stage_spec(blocked)["template_ids"],
+                        sealed_set=None,
+                        sealed_tasks=None,
+                    )
 
     def test_development_control_section_is_pair_specific(self):
         config = qualification_config_dict("W2", "development")
@@ -308,16 +329,20 @@ class TestPairs:
         assert pair_for_treatment("W2") is W1_W2_PAIR
         assert pair_for_control("P1") is P1_P2C_PAIR
         assert pair_for_control("W1") is W1_W2_PAIR
-        for other in ("C1", "C2", "P2", "W5"):
+        for other in ("C1", "C2", "P2"):
             assert pair_for_treatment(other) is None and pair_for_control(other) is None
         assert P1_P2C_PAIR.kind == CONTROL_KIND == "matched-p1-development-control"
         assert W1_W2_PAIR.kind == W_CONTROL_KIND == "matched-w1-development-control"
         assert W3_W4_PAIR.kind == W3_CONTROL_KIND == "matched-w3-development-control"
+        assert W5_W6_PAIR.kind == W5_CONTROL_KIND == "matched-w5-development-control"
         assert P1_P2C_PAIR.label_key == "p1_run_label"
         assert W1_W2_PAIR.label_key == "w1_run_label"
         assert W3_W4_PAIR.label_key == "w3_run_label"
         assert pair_for_treatment("W4") is W3_W4_PAIR
         assert pair_for_control("W3") is W3_W4_PAIR
+        assert pair_for_treatment("W6") is W5_W6_PAIR
+        assert pair_for_control("W5") is W5_W6_PAIR
+        assert W5_W6_PAIR.label_key == "w5_run_label"
 
     def test_historical_messages_are_unchanged(self):
         assert (

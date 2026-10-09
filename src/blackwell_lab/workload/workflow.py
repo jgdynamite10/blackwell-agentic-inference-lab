@@ -127,6 +127,9 @@ REJECT_MALFORMED_TERMINAL = "malformed_terminal"
 #: Successor-only terminal categories (workflow-controller-v2). v1 never emits them.
 REJECT_DIAGNOSIS_RELEVANT_EVIDENCE = "diagnosis_relevant_evidence_required"
 REJECT_RELEVANT_EVIDENCE_REF = "relevant_evidence_ref_required"
+#: Structured-evidence categories (workflow-controller-v3). v1 and v2 never emit them.
+REJECT_HYPOTHESIS_SUPPORT = "hypothesis_support_required"
+REJECT_HYPOTHESIS_WITNESS_REF = "hypothesis_witness_ref_required"
 #: Non-terminal rejection for a repeated equivalent zero-match search (v2 only).
 REJECT_REPEATED_ZERO_MATCH = "repeated_zero_match_search"
 REJECTION_CATEGORIES = (
@@ -139,6 +142,8 @@ REJECTION_CATEGORIES = (
     REJECT_MALFORMED_TERMINAL,
     REJECT_DIAGNOSIS_RELEVANT_EVIDENCE,
     REJECT_RELEVANT_EVIDENCE_REF,
+    REJECT_HYPOTHESIS_SUPPORT,
+    REJECT_HYPOTHESIS_WITNESS_REF,
 )
 
 #: Generic corrective guidance. Every sentence is scenario-independent: it
@@ -187,6 +192,18 @@ GUIDANCE: dict[str, str] = {
         "evidence_refs must include the observation_id of a usable direct log "
         "observation relevant to the selected diagnosis. Runbook lookups and "
         "recent-change lookups are not direct evidence."
+    ),
+    REJECT_HYPOTHESIS_SUPPORT: (
+        "The selected diagnosis is not covered by the recorded public evidence. "
+        "A mention, a symptom, an ambiguous report, a contradicted condition, or "
+        "a partial pattern is not sufficient. Continue investigating within this "
+        "task, then resubmit."
+    ),
+    REJECT_HYPOTHESIS_WITNESS_REF: (
+        "evidence_refs must cite every recorded witness the selected diagnosis "
+        "requires, including a health result when the claim requires health. "
+        "Metrics, runbooks, and change records cannot replace a required log or "
+        "health witness."
     ),
 }
 

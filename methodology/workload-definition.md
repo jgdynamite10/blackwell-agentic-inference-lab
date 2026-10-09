@@ -191,6 +191,22 @@ authenticate W4, and a W3 control cannot authenticate W2. The prompt bytes,
 evaluator, 20-task schedule, 0.40 floor, canary schedule, and measured
 canary seed `20261007` are unchanged.
 
+### Workloads 2.8.0 and 2.8.1 — structured public evidence (decision D-0034)
+
+Workloads **2.8.0** and **2.8.1** bind **`workflow-controller-v3`**. They
+add a reviewed public-evidence overlay for the six development templates:
+hypothesis claims on the task prompt and on a successful runbook, and
+`finding` / `mentions` arrays on returned logs and health. The controller
+checks whether the selected hypothesis's declared evidence pattern is
+covered. It does not decide that the hypothesis is the correct or unique
+cause. The evaluator, predicates, accepted answers, schedules, floors,
+region, turn budget, and retry policy stay unchanged. W6 differs from W5
+only by `evidence_refs`, which must cite every required witness, including
+health when the claim requires it. W1-W4 keep their controllers, payloads,
+and identity digests. Holdout templates have no overlay in this revision,
+so a W5/W6 holdout or freeze stage refuses to execute rather than invent
+annotations. `validation_scope` is `public-catalog-pre-exposed-holdout`.
+
 Candidates **W1** (2.6.0) and **W2** (2.6.1) are the authorized
 `qualify-agent` bindings: identical model, artifact, serving image, prompt
 bytes, generation pins, catalog, evaluator 3.1.0, 20-task development

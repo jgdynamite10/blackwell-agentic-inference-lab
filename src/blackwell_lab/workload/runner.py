@@ -82,6 +82,7 @@ from blackwell_lab.workload.model_client import (
     ModelClient,
 )
 from blackwell_lab.workload.native_tools import require_workload_version
+from blackwell_lab.workload.public_metadata import manifest_workload_binding
 from blackwell_lab.workload.sampling import (
     TaskInstance,
     generate_task_instances,
@@ -503,6 +504,7 @@ def build_manifest(
             "name": WORKLOAD_NAME,
             "version": executed_version,
             **({"controller": controller} if controller else {}),
+            **manifest_workload_binding(executed_version),
             "catalog_digest": catalog_digest(),
             "task_source": catalog_task_source(),
             "profile": profile.name,

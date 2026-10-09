@@ -1651,6 +1651,11 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
             qualification.require_w_pair_contract()
         elif candidate_id in qualification.SUCCESSOR_WORKFLOW_CANDIDATES:
             qualification.require_successor_pair_contract()
+        elif candidate_id in qualification.STRUCTURED_EVIDENCE_CANDIDATES:
+            qualification.require_structured_pair_contract()
+            canary.preflight_canary_execution(
+                config, candidate_id=candidate_id, run_label=run_label
+            )
     except (ConfigError, qualification.QualificationError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 1
@@ -2120,7 +2125,7 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4"),
+        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6"),
         help=(
             "C1 (temperature 1.0, workload 2.4.0), "
             "C2 (temperature 0.2, workload 2.4.0), "
@@ -2196,7 +2201,7 @@ def build_parser() -> argparse.ArgumentParser:
     canary_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4"),
+        choices=("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4", "W5", "W6"),
         help="Public-catalog candidate to canary (P2 is sealed and refused).",
     )
     canary_parser.add_argument(
@@ -2229,7 +2234,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4"),
+        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6"),
     )
     analyze_parser.add_argument(
         "--stage", default="development", choices=("development", "holdout", "freeze")

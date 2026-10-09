@@ -119,7 +119,7 @@
           "properties": {
             "controller": {
               "type": "string",
-              "enum": ["workflow-controller-v1", "workflow-controller-v2"]
+              "enum": ["workflow-controller-v1", "workflow-controller-v2", "workflow-controller-v3"]
             },
             "treatments": {
               "type": "array",

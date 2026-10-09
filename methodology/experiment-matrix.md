@@ -104,7 +104,12 @@ Before any full-baseline measurement, one short owner-approved
   schema-valid and authenticates only W4. Relevance uses the selected
   diagnosis id, including short technical tokens and acronyms, and does
   not copy runbook categories onto other published candidates. W1/W2 stay
-  historical. The Akamai
+  historical. Decision **D-0034** adds W5/W6 (workloads 2.8.0 / 2.8.1,
+  `workflow-controller-v3`, W5 the same-session control for W6) with a
+  structured public-evidence overlay. The controller checks coverage of
+  the selected hypothesis; the evaluator still decides correctness. A W5
+  control authenticates only W6. Holdout execution is outside this
+  revision's metadata. The Akamai
   qualification infrastructure region is fixed to `ca-central` (decision
   D-0032, superseding only the D-0030 region lock). The owner confirmed
   current capacity in `ca-central` by authorizing this region change on
