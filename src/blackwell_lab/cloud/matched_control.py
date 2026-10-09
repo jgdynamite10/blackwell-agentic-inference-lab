@@ -24,7 +24,8 @@ so neither pair can authenticate the other.
 Decision D-0033 adds a third pair: W3 is the same-session development
 control for W4. Its kind and ``w3_``-prefixed keys match neither the P1
 pair nor the W1 pair, so a W1 control cannot authenticate W4 and a W3
-control cannot authenticate W2.
+control cannot authenticate W2. The schema admits a genuine W3 record
+next to the historical P1 and W1 records.
 """
 
 from __future__ import annotations
@@ -1046,6 +1047,7 @@ def install_verified_p1_development_control(
         ),
         pair=pair,
     )
+    _validate_record(record, pair=pair)
     control_digest = write_private_json(
         control_record_path(results_dir, p1_run_label, pair=pair), record
     )
@@ -1059,7 +1061,7 @@ def _validate_record(record: dict, *, pair: ControlPair = P1_P2C_PAIR) -> None:
         jsonschema.validate(record, _load_schema())
     except jsonschema.ValidationError:
         _fail(pair.message("malformed"))
-    # The schema admits both pair kinds; the pair in scope admits only its own.
+    # The schema admits every registered pair kind; the pair in scope admits only its own.
     if record.get("kind") != pair.kind or record.get("candidate_id") != pair.control:
         _fail(pair.message("malformed"))
     _reject_private_strings(record)

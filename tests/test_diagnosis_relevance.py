@@ -131,8 +131,8 @@ class TestRelevanceContract:
         ("diagnosis", "steps", "query", "message"),
         [
             (
-                "published-diagnosis-a",
-                ["Check resolver SERVFAIL counters before any restart."],
+                "resolver-servfail",
+                ["Follow the published steps."],
                 "SERVFAIL",
                 "lookup returned SERVFAIL from the resolver",
             ),
@@ -241,25 +241,149 @@ class TestRelevanceContract:
             "retrieve_runbook",
             _runbook(
                 ["Check resolver SERVFAIL counters before any restart."],
-                ["published-diagnosis-a"],
+                ["resolver-servfail", "badger-queue-outage"],
                 ["remediation-a"],
             ),
         )
         assert health.eligible is True
         assert change.eligible is False
         cited_health = controller.validate_terminal(
-            _terminal("published-diagnosis-a", "remediation-a", [health.observation_id])
+            _terminal("resolver-servfail", "remediation-a", [health.observation_id])
         )
         assert cited_health.accepted is False
         assert REJECT_RELEVANT_EVIDENCE_REF in cited_health.failure_categories
         cited_change = controller.validate_terminal(
-            _terminal("published-diagnosis-a", "remediation-a", [change.observation_id])
+            _terminal("resolver-servfail", "remediation-a", [change.observation_id])
         )
         assert REJECT_EVIDENCE_REFS_REQUIRED in cited_change.failure_categories
         cited_log = controller.validate_terminal(
-            _terminal("published-diagnosis-a", "remediation-a", [log_obs.observation_id])
+            _terminal("resolver-servfail", "remediation-a", [log_obs.observation_id])
         )
         assert cited_log.accepted is True
+        distractor = controller.validate_terminal(
+            _terminal("badger-queue-outage", "remediation-a", [log_obs.observation_id])
+        )
+        assert distractor.accepted is False
+        assert REJECT_DIAGNOSIS_RELEVANT_EVIDENCE in distractor.failure_categories
+        assert REJECT_RELEVANT_EVIDENCE_REF in distractor.failure_categories
+
+    def test_short_technical_tokens_and_acronyms_match_returned_lines(self):
+        cases = (
+            ("edge-mtu-clamp", "mtu", "interface mtu dropped on the path"),
+            ("worker-oom-kill", "oom", "worker oom kill on the replica"),
+            ("expired-tls-cert", "tls", "handshake used an expired tls certificate"),
+            ("ingress-h2-stall", "h2", "ingress h2 stream stalled"),
+            ("stale-ipv4-route", "ipv4", "route advertised the wrong ipv4 prefix"),
+        )
+        for diagnosis, token, message in cases:
+            payload = _log(token, message)
+            kept = relevance.diagnosis_tokens(diagnosis)
+            lines = relevance.log_message_tokens(payload)
+            assert token in kept
+            assert token in lines
+            assert relevance.evidence_relevant(
+                diagnosis_categories=relevance.categories_in_text(diagnosis),
+                diagnosis_id_tokens=kept,
+                log_categories=relevance.classify_usable_log(payload),
+                log_tokens=lines,
+            )
+        payload = _log("mtu", "interface mtu dropped on the path")
+        assert relevance.diagnosis_tokens("edge-mtu-clamp") & relevance.log_message_tokens(
+            payload
+        ) == frozenset({"mtu"})
+        controller = DiagnosisRelevantWorkflowController(context="ctx")
+        _prepare(
+            controller,
+            payload,
+            ["Follow the published steps."],
+            "edge-mtu-clamp",
+        )
+        verdict = controller.validate_terminal(_terminal("edge-mtu-clamp", "remediation-a"))
+        assert verdict.accepted is True
+
+    def test_stopwords_numbers_and_unrelated_acronyms_do_not_match(self):
+        assert "failure" not in relevance.diagnosis_tokens("config-failure")
+        assert "release" not in relevance.diagnosis_tokens("bad-release-window")
+        assert "missing" not in relevance.diagnosis_tokens("header-missing-span")
+        assert "404" not in relevance.diagnosis_tokens("ticket-404-only")
+        failure = _log("failure", "process failure during reload")
+        assert not relevance.evidence_relevant(
+            diagnosis_categories=relevance.categories_in_text("config-failure"),
+            diagnosis_id_tokens=relevance.diagnosis_tokens("config-failure"),
+            log_categories=relevance.classify_usable_log(failure),
+            log_tokens=relevance.log_message_tokens(failure),
+        )
+        numeric = _log("404", "status 404 returned to the caller")
+        assert not (
+            relevance.diagnosis_tokens("ticket-404-only") & relevance.log_message_tokens(numeric)
+        )
+        injected = _log("mtu", "disk latency exceeded budget")
+        assert "mtu" not in relevance.log_message_tokens(injected)
+        assert not relevance.evidence_relevant(
+            diagnosis_categories=frozenset(),
+            diagnosis_id_tokens=relevance.diagnosis_tokens("edge-mtu-clamp"),
+            log_categories=relevance.classify_usable_log(injected),
+            log_tokens=relevance.log_message_tokens(injected),
+        )
+        other = _log("rpc", "rpc deadline exceeded on the client")
+        assert "rpc" in relevance.log_message_tokens(other)
+        assert "rpc" not in relevance.diagnosis_tokens("edge-mtu-clamp")
+        assert not (
+            relevance.diagnosis_tokens("edge-mtu-clamp") & relevance.log_message_tokens(other)
+        )
+        controller = DiagnosisRelevantWorkflowController(context="ctx")
+        _prepare(
+            controller,
+            failure,
+            ["Check resolver SERVFAIL counters before any restart."],
+            "config-failure",
+        )
+        verdict = controller.validate_terminal(_terminal("config-failure", "remediation-a"))
+        assert verdict.accepted is False
+        assert REJECT_DIAGNOSIS_RELEVANT_EVIDENCE in verdict.failure_categories
+
+
+CORRECT_DIAGNOSIS = "resolver-servfail"
+DISTRACTOR_DIAGNOSES = ("badger-queue-outage", "network-firewall-block")
+TOPICAL_STEPS = ["Check resolver SERVFAIL counters before any restart."]
+
+
+class TestSelectedDiagnosisOnly:
+    def test_w3_and_w4_accept_the_matching_diagnosis_and_reject_distractors(self):
+        log_payload = _log("SERVFAIL", "lookup returned SERVFAIL from the resolver")
+        for version in ("2.7.0", "2.7.1"):
+            controller = build_controller(version, context=f"ctx-{version}")
+            assert isinstance(controller, DiagnosisRelevantWorkflowController)
+            log_obs = controller.record("search_logs", log_payload)
+            controller.record(
+                "retrieve_runbook",
+                _runbook(
+                    TOPICAL_STEPS,
+                    [CORRECT_DIAGNOSIS, *DISTRACTOR_DIAGNOSES],
+                    ["remediation-a"],
+                ),
+            )
+            refs = [log_obs.observation_id] if controller.requires_evidence_refs else None
+            accepted = controller.validate_terminal(
+                _terminal(CORRECT_DIAGNOSIS, "remediation-a", refs)
+            )
+            assert accepted.accepted is True
+            assert accepted.failure_categories == ()
+            for distractor in DISTRACTOR_DIAGNOSES:
+                rejected = controller.validate_terminal(
+                    _terminal(distractor, "remediation-a", refs)
+                )
+                assert rejected.accepted is False
+                assert REJECT_DIAGNOSIS_RELEVANT_EVIDENCE in rejected.failure_categories
+                if controller.requires_evidence_refs:
+                    assert REJECT_RELEVANT_EVIDENCE_REF in rejected.failure_categories
+            if controller.requires_evidence_refs:
+                uncited = controller.validate_terminal(
+                    _terminal(CORRECT_DIAGNOSIS, "remediation-a")
+                )
+                assert uncited.accepted is False
+                assert REJECT_EVIDENCE_REFS_REQUIRED in uncited.failure_categories
+                assert REJECT_DIAGNOSIS_RELEVANT_EVIDENCE not in uncited.failure_categories
 
 
 class TestLegacyPairUnchanged:

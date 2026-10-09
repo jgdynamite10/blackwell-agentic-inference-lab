@@ -2093,15 +2093,24 @@ bind W2.
 The successor keeps the usable-log and valid-runbook requirements. It also
 requires at least one usable direct log observation relevant to the
 diagnosis selected in `recommend_remediation`. Relevance is a generic
-category or diagnosis-id token overlap computed only from public tool,
-diagnosis, and runbook metadata. W4's `evidence_refs` must include one
-such log. Runbook and recent-change observations stay ineligible as direct
-evidence. A repeated equivalent zero-match search receives a typed
-correctable rejection that tells the model to change the query, source, or
-diagnostic hypothesis. `max_turns` stays 12, one native call per turn,
-`RETRIES` stays 0, and the remaining-turn warning stays at three. If
-relevant evidence is never found, the terminal is rejected and budget
-exhaustion is `workflow_requirements_unmet`.
+category named by that diagnosis id, or a token of that id that appears
+in a returned log line. Short technical tokens and acronyms in the
+agent-visible diagnosis id count. Ordinary stopwords and pure numbers do
+not. A retrieved runbook's categories are not copied onto every published
+diagnosis candidate, so a topical log does not authorize an unsupported
+distractor. W4's `evidence_refs` must include one such log. Runbook and
+recent-change observations stay ineligible as direct evidence. A repeated
+equivalent zero-match search receives a typed correctable rejection that
+tells the model to change the query, source, or diagnostic hypothesis.
+`max_turns` stays 12, one native call per turn, `RETRIES` stays 0, and the
+remaining-turn warning stays at three. If relevant evidence is never
+found, the terminal is rejected and budget exhaustion is
+`workflow_requirements_unmet`.
+
+The matched-control schema admits a genuine W3 record
+(`matched-w3-development-control`, candidate `W3`) so W4 can authenticate
+it. P1 and W1 records stay valid. A W3 record does not authenticate W2,
+and a W1 record does not authenticate W4.
 
 A ten-task development canary passed 3 of 10. Six controller-accepted
 terminals missed diagnosis-relevant evidence, and one task exhausted the
@@ -2115,7 +2124,11 @@ task fixtures, and the `ca-central` region lock are unchanged. D-0027
 through D-0032 are not rewritten.
 
 Identity digests below were recomputed with `candidate_identity_digest`.
-The D-0032 W1 and W2 cells stay the current contract for those candidates.
+The 2026-10-09 correction of the W3 schema admission and the relevance
+predicate recomputed the same four digests: the identity serialization is
+the frozen candidate fields, not the relevance predicate or the
+matched-control schema. The D-0032 W1 and W2 cells stay the current
+contract for those candidates.
 
 | Candidate | D-0033 (`ca-central`, recomputed) |
 | --- | --- |

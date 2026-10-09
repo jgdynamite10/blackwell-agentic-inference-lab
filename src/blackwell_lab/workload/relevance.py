@@ -1,9 +1,10 @@
 """Diagnosis-to-evidence relevance for ``workflow-controller-v2``.
 
-The contract is a pure function of public tool-call metadata, tool-result
-metadata, the selected diagnosis id, and runbook title/step text already
-returned to the agent. It classifies that text into generic diagnostic
-categories. It does not import the evaluator, the scenario catalog, sealed
+The contract is a pure function of public tool-result metadata and the
+selected diagnosis id already returned to the agent. It classifies that
+text into generic diagnostic categories and identifier tokens. A retrieved
+runbook's title and steps are not copied onto other published diagnosis
+candidates. It does not import the evaluator, the scenario catalog, sealed
 payloads, holdout material, or accepted answers, and it never reads them.
 """
 
@@ -25,7 +26,10 @@ CATEGORY_MARKERS: dict[str, tuple[str, ...]] = {
 }
 
 _TOKEN = re.compile(r"[a-z0-9]+")
-_MIN_DIAGNOSIS_TOKEN = 5
+#: Ordinary prose shorter than this is not a significant word.
+_MIN_PROSE_TOKEN = 5
+#: Shortest agent-visible identifier segment that can be a technical token.
+_MIN_TECHNICAL_TOKEN = 2
 #: Ordinary words that must not, by themselves, make a log relevant.
 _TOKEN_STOPWORDS = frozenset(
     {
@@ -73,35 +77,38 @@ def categories_in_text(text: str) -> frozenset[str]:
     )
 
 
+def _is_short_technical_token(token: str) -> bool:
+    """True for a short acronym or technical segment of an identifier.
+
+    The diagnosis id is agent-visible metadata. Its hyphen-separated
+    segments of length 2-4 are technical tokens or acronyms (``mtu``,
+    ``tls``, ``oom``, ``h2``), including segments that contain a digit.
+    Ordinary stopwords and pure numbers are not technical tokens.
+    """
+    if len(token) < _MIN_TECHNICAL_TOKEN or len(token) >= _MIN_PROSE_TOKEN:
+        return False
+    return token.isalnum()
+
+
 def _kept_token(token: str) -> bool:
-    return (
-        len(token) >= _MIN_DIAGNOSIS_TOKEN and not token.isdigit() and token not in _TOKEN_STOPWORDS
-    )
+    """Keep a significant word or a short technical identifier token."""
+    if token.isdigit() or token in _TOKEN_STOPWORDS:
+        return False
+    if len(token) >= _MIN_PROSE_TOKEN:
+        return True
+    return _is_short_technical_token(token)
 
 
 def diagnosis_tokens(diagnosis_id: str) -> frozenset[str]:
     """Significant tokens of a published diagnosis id.
 
-    Short tokens and ordinary stopwords are dropped so a diagnosis id cannot
-    match a log merely by sharing a filler word.
+    The id is agent-visible metadata. Significant words are kept, and so
+    are short technical tokens and acronyms from that id. Ordinary
+    stopwords and pure numbers are dropped so a diagnosis id cannot match
+    a log merely by sharing a filler word.
     """
     folded = diagnosis_id.casefold()
     return frozenset(token for token in _TOKEN.findall(folded) if _kept_token(token))
-
-
-def runbook_categories(runbook: dict) -> frozenset[str]:
-    """Categories declared by a retrieved runbook's title and steps.
-
-    Remediation ids are not inspected. They are not diagnostic class metadata.
-    """
-    parts: list[str] = []
-    title = runbook.get("title")
-    if isinstance(title, str):
-        parts.append(title)
-    steps = runbook.get("steps")
-    if isinstance(steps, list):
-        parts.extend(step for step in steps if isinstance(step, str))
-    return categories_in_text("\n".join(parts))
 
 
 def equivalent_query_key(query: object) -> str | None:
@@ -181,9 +188,11 @@ def evidence_relevant(
 ) -> bool:
     """True when one usable log supports the selected diagnosis.
 
-    Support is a shared generic category, or a significant diagnosis-id token
-    that appears in a returned log line. Either condition is enough. Neither
-    condition reads an accepted answer.
+    Support is a shared generic category, or a diagnosis-id token that
+    appears in a returned log line. Short technical tokens and acronyms
+    from the diagnosis id count. Ordinary stopwords do not. Either
+    condition is enough. Neither condition reads an accepted answer or
+    copies a runbook category onto another published candidate.
     """
     if diagnosis_categories & log_categories:
         return True

@@ -171,8 +171,11 @@ bind **`workflow-controller-v2`** because generic log sufficiency did not
 guarantee diagnosis-relevant evidence. The successor keeps the usable-log
 and valid-runbook requirements, and it also requires at least one usable
 direct log observation whose generic category or diagnosis-id token overlap
-supports the selected diagnosis. Categories are derived only from public
-tool, diagnosis, and runbook metadata. The treatment on 2.7.1 still requires
+supports the selected diagnosis. Categories and tokens come from that
+diagnosis id, which is agent-visible metadata, and from returned log
+lines. Short technical tokens and acronyms in the id count; ordinary
+stopwords do not. Runbook categories are not copied onto every published
+candidate. The treatment on 2.7.1 still requires
 `evidence_refs`, and at least one cited reference must be such a log.
 Runbook and recent-change observations remain ineligible as direct evidence.
 A repeated equivalent zero-match search is rejected with generic text that

@@ -39,7 +39,9 @@ of the candidate pair.
 Successor ``workflow-controller-v2`` (workloads 2.7.0 / 2.7.1, candidates
 W3/W4, decision D-0033) is a separate class. It keeps every rule above and
 also rejects a terminal whose usable logs are not relevant to the selected
-diagnosis. W1 and W2 stay on this class and do not inherit that check.
+diagnosis. Relevance uses that diagnosis id and the returned log lines.
+A retrieved runbook's categories are not copied onto other published
+candidates. W1 and W2 stay on this class and do not inherit that check.
 
 What the controller never does
 ------------------------------
@@ -73,7 +75,6 @@ from blackwell_lab.workload.relevance import (
     equivalent_query_key,
     evidence_relevant,
     log_message_tokens,
-    runbook_categories,
 )
 from blackwell_lab.workload.tools import EVIDENCE_REFS_ARGUMENT, TERMINAL_TOOL
 
@@ -562,11 +563,15 @@ class DiagnosisRelevantWorkflowController(WorkflowController):
 
     A usable log is not enough. At least one usable direct-log observation
     must be relevant to the diagnosis selected in ``recommend_remediation``.
-    The treatment additionally requires ``evidence_refs`` to cite one of
-    those relevant logs. Runbook and recent-change observations stay
-    ineligible as direct evidence. Repeated equivalent zero-match searches
-    are rejected with generic corrective text. W1 and W2 never construct
-    this class.
+    Relevance is that diagnosis id's own categories and tokens, including
+    short technical tokens and acronyms, against the returned log lines.
+    Categories from a retrieved runbook are not applied to every published
+    candidate, so a topical log does not authorize an unsupported
+    distractor. The treatment additionally requires ``evidence_refs`` to
+    cite one of those relevant logs. Runbook and recent-change observations
+    stay ineligible as direct evidence. Repeated equivalent zero-match
+    searches are rejected with generic corrective text. W1 and W2 never
+    construct this class.
     """
 
     def __post_init__(self) -> None:
@@ -574,7 +579,6 @@ class DiagnosisRelevantWorkflowController(WorkflowController):
         self.controller_id = CONTROLLER_WORKFLOW_V2
         self._log_categories: dict[str, frozenset[str]] = {}
         self._log_tokens: dict[str, frozenset[str]] = {}
-        self._published_categories: dict[str, set[str]] = {}
         self._zero_match_keys: set[str] = set()
         self._repeated_zero_match_ids: set[str] = set()
         self._repeated_zero_match_searches = 0
@@ -600,8 +604,6 @@ class DiagnosisRelevantWorkflowController(WorkflowController):
         if usable_log:
             self._log_categories[observation.observation_id] = classify_usable_log(payload)
             self._log_tokens[observation.observation_id] = log_message_tokens(payload)
-        if tool == "retrieve_runbook" and isinstance(payload, dict):
-            self._note_runbook(payload)
         return observation
 
     def annotate(self, payload: dict[str, Any], observation: Observation) -> dict[str, Any]:
@@ -614,23 +616,8 @@ class DiagnosisRelevantWorkflowController(WorkflowController):
         block["guidance"] = REPEATED_ZERO_MATCH_GUIDANCE
         return {**annotated, WORKFLOW_FIELD: block}
 
-    def _note_runbook(self, payload: dict[str, Any]) -> None:
-        if payload.get("found") is not True:
-            return
-        runbook = payload.get("runbook")
-        if not isinstance(runbook, dict):
-            return
-        categories = runbook_categories(runbook)
-        candidates = payload.get("diagnosis_candidates")
-        if not isinstance(candidates, list):
-            return
-        for candidate in candidates:
-            if _is_clean_string(candidate):
-                self._published_categories.setdefault(candidate, set()).update(categories)
-
     def _relevant_log_ids(self, diagnosis: str) -> set[str]:
         diagnosis_categories = set(categories_in_text(diagnosis))
-        diagnosis_categories.update(self._published_categories.get(diagnosis, ()))
         tokens = diagnosis_tokens(diagnosis)
         relevant: set[str] = set()
         frozen_categories = frozenset(diagnosis_categories)
