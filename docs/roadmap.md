@@ -1,5 +1,29 @@
 # Project Roadmap
 
+## Current bounded completion target — D-0035 (review pending)
+
+The immediate deliverable is one **qualified Akamai provider-native
+baseline**, not completion of the entire roadmap. D-0035 adds standalone
+W7 (workload 2.9.0), complete public-catalog evidence coverage, and
+`qualified-baseline`, requiring a verified same-session successful W7
+freeze before measurement. W1–W6 and historical MVL-F stay frozen;
+W5/W6 remain development-only. This is public-catalog evaluation with
+`blind_generalization_evidence=false`, not blind holdout evidence.
+
+The sequence is canary, development (20 / 0.40), holdout-labelled public
+split (20 / 0.50), freeze (200 measured / 0.70 overall / 0.40 each scenario
+plus structural gates), then the D-0017 three-cell baseline (1,800
+measured observations). Stop on a failed gate. Source tests do not prove
+live qualification. See the [D-0035 runbook](d-0035-qualified-baseline.md)
+for separate local approval, custody, budget, teardown, and acceptance
+requirements. AWS/GCP, controlled-resource mode, and engine/precision
+comparisons remain later work; the wider matrices below describe that
+broader historical scope.
+The opt-in W7 measurement instrument uses 1,024 tokens for both profiles
+and the new renderer's cached schema validation. Historical profiles and
+data stay unchanged. Coverage repair does not prove live quality will
+meet study entry.
+
 Work proceeds phase by phase. **Each phase begins only after the project owner
 explicitly authorizes it, and work stops at the end of the currently
 authorized phase** ([AGENTS.md](../AGENTS.md), section 7).

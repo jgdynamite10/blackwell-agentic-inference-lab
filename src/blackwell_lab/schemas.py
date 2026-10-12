@@ -58,7 +58,7 @@ def validate_run_manifest(document: dict[str, Any]) -> None:
     validate_document(document, RUN_MANIFEST_SCHEMA)
     workload = document.get("workload")
     if isinstance(workload, dict):
-        from blackwell_lab.workload.public_metadata import require_manifest_binding
+        from blackwell_lab.workload.catalog_runtime import require_manifest_binding
 
         require_manifest_binding(workload)
 

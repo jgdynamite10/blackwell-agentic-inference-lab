@@ -36,7 +36,7 @@ import os
 import re
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -47,9 +47,12 @@ from blackwell_lab.schemas import (
     validate_run_manifest,
     validate_task_observations,
 )
+from blackwell_lab.workload.catalog_runtime import (
+    manifest_workload_binding,
+    require_controller_binding,
+)
 from blackwell_lab.workload.clock import SYSTEM_CLOCK, Clock
 from blackwell_lab.workload.evaluator import EVALUATOR_VERSION, QUALITY_THRESHOLD
-from blackwell_lab.workload.evidence import require_controller_binding
 from blackwell_lab.workload.model_client import GenerationSettings, ModelClient
 from blackwell_lab.workload.native_tools import (
     REASONING_PARSER,
@@ -57,7 +60,6 @@ from blackwell_lab.workload.native_tools import (
     TOOL_CALL_TRANSPORT,
     require_workload_version,
 )
-from blackwell_lab.workload.public_metadata import manifest_workload_binding
 from blackwell_lab.workload.runner import (
     DEFAULT_REPETITIONS,
     DEFAULT_TASKS_PER_REPETITION,
@@ -94,7 +96,9 @@ _ARTIFACT_HASH_RE = re.compile(r"^(sha256:[0-9a-f]{64}|sha512:[0-9a-f]{128}|blak
 _RUN_LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 #: Closed set. ``canary-runs`` is the diagnostic family from D-0031 and is
 #: never a qualification cell or a comparative real run. Arbitrary names fail.
-ALLOWED_ARTIFACT_FAMILIES = frozenset({"real-runs", "qualification-runs", "canary-runs"})
+ALLOWED_ARTIFACT_FAMILIES = frozenset(
+    {"real-runs", "qualification-runs", "canary-runs", "qualified-baseline-runs"}
+)
 
 ITL_UNAVAILABLE_REASON = (
     "the OpenAI-compatible stream carries no true per-token timing; transport "
@@ -154,6 +158,7 @@ class RealRunSpec:
     template_ids: tuple[str, ...] | None = None
     artifact_family: str = "real-runs"
     workload_version: str | None = None
+    study_entry_binding: dict | None = None
     #: Declared agent controller. Must equal the controller bound to the
     #: executed workload version (None for 2.3.0/2.4.0/2.4.1,
     #: ``evidence-grounding-v1`` for 2.5.0); any other combination fails
@@ -188,6 +193,25 @@ def _validate_sealed_spec(spec: RealRunSpec) -> None:
 
 
 def _validate_spec(spec: RealRunSpec) -> Profile:
+    if spec.artifact_family == "qualified-baseline-runs":
+        binding = spec.study_entry_binding
+        if (
+            spec.workload_version != "2.9.0"
+            or not isinstance(binding, dict)
+            or binding.get("candidate_id") != "W7"
+            or binding.get("study_entry_passed") is not True
+        ):
+            raise ConfigError("qualified baseline requires a verified W7 study-entry binding")
+        from blackwell_lab.cloud.qualified_mvl import validate_study_entry_binding
+
+        validate_study_entry_binding(binding)
+        from blackwell_lab.cloud.qualification import frozen_candidate_fields
+
+        expected = frozen_candidate_fields("W7")["generation"]
+        if any(getattr(spec.generation, key) != value for key, value in expected.items()):
+            raise ConfigError("qualified baseline generation must match the qualified W7 settings")
+    elif spec.study_entry_binding is not None:
+        raise ConfigError("study-entry binding is valid only for qualified baseline artifacts")
     validate_runner_config(
         profile_name=spec.profile_name,
         concurrency=spec.concurrency,
@@ -253,7 +277,10 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
     from blackwell_lab.engines.adapters import require_real_spec_contract
 
     require_real_spec_contract(spec)
-    return PROFILES[spec.profile_name]
+    profile = PROFILES[spec.profile_name]
+    if spec.artifact_family == "qualified-baseline-runs":
+        return replace(profile, max_tokens=spec.generation.max_tokens)
+    return profile
 
 
 def _utc_now() -> str:
@@ -324,6 +351,11 @@ def build_real_manifest(
         },
         "workload": {
             "name": WORKLOAD_NAME,
+            **(
+                {"study_entry_binding": spec.study_entry_binding}
+                if spec.study_entry_binding
+                else {}
+            ),
             "version": require_workload_version(spec.workload_version),
             **({"controller": spec.controller} if spec.controller else {}),
             **manifest_workload_binding(require_workload_version(spec.workload_version)),

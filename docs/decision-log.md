@@ -2223,3 +2223,100 @@ private result, custody package, publication system, plan, apply, destroy,
 or the secondary repository was accessed. Results that predate this change
 are the W1 canary at commit `47b6d742` and the D-0033 implementation at
 `8888927`; neither used this overlay.
+
+## 2026-10-12 — D-0035: Complete-catalog W7 and a qualification-bound baseline
+
+**Status: offline implementation for owner review; live execution not
+authorized by this entry.** The owner requested immediate implementation
+and parallel work toward a bounded Akamai baseline. This records the
+change before new measurement, rather than declaring the entire
+three-provider charter complete.
+
+**Change.** Add standalone **W7**, workload **2.9.0**, with evidence
+contract/public metadata/normalization policy **2.0.0**, the existing
+public-evidence grammar **1.0.0**, and the unchanged
+`workflow-controller-v3` support matcher. The full public catalog has ten
+templates and thirty candidate hypotheses. Six development metadata
+blocks keep their previous compiled content. Four additional blocks
+are authored from public candidate IDs, raw logs, and returned health,
+not accepted diagnoses or evaluator predicates. There is no new treatment
+pair, agent framework, tool budget, diagnosis-selection rule, or lowered
+quality gate.
+
+This is coverage and runner repair with the same agent policy, not a
+demonstrated model-quality gain. W7 may still fail the final aggregate or
+per-scenario floor.
+
+Historical W1–W6 closure bytes and identities stay frozen. W5/W6 remain
+development-only, with holdout/freeze refusal. W7 uses additive runtime,
+agent, renderer, and contract modules; its identity binds those new bytes.
+The final W7 digest is computed from reviewed source, not assigned here.
+W5/W6 artifacts remain attached to their original commit and execution
+context and are not relabelled as W7 data.
+
+The v2 renderer compiles the identical JSON schema once per schema content
+instead of once per tool call. Schema/matcher behavior is unchanged; the
+new source binding and CPU overhead belong to W7's benchmark surface.
+
+W7 retains the pinned BF16 model, vLLM 0.27.1/container, one Blackwell GPU,
+`ca-central`, provider-native mode, temperature 0.2, top-p 0.95, model seed
+`20260906`, 1,024-token cap, twelve turns, one call per turn, and
+`RETRIES=0`. The canary stays ten development tasks at seed `20261007`
+and floor 0.40. Stages stay development twenty tasks at 0.40, holdout
+twenty at 0.50, and freeze two hundred measured tasks plus one separate
+two-hundred-task warm-up. Freeze requires 0.70 overall, 0.40 per
+scenario, and all existing structural, latency, provenance, and
+verification gates. Accepted answers, predicates, schedules, runbook
+bodies, and raw fixtures are unchanged.
+
+W7 alone normalizes persisted per-turn TTFT into the same per-task minimum
+used by the existing object metric path. Missing usable timing remains
+unavailable; thresholds and historical qualification metrics are unchanged.
+
+Add **`blackwell-cloud qualified-baseline`** without changing the historical
+workload-2.3.0 `mvl-baseline` path. It authenticates an exact successful W7
+freeze receipt, artifact hashes, observations, re-evaluated study-entry
+gates, current source binding, and the same resource session before
+constructing a client, and carries the proof into measurement. The
+D-0017 sample plan remains provider-native interactive/1, batch-heavy/4,
+and batch-heavy/8, each with one warm-up plus three measured repetitions
+of two hundred tasks: **1,800 measured observations**. The session
+projection and existing six-hour / $25 ceiling remain. Every model-request
+deadline is clamped to the remaining approved six-hour session, which
+requires a real provisioning timestamp.
+
+The new measurement instrument is opt-in: W7's frozen **1,024-token cap
+applies to both interactive and batch-heavy** profiles. Historical
+batch-heavy/MVL behavior retains its 4,096-token cap, and MVL-F stays
+diagnostic. Context, log/metric windows, timeouts, SLOs, cells, and sample
+counts remain unchanged. Old data are never relabelled as this instrument.
+
+W7 qualification receipts bind each result, manifest, measured/warm-up
+artifact SHA-256, run tag, current canonical commit, and stable resource
+identity. Harmless operator-ledger byte updates do not change that
+identity; a different resource session is refused. The baseline's direct
+run spec requires the complete six-field freeze proof (candidate ID,
+candidate identity, receipt/result/manifest digests, and passing verdict),
+not a passing boolean alone.
+
+**Exposure and limitations.** Public-field authoring now inspected all
+four holdout-labelled templates: `elevated-latency-001`,
+`pod-failures-001`, `storage-latency-001`, and `rate-limiting-001`. Earlier
+answer-bearing exposure stays documented in
+[D-0034 holdout exposure](d-0034-holdout-exposure.md). Tests use accepted
+answers/evaluator only after annotation authoring for validation; this is
+not an assertion that answer-bearing material was never visible. Every
+W7 manifest/receipt reports
+`validation_scope=public-catalog-pre-exposed-holdout` and
+`blind_generalization_evidence=false`. No blind-generalization or improved
+quality claim is made. Official qualification/holdout outcomes must not
+tune wording or select favorable reruns.
+
+**Execution boundary.** See the concrete
+[Cursor runbook and acceptance criteria](d-0035-qualified-baseline.md).
+Apply, canary, every qualification stage, qualified baseline, and destroy
+require actual saved-plan/config digests and exact local owner approvals.
+The deleted W5/W6 session cannot authorize new resources. No W7
+inference, benchmark, provider work, credential access, or genuine result
+publication is established by this entry. AWS, GCP, other
+engines/precision, and the broader charter remain later work.

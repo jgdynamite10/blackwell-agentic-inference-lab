@@ -42,13 +42,12 @@ from blackwell_lab.cloud.sealed_binding import (
     binding_from_config,
     requires_sealed_set,
 )
+from blackwell_lab.workload.catalog_runtime import require_controller_binding, workload_treatments
 from blackwell_lab.workload.evidence import (
     CONTROLLER_EVIDENCE_GROUNDING_V1,
     CONTROLLER_WORKFLOW_V1,
     CONTROLLER_WORKFLOW_V2,
     CONTROLLER_WORKFLOW_V3,
-    require_controller_binding,
-    workload_treatments,
 )
 from blackwell_lab.workload.native_tools import (
     REASONING_PARSER,
@@ -106,12 +105,16 @@ SUCCESSOR_WORKFLOW_CANDIDATES = (CANDIDATE_W3, CANDIDATE_W4)
 CANDIDATE_W5 = "W5"
 CANDIDATE_W6 = "W6"
 STRUCTURED_EVIDENCE_CANDIDATES = (CANDIDATE_W5, CANDIDATE_W6)
+CANDIDATE_W7 = "W7"
+CATALOG_EVIDENCE_CANDIDATES = (CANDIDATE_W7,)
+W7_WORKLOAD_VERSION = "2.9.0"
 #: Every candidate any qualification command may name.
 ALL_AUTHORIZED_CANDIDATES = (
     *AUTHORIZED_CANDIDATES,
     *WORKFLOW_CANDIDATES,
     *SUCCESSOR_WORKFLOW_CANDIDATES,
     *STRUCTURED_EVIDENCE_CANDIDATES,
+    *CATALOG_EVIDENCE_CANDIDATES,
 )
 C1_TEMPERATURE = 1.0
 C2_TEMPERATURE = 0.2
@@ -375,7 +378,7 @@ DEVELOPMENT_CONTROL_PAIRS: dict[str, str] = {
     CANDIDATE_W6: CANDIDATE_W5,
 }
 UNKNOWN_CANDIDATE_MESSAGE = (
-    "qualification candidate must be C1, C2, P1, P2, P2C, W1, W2, W3, W4, W5, or W6"
+    "qualification candidate must be C1, C2, P1, P2, P2C, W1, W2, W3, W4, W5, W6, or W7"
 )
 _UNKNOWN_CANDIDATE = UNKNOWN_CANDIDATE_MESSAGE
 
@@ -391,6 +394,7 @@ def is_workflow_family(candidate_id: str) -> bool:
         candidate_id in WORKFLOW_CANDIDATES
         or candidate_id in SUCCESSOR_WORKFLOW_CANDIDATES
         or candidate_id in STRUCTURED_EVIDENCE_CANDIDATES
+        or candidate_id in CATALOG_EVIDENCE_CANDIDATES
     )
 
 
@@ -455,6 +459,7 @@ def candidate_workload_version(candidate_id: str) -> str:
             **WORKFLOW_CANDIDATE_WORKLOAD_VERSIONS,
             **SUCCESSOR_CANDIDATE_WORKLOAD_VERSIONS,
             **STRUCTURED_CANDIDATE_WORKLOAD_VERSIONS,
+            CANDIDATE_W7: W7_WORKLOAD_VERSION,
         }[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
@@ -472,6 +477,7 @@ def candidate_controller(candidate_id: str) -> str | None:
             **WORKFLOW_CANDIDATE_CONTROLLERS,
             **SUCCESSOR_CANDIDATE_CONTROLLERS,
             **STRUCTURED_CANDIDATE_CONTROLLERS,
+            CANDIDATE_W7: CONTROLLER_WORKFLOW_V3,
         }[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
@@ -547,6 +553,22 @@ def frozen_candidate_fields(candidate_id: str) -> dict[str, Any]:
 
 def _structured_identity_fields(candidate_id: str) -> dict[str, Any]:
     """Evidence binding for W5/W6 only. Other candidates gain no fields."""
+    if candidate_id == CANDIDATE_W7:
+        from blackwell_lab.workload.agent import SYSTEM_PROMPT_V241
+        from blackwell_lab.workload.native_tools import openai_tool_definitions
+        from blackwell_lab.workload.public_metadata.catalog_v2 import evidence_contract
+
+        tools = json.dumps(
+            openai_tool_definitions(W7_WORKLOAD_VERSION),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return {
+            "evidence_contract": evidence_contract(),
+            "system_prompt_sha256": hashlib.sha256(SYSTEM_PROMPT_V241.encode()).hexdigest(),
+            "native_tool_contract_sha256": hashlib.sha256(tools).hexdigest(),
+        }
     if candidate_id not in STRUCTURED_EVIDENCE_CANDIDATES:
         return {}
     from blackwell_lab.workload.agent import system_prompt
@@ -1114,7 +1136,15 @@ def require_w_config(config: dict, *, candidate_id: str) -> None:
     for key in ("system_prompt", "prompt", "evaluator_version", "evaluator", "max_turns"):
         if key in config or key in generation:
             raise ConfigError(f"qualify-agent {candidate_id} does not accept a {key} override")
-    if candidate_id in SUCCESSOR_WORKFLOW_CANDIDATES:
+    if candidate_id == CANDIDATE_W7:
+        require_catalog_contract()
+        from blackwell_lab.workload.public_metadata.catalog_v2 import require_evidence_contract
+
+        try:
+            require_evidence_contract(config.get("evidence_contract"))
+        except RuntimeError as exc:
+            raise ConfigError(str(exc)) from exc
+    elif candidate_id in SUCCESSOR_WORKFLOW_CANDIDATES:
         require_successor_pair_contract()
     elif candidate_id in STRUCTURED_EVIDENCE_CANDIDATES:
         require_structured_pair_contract()
@@ -1597,6 +1627,29 @@ def compute_qualification_metrics(
     )
 
 
+def compute_catalog_metrics(outcomes: Sequence[object], **kwargs) -> QualificationMetrics:
+    """Normalize persisted per-turn TTFT for W7; historical metrics stay unchanged.
+
+    The historical dict fast path expects a top-level ttft_ms, whereas the
+    persisted schema stores it on turns. Use the same minimum per-task TTFT
+    that the existing object path uses. Missing timing remains unavailable.
+    """
+    normalized = []
+    for outcome in outcomes:
+        if isinstance(outcome, dict):
+            row = dict(outcome)
+            timings = [
+                turn["ttft_ms"]
+                for turn in row.get("turns", [])
+                if isinstance(turn, dict) and turn.get("ttft_ms") is not None
+            ]
+            row["ttft_ms"] = min(timings) if timings else None
+            normalized.append(row)
+        else:
+            normalized.append(outcome)
+    return compute_qualification_metrics(normalized, **kwargs)
+
+
 def _rate_pass(value: float, minimum: float | None = None, maximum: float | None = None) -> bool:
     if minimum is not None and value < minimum:
         return False
@@ -1763,6 +1816,10 @@ def sanitized_receipt(
             "matched-control provenance is valid only for P2C or W2 development"
         )
     structured_binding: dict[str, Any] = {}
+    if candidate_id == CANDIDATE_W7:
+        from blackwell_lab.workload.catalog_runtime import manifest_workload_binding
+
+        structured_binding = manifest_workload_binding(W7_WORKLOAD_VERSION)
     if candidate_id in STRUCTURED_EVIDENCE_CANDIDATES:
         from blackwell_lab.workload.public_metadata import VALIDATION_SCOPE, evidence_contract
 
@@ -1848,3 +1905,19 @@ def tool_contract_mentions_required_workflow() -> bool:
         and "log-dependent" in descriptions["search_logs"]
         and "service or system" in system
     )
+
+
+def require_catalog_contract() -> dict[str, Any]:
+    """Full catalog coverage, same v3 algorithm, and six historical identities."""
+    from blackwell_lab.workload.public_metadata.catalog_v2 import evidence_contract, load_overlay
+
+    require_structured_pair_contract()
+    historical = {
+        "W5": "4aaec2742359ce7d35f04ed5b167132e68783dc073b3d8516c30851a8f7e5f27",
+        "W6": "cbff1ba63b6f43e2b4b672ee5559b95ebcdb464ab9ec6ea1b6b2f288a32c541a",
+    }
+    if any(candidate_identity_digest(key) != value for key, value in historical.items()):
+        raise QualificationError("historical W5/W6 identity drift; nothing was executed")
+    if set(load_overlay()["templates"]) != set(catalog()):
+        raise QualificationError("W7 metadata must cover every public catalog template")
+    return evidence_contract()

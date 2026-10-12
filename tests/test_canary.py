@@ -245,7 +245,19 @@ class TestApprovalAndConfig:
             )
 
     def test_candidates_are_public_catalog_only(self):
-        assert CANARY_CANDIDATES == ("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4", "W5", "W6")
+        assert CANARY_CANDIDATES == (
+            "C1",
+            "C2",
+            "P1",
+            "P2C",
+            "W1",
+            "W2",
+            "W3",
+            "W4",
+            "W5",
+            "W6",
+            "W7",
+        )
         with pytest.raises(ConfigError, match="public-catalog"):
             validate_canary_config(_canary_config("W1"), candidate_id="P2")
 
@@ -541,7 +553,7 @@ class TestRealCanaryValidation:
     def test_canary_family_passes_real_validation_and_invalid_families_do_not(self):
         assert CANARY_ARTIFACT_FAMILY == "canary-runs"
         assert ALLOWED_ARTIFACT_FAMILIES == frozenset(
-            {"real-runs", "qualification-runs", "canary-runs"}
+            {"real-runs", "qualification-runs", "canary-runs", "qualified-baseline-runs"}
         )
         profile = realbench._validate_spec(_canary_run_spec())
         assert profile.name == "interactive"

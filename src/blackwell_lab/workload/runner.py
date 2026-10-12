@@ -68,6 +68,10 @@ from blackwell_lab.workload.agent import (
     TaskExecution,
     run_task,
 )
+from blackwell_lab.workload.catalog_runtime import (
+    controller_for_workload,
+    manifest_workload_binding,
+)
 from blackwell_lab.workload.clock import SYSTEM_CLOCK, Clock
 from blackwell_lab.workload.evaluator import (
     EVALUATOR_VERSION,
@@ -75,14 +79,12 @@ from blackwell_lab.workload.evaluator import (
     Evaluation,
     evaluate,
 )
-from blackwell_lab.workload.evidence import controller_for_workload
 from blackwell_lab.workload.model_client import (
     DeterministicMockClient,
     GenerationSettings,
     ModelClient,
 )
 from blackwell_lab.workload.native_tools import require_workload_version
-from blackwell_lab.workload.public_metadata import manifest_workload_binding
 from blackwell_lab.workload.sampling import (
     TaskInstance,
     generate_task_instances,
@@ -314,13 +316,21 @@ def _run_pass(
             submitted_at = clock.monotonic()
             submitted_utc = _utc_now()
             scenario = scenarios_by_id[instance.template_id]
-            toolbox = SimulatedToolbox(
+            toolbox_type = SimulatedToolbox
+            task_runner = run_task
+            if settings.workload_version == "2.9.0":
+                from blackwell_lab.workload.catalog_agent import run_task as catalog_run_task
+                from blackwell_lab.workload.catalog_runtime import CatalogToolbox
+
+                toolbox_type = CatalogToolbox
+                task_runner = catalog_run_task
+            toolbox = toolbox_type(
                 scenario,
                 log_limit=profile.log_limit,
                 metric_window_s=profile.metric_window_s,
                 clock=clock,
             )
-            execution = run_task(
+            execution = task_runner(
                 scenario,
                 client,
                 toolbox,

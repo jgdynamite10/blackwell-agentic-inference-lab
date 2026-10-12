@@ -1,5 +1,39 @@
 # Experiment Matrix
 
+## Current bounded Akamai deliverable — D-0035 (review pending)
+
+The immediate qualified baseline uses the **D-0017 minimum valuable lab
+sample plan**, not the wider historical matrix below: provider-native
+interactive/1, batch-heavy/4, and batch-heavy/8, each with one separate
+200-task warm-up and three measured 200-task repetitions. Total: **1,800
+measured observations**, with 600 warm-up observations retained separately.
+p50/p95 remain primary; p99 stays exploratory and subject to existing
+sample limits. Do not mix warm-up, qualification, or earlier diagnostic
+observations into baseline summaries.
+
+D-0035's `qualified-baseline` binds standalone W7/workload 2.9.0 and its
+version-2.0.0 public evidence contract to a verified successful freeze from
+the same source/resource session. W7 retains temperature 0.2/top-p 0.95,
+frozen model/serving pins, BF16, and `ca-central`; it does not reuse
+historical MVL-F/workload-2.3.0 qualification. Final study entry stays
+0.70 aggregate, 0.40 each scenario, and all structural gates; development
+0.40 and holdout 0.50 are earlier screening floors. All ten templates are
+public and pre-exposed, so manifests declare
+`blind_generalization_evidence=false`. W1–W6 remain historical. See the
+[D-0035 execution and acceptance contract](../docs/d-0035-qualified-baseline.md).
+This bounded Akamai deliverable does not complete or authorize later
+provider/engine matrices.
+
+The W7 measurement instrument opts into a **1,024-token cap for both
+profiles**, instead of the historical batch-heavy 4,096 cap, and its v2
+renderer compiles the same schema once per schema content. These changes
+are versioned and recorded before new measurement; historical profiles,
+MVL-F, and observations are unchanged. Context/log/metric windows, task
+timeouts, SLOs, cells, and sample counts stay fixed. W7's coverage and
+runner repair demonstrate no model-quality or performance gain by
+themselves. Same-session qualification proof and the six-hour request
+deadline guard are mandatory.
+
 Defines the experimental cells for every phase. A **cell** is the unit of
 measurement: provider × comparison mode × serving path × precision × workload
 profile × concurrency. Every cell receives **five measured repetitions** plus
