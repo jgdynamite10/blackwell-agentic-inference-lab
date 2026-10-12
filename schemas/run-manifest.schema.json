@@ -414,7 +414,7 @@
               {
                 "required": ["version"],
                 "properties": {
-                  "version": { "enum": ["2.8.0", "2.8.1"] }
+                  "version": { "enum": ["2.8.0", "2.8.1", "2.9.0"] }
                 }
               },
               {
@@ -464,15 +464,28 @@
             "surface_renderer_sha256"
           ],
           "properties": {
-            "contract_version": { "type": "string", "const": "1.0.0" },
+            "contract_version": { "type": "string", "enum": ["1.0.0", "2.0.0"] },
             "evidence_schema_version": { "type": "string", "const": "1.0.0" },
             "evidence_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-            "public_metadata_version": { "type": "string", "const": "1.0.0" },
+            "public_metadata_version": { "type": "string", "enum": ["1.0.0", "2.0.0"] },
             "public_metadata_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "normalization_policy_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "controller_id": { "type": "string", "const": "workflow-controller-v3" },
             "controller_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "surface_renderer_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "study_entry_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidate_id", "candidate_identity_sha256", "receipt_sha256", "result_sha256", "manifest_sha256", "study_entry_passed"],
+          "properties": {
+            "candidate_id": { "const": "W7" },
+            "candidate_identity_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "result_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "study_entry_passed": { "const": true }
           }
         },
         "validation_scope": {

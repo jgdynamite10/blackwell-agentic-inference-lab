@@ -1,0 +1,1077 @@
+{
+  "dns-failures-001": {
+    "evidence_schema_version": "1.0.0",
+    "diagnosis_hypotheses": [
+      {
+        "id": "badger-queue-outage",
+        "about": [
+          {
+            "kind": "service",
+            "id": "badger-queue",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: badger-queue is in an outage.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "service",
+                "id": "badger-queue",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "availability",
+                "state": "outage"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "dns-search-domain-typo-cfg-5150",
+        "about": [
+          {
+            "kind": "configuration",
+            "id": "cfg-5150",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: configuration cfg-5150 contains a DNS search-domain typo.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "configuration",
+                "id": "cfg-5150",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "dns.search_domain",
+                "state": "typo"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "network-firewall-block",
+        "about": [
+          {
+            "kind": "network-path",
+            "id": "DNS",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: a firewall is blocking the relevant DNS network path.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "network-path",
+                "id": "DNS",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "firewall_action",
+                "state": "blocked"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "memory-pressure-001": {
+    "evidence_schema_version": "1.0.0",
+    "diagnosis_hypotheses": [
+      {
+        "id": "memory-leak-in-worker",
+        "about": [
+          {
+            "kind": "process",
+            "id": "worker",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the worker has a memory leak.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "process",
+                "id": "worker",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "memory_leak",
+                "state": "present"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "traffic-growth-capacity",
+        "about": [
+          {
+            "kind": "service",
+            "id": "otter-inventory",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: increased request traffic exceeds otter-inventory capacity.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "service",
+                "id": "otter-inventory",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "request_rate",
+                "state": "exceeds_capacity"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "unbounded-cache-cfg-3300",
+        "about": [
+          {
+            "kind": "configuration",
+            "id": "cfg-3300",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: configuration cfg-3300 sets an unbounded cache entry limit.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "configuration",
+                "id": "cfg-3300",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "cache_max_entries",
+                "state": "0"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            },
+            {
+              "subject": {
+                "kind": "configuration",
+                "id": "cfg-3300",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "cache_bound",
+                "state": "unbounded"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "failed-deployment-001": {
+    "evidence_schema_version": "1.0.0",
+    "diagnosis_hypotheses": [
+      {
+        "id": "bad-image-artifact",
+        "about": [
+          {
+            "kind": "deployment",
+            "id": "dep-9004",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the image artifact for deployment dep-9004 is invalid.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "deployment",
+                "id": "dep-9004",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "image_artifact",
+                "state": "invalid"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "missing-migration-dep-9004",
+        "about": [
+          {
+            "kind": "deployment",
+            "id": "dep-9004",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: deployment dep-9004 requires a migration that was not applied.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "deployment",
+                "id": "dep-9004",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "required_migration",
+                "state": "not_applied"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "readiness-probe-misconfigured",
+        "about": [
+          {
+            "kind": "probe",
+            "id": "readiness",
+            "scope": "ibis-notify"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the readiness probe configuration is incorrect.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "probe",
+                "id": "readiness",
+                "scope": "ibis-notify"
+              },
+              "condition": {
+                "name": "configuration",
+                "state": "misconfigured"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "unhealthy-upstream-001": {
+    "evidence_schema_version": "1.0.0",
+    "diagnosis_hypotheses": [
+      {
+        "id": "edge-lb-misroute",
+        "about": [
+          {
+            "kind": "load-balancer",
+            "id": "edge-lb",
+            "scope": "falcon-frontend"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the frontend edge load balancer routes traffic incorrectly.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "load-balancer",
+                "id": "edge-lb",
+                "scope": "falcon-frontend"
+              },
+              "condition": {
+                "name": "routing",
+                "state": "misrouted"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "frontend-bad-deploy",
+        "about": [
+          {
+            "kind": "deployment",
+            "id": "frontend",
+            "scope": "falcon-frontend"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the frontend deployment is faulty.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "deployment",
+                "id": "frontend",
+                "scope": "falcon-frontend"
+              },
+              "condition": {
+                "name": "deployment_state",
+                "state": "faulty"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "unhealthy-upstream-heron-auth",
+        "about": [
+          {
+            "kind": "service",
+            "id": "heron-auth",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: heron-auth is an unhealthy upstream for the affected caller.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "service",
+                "id": "heron-auth",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "api.status",
+                "state": "unhealthy"
+              },
+              "polarity": "affirmed",
+              "witness_type": "health",
+              "role": "condition"
+            },
+            {
+              "subject": {
+                "kind": "service",
+                "id": "heron-auth",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "service_role",
+                "state": "upstream"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "context"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "capacity-exhaustion-001": {
+    "evidence_schema_version": "1.0.0",
+    "diagnosis_hypotheses": [
+      {
+        "id": "autoscaler-ceiling-exhausted",
+        "about": [
+          {
+            "kind": "component",
+            "id": "autoscaler",
+            "scope": "badger-queue-1.node.lab.example"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the autoscaler replica ceiling prevents requested scale-out.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "component",
+                "id": "autoscaler",
+                "scope": "badger-queue-1.node.lab.example"
+              },
+              "condition": {
+                "name": "desired_replicas",
+                "state": "40"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            },
+            {
+              "subject": {
+                "kind": "component",
+                "id": "autoscaler",
+                "scope": "badger-queue-1.node.lab.example"
+              },
+              "condition": {
+                "name": "max_replicas",
+                "state": "24"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            },
+            {
+              "subject": {
+                "kind": "component",
+                "id": "autoscaler",
+                "scope": "badger-queue-1.node.lab.example"
+              },
+              "condition": {
+                "name": "scaling",
+                "state": "capped_by_ceiling"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "broker-disk-saturation",
+        "about": [
+          {
+            "kind": "disk",
+            "id": "broker",
+            "scope": "badger-queue"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the broker disk is saturated.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "disk",
+                "id": "broker",
+                "scope": "badger-queue"
+              },
+              "condition": {
+                "name": "capacity",
+                "state": "saturated"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "consumer-deadlock",
+        "about": [
+          {
+            "kind": "process-group",
+            "id": "consumers",
+            "scope": "badger-queue"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the consumers are deadlocked.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "process-group",
+                "id": "consumers",
+                "scope": "badger-queue"
+              },
+              "condition": {
+                "name": "progress",
+                "state": "deadlocked"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "gpu-saturation-001": {
+    "evidence_schema_version": "1.0.0",
+    "diagnosis_hypotheses": [
+      {
+        "id": "batch-job-gpu-contention",
+        "about": [
+          {
+            "kind": "batch-job",
+            "id": "embed-refresh-44",
+            "scope": "lynx-inference-1.node.lab.example"
+          },
+          {
+            "kind": "allocator",
+            "id": "kv-cache",
+            "scope": "lynx-inference-1.node.lab.example"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: batch GPU work is contending with online inference for shared GPU resources.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "batch-job",
+                "id": "embed-refresh-44",
+                "scope": "lynx-inference-1.node.lab.example"
+              },
+              "condition": {
+                "name": "online_gpu_pool_admission",
+                "state": "without_priority_cap"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            },
+            {
+              "subject": {
+                "kind": "allocator",
+                "id": "kv-cache",
+                "scope": "lynx-inference-1.node.lab.example"
+              },
+              "condition": {
+                "name": "capacity",
+                "state": "saturated"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "model-regression-slow-kernels",
+        "about": [
+          {
+            "kind": "model",
+            "id": "inference",
+            "scope": "lynx-inference"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: a model regression makes GPU kernels slow.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "model",
+                "id": "inference",
+                "scope": "lynx-inference"
+              },
+              "condition": {
+                "name": "kernel_performance",
+                "state": "regressed"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "traffic-spike-overload",
+        "about": [
+          {
+            "kind": "service",
+            "id": "lynx-inference",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: an incoming traffic spike overloads online inference.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "service",
+                "id": "lynx-inference",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "request_rate",
+                "state": "exceeds_capacity"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "elevated-latency-001": {
+    "evidence_schema_version": "1.0.0",
+    "diagnosis_hypotheses": [
+      {
+        "id": "synchronous-audit-logging-cfg-2041",
+        "about": [
+          {
+            "kind": "configuration",
+            "id": "cfg-2041",
+            "scope": "$task"
+          },
+          {
+            "kind": "subsystem",
+            "id": "audit-log",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: cfg-2041 enables synchronous audit logging while audit-log flushes block request threads.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "configuration",
+                "id": "cfg-2041",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "audit_logging",
+                "state": "synchronous"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            },
+            {
+              "subject": {
+                "kind": "subsystem",
+                "id": "audit-log",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "request_thread_pool",
+                "state": "blocked_by_flush"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "traffic-spike-overload",
+        "about": [
+          {
+            "kind": "service",
+            "id": "zephyr-cart",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: a traffic spike overloads zephyr-cart.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "service",
+                "id": "zephyr-cart",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "traffic_load",
+                "state": "spike_overload"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "upstream-dependency-slowdown",
+        "about": [
+          {
+            "kind": "dependency",
+            "id": "zephyr-cart.upstream",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: a zephyr-cart upstream dependency is slow.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "dependency",
+                "id": "zephyr-cart.upstream",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "latency",
+                "state": "slow"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "pod-failures-001": {
+    "evidence_schema_version": "1.0.0",
+    "diagnosis_hypotheses": [
+      {
+        "id": "missing-env-var-dep-8102",
+        "about": [
+          {
+            "kind": "environment-variable",
+            "id": "LEDGER_ENDPOINT_MODE",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: release dep-8102 requires LEDGER_ENDPOINT_MODE, which is unset at startup.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "environment-variable",
+                "id": "LEDGER_ENDPOINT_MODE",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "value",
+                "state": "unset"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            },
+            {
+              "subject": {
+                "kind": "environment-variable",
+                "id": "LEDGER_ENDPOINT_MODE",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "introduced_in_release",
+                "state": "dep-8102"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "node-resource-exhaustion",
+        "about": [
+          {
+            "kind": "node-resources",
+            "id": "quokka-payments",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: node resources for quokka-payments are exhausted.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "node-resources",
+                "id": "quokka-payments",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "capacity",
+                "state": "exhausted"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "upstream-ledger-outage",
+        "about": [
+          {
+            "kind": "service",
+            "id": "ledger",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the upstream ledger service is in an outage.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "service",
+                "id": "ledger",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "availability",
+                "state": "outage"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "storage-latency-001": {
+    "evidence_schema_version": "1.0.0",
+    "diagnosis_hypotheses": [
+      {
+        "id": "cpu-saturation-primary",
+        "about": [
+          {
+            "kind": "service-component",
+            "id": "heron-metadata.primary",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the heron-metadata primary CPU is saturated.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "service-component",
+                "id": "heron-metadata.primary",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "cpu",
+                "state": "saturated"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "degraded-volume-7",
+        "about": [
+          {
+            "kind": "volume",
+            "id": "volume-7",
+            "scope": "$task"
+          },
+          {
+            "kind": "service",
+            "id": "heron-metadata",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: volume-7 has media latency above threshold and returned volume status degraded.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "volume",
+                "id": "volume-7",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "media_latency",
+                "state": "above_threshold"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            },
+            {
+              "subject": {
+                "kind": "service",
+                "id": "heron-metadata",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "volume-7.status",
+                "state": "degraded"
+              },
+              "polarity": "affirmed",
+              "witness_type": "health",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "network-partition-replica",
+        "about": [
+          {
+            "kind": "service-component",
+            "id": "heron-metadata.replica",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: the heron-metadata replica is network-partitioned.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "service-component",
+                "id": "heron-metadata.replica",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "network",
+                "state": "partitioned"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "rate-limiting-001": {
+    "evidence_schema_version": "1.0.0",
+    "diagnosis_hypotheses": [
+      {
+        "id": "backend-capacity-shortfall",
+        "about": [
+          {
+            "kind": "service",
+            "id": "marmot-search",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: marmot-search backend capacity is insufficient.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "service",
+                "id": "marmot-search",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "backend_capacity",
+                "state": "insufficient"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "client-abuse-wave",
+        "about": [
+          {
+            "kind": "service",
+            "id": "marmot-search",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: marmot-search is experiencing an abusive client traffic wave.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "service",
+                "id": "marmot-search",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "client_traffic",
+                "state": "abuse_wave"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      },
+      {
+        "id": "misconfigured-rate-limit-cfg-6201",
+        "about": [
+          {
+            "kind": "rate-limit-rule",
+            "id": "rl-77",
+            "scope": "$task"
+          }
+        ],
+        "claim": {
+          "text": "Hypothesis: cfg-6201 activates rl-77 at 50 requests per minute per client, reduced from 500.",
+          "support_all_of": [
+            {
+              "subject": {
+                "kind": "rate-limit-rule",
+                "id": "rl-77",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "limit_per_client_req_min",
+                "state": "50"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            },
+            {
+              "subject": {
+                "kind": "rate-limit-rule",
+                "id": "rl-77",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "previous_limit_per_client_req_min",
+                "state": "500"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            },
+            {
+              "subject": {
+                "kind": "rate-limit-rule",
+                "id": "rl-77",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "configuration_release",
+                "state": "cfg-6201"
+              },
+              "polarity": "affirmed",
+              "witness_type": "log",
+              "role": "condition"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -117,6 +117,7 @@ TOOL_DESCRIPTIONS_BY_VERSION: dict[str, dict[str, str]] = {
     # fields are explained in the system prompt and rendered on results.
     "2.8.0": TOOL_DESCRIPTIONS_V240,
     "2.8.1": TOOL_DESCRIPTIONS_V240,
+    "2.9.0": TOOL_DESCRIPTIONS_V240,
 }
 
 #: Default catalog contract (workload 2.3.0). Callers that execute a
@@ -133,6 +134,11 @@ def require_workload_version(version: str | None) -> str:
     if resolved not in TOOL_DESCRIPTIONS_BY_VERSION:
         raise ConfigError(f"unknown workload version: {resolved}")
     return resolved
+
+
+def _tool_surface_version(version: str | None) -> str | None:
+    """2.9.0 changes evidence metadata, not the native tool argument surface."""
+    return "2.8.0" if version == "2.9.0" else version
 
 
 def tool_descriptions(workload_version: str | None = None) -> dict[str, str]:
@@ -152,7 +158,7 @@ _REASONING_DELTA_KEYS = ("reasoning", "reasoning_content", "reasoning_text")
 def openai_tool_definitions(workload_version: str | None = None) -> list[dict]:
     """Deterministic OpenAI ``tools`` array for the executed workload contract."""
     descriptions = tool_descriptions(workload_version)
-    specs = tool_specs(workload_version)
+    specs = tool_specs(_tool_surface_version(workload_version))
     definitions: list[dict] = []
     for name in sorted(specs):
         spec = specs[name]
@@ -335,12 +341,14 @@ class ToolCallAssembler:
                 arguments_json_ok=False,
             )
         try:
-            validate_tool_call(name, parsed, self.workload_version)
+            validate_tool_call(name, parsed, _tool_surface_version(self.workload_version))
         except InvalidToolArgumentsError:
             # Workflow-controlled terminal calls stay correctable. Every
             # other schema failure is still an assembly error and never
             # reaches a tool handler.
-            if not workflow_terminal_schema_is_correctable(name, self.workload_version):
+            if not workflow_terminal_schema_is_correctable(
+                name, _tool_surface_version(self.workload_version)
+            ):
                 return self._error(
                     "invalid_arguments",
                     tool_call_count=1,

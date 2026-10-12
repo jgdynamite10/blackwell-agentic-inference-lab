@@ -1184,6 +1184,12 @@ def _sealed_validation_report(
     }
 
 
+def cmd_qualified_baseline(args: argparse.Namespace) -> int:
+    from blackwell_lab.cloud.qualified_mvl import execute
+
+    return execute(args)
+
+
 def cmd_qualify_agent(args: argparse.Namespace) -> int:
     from blackwell_lab.cloud import (
         lifecycle,
@@ -1198,7 +1204,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         require_sealed_stage_evidence,
         resolve_sealed_stage,
     )
-    from blackwell_lab.workload.evidence import require_controller_binding
+    from blackwell_lab.workload.catalog_runtime import require_controller_binding
     from blackwell_lab.workload.model_client import GenerationSettings
     from blackwell_lab.workload.openai_client import OpenAICompatibleClient
 
@@ -1494,7 +1500,12 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
             )
             if sealed is not None:
                 require_manifest_provenance(manifest, sealed.binding)
-        metrics = qualification.compute_qualification_metrics(
+        metrics_factory = (
+            qualification.compute_catalog_metrics
+            if candidate_id == qualification.CANDIDATE_W7
+            else qualification.compute_qualification_metrics
+        )
+        metrics = metrics_factory(
             outcomes,
             provenance_ok=True,
             verification_ok=verification_ok,
@@ -1520,6 +1531,21 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         )
         from blackwell_lab.cloud.artifacts import write_private_json
 
+        if candidate_id == qualification.CANDIDATE_W7:
+            from blackwell_lab.cloud.matched_control import resource_identity_sha256
+
+            receipt["artifact_sha256"] = {
+                name: _sha256_file(
+                    results_dir / qualification.QUALIFICATION_ARTIFACT_FAMILY / cell_label / name
+                )
+                for name in files
+            }
+            receipt["execution_context"] = {
+                "run_tag": args.run_tag,
+                "canonical_commit": config["canonical_commit"],
+                "resource_identity_sha256": resource_identity_sha256(ledger["resources"]),
+                "ledger_sha256": _sha256_file(paths.ledger_path),
+            }
         receipt_sha256 = write_private_json(
             results_dir
             / qualification.QUALIFICATION_ARTIFACT_FAMILY
@@ -1607,7 +1633,7 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
         realbench,
         telemetry,
     )
-    from blackwell_lab.workload.evidence import require_controller_binding
+    from blackwell_lab.workload.catalog_runtime import require_controller_binding
     from blackwell_lab.workload.model_client import GenerationSettings
     from blackwell_lab.workload.openai_client import OpenAICompatibleClient
 
@@ -1651,6 +1677,11 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
             qualification.require_w_pair_contract()
         elif candidate_id in qualification.SUCCESSOR_WORKFLOW_CANDIDATES:
             qualification.require_successor_pair_contract()
+        elif candidate_id == qualification.CANDIDATE_W7:
+            qualification.require_catalog_contract()
+            from blackwell_lab.cloud.structured_canary import preflight_canary_execution
+
+            preflight_canary_execution(config, candidate_id=candidate_id, run_label=run_label)
         elif candidate_id in qualification.STRUCTURED_EVIDENCE_CANDIDATES:
             qualification.require_structured_pair_contract()
             from blackwell_lab.cloud.structured_canary import preflight_canary_execution
@@ -1854,7 +1885,10 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
             files=files,
             qualification_environment=qual_environment,
         )
-        if candidate_id in qualification.STRUCTURED_EVIDENCE_CANDIDATES:
+        if candidate_id in (
+            *qualification.STRUCTURED_EVIDENCE_CANDIDATES,
+            qualification.CANDIDATE_W7,
+        ):
             from blackwell_lab.cloud.structured_canary import enrich_canary_receipt
 
             receipt = enrich_canary_receipt(receipt)
@@ -2115,6 +2149,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mvl_parser.add_argument("--approve", help="The exact MVL approval phrase.")
 
+    qualified_parser = sub.add_parser(
+        "qualified-baseline", help="Qualification-bound W7 Akamai baseline (three cells)."
+    )
+    qualified_parser.add_argument("--run-tag", required=True)
+    qualified_parser.add_argument("--run-label", required=True)
+    qualified_parser.add_argument("--config", required=True)
+    qualified_parser.add_argument("--approve")
+    qualified_parser.add_argument("--validate-only", action="store_true")
+
     qualify_parser = sub.add_parser(
         "qualify-agent",
         help=(
@@ -2129,7 +2172,7 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6"),
+        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7"),
         help=(
             "C1 (temperature 1.0, workload 2.4.0), "
             "C2 (temperature 0.2, workload 2.4.0), "
@@ -2144,7 +2187,9 @@ def build_parser() -> argparse.ArgumentParser:
             "treatment; W1 is its same-session control), "
             "W3 (workload 2.7.0, workflow-controller-v2; the D-0033 control), or "
             "W4 (workload 2.7.1, workflow-controller-v2 with evidence-refs that "
-            "must cite a diagnosis-relevant log; W3 is its same-session control)."
+            "must cite a diagnosis-relevant log; W3 is its same-session control), "
+            "W5/W6 (development-only structured evidence), or W7 (workload "
+            "2.9.0, complete public catalog, unchanged v3 support matcher)."
         ),
     )
     qualify_parser.add_argument(
@@ -2205,7 +2250,7 @@ def build_parser() -> argparse.ArgumentParser:
     canary_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4", "W5", "W6"),
+        choices=("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7"),
         help="Public-catalog candidate to canary (P2 is sealed and refused).",
     )
     canary_parser.add_argument(
@@ -2238,7 +2283,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6"),
+        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7"),
     )
     analyze_parser.add_argument(
         "--stage", default="development", choices=("development", "holdout", "freeze")
@@ -2326,6 +2371,7 @@ _HANDLERS = {
     "recover-empty-apply": cmd_recover_empty_apply,
     "pilot": cmd_pilot,
     "mvl-baseline": cmd_mvl_baseline,
+    "qualified-baseline": cmd_qualified_baseline,
     "qualify-agent": cmd_qualify_agent,
     "canary-agent": cmd_canary_agent,
     "analyze-qualification": cmd_analyze_qualification,
