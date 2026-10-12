@@ -162,6 +162,54 @@ under the generic deterministic state machine **`workflow-controller-v1`**
   required on the terminal call). `WORKLOAD_CONTROLLERS` and
   `WORKLOAD_TREATMENTS` are closed tables.
 
+### Workloads 2.7.0 and 2.7.1 — diagnosis-relevant successor (decision D-0033)
+
+`workflow-controller-v1` accepted a terminal once any log search succeeded
+and a retrieved runbook published the submitted remediation. That rule is
+unchanged for workloads 2.6.0 and 2.6.1. Workloads **2.7.0** and **2.7.1**
+bind **`workflow-controller-v2`** because generic log sufficiency did not
+guarantee diagnosis-relevant evidence. The successor keeps the usable-log
+and valid-runbook requirements, and it also requires at least one usable
+direct log observation whose generic category or diagnosis-id token overlap
+supports the selected diagnosis. Categories and tokens come from that
+diagnosis id, which is agent-visible metadata, and from returned log
+lines. Short technical tokens and acronyms in the id count; ordinary
+stopwords do not. Runbook categories are not copied onto every published
+candidate. The treatment on 2.7.1 still requires
+`evidence_refs`, and at least one cited reference must be such a log.
+Runbook and recent-change observations remain ineligible as direct evidence.
+A repeated equivalent zero-match search is rejected with generic text that
+tells the model to change the query, source, or diagnostic hypothesis. The
+turn budget stays 12, one native call per turn, retries stay 0, and the
+warning still appears at three turns remaining. If relevant evidence is
+never found, the controller rejects the terminal and budget exhaustion is
+`workflow_requirements_unmet`.
+
+Candidates **W3** (2.7.0, control) and **W4** (2.7.1, treatment) are the
+successor pair. W3 is W4's same-session control. A W1 control cannot
+authenticate W4, and a W3 control cannot authenticate W2. The prompt bytes,
+evaluator, 20-task schedule, 0.40 floor, canary schedule, and measured
+canary seed `20261007` are unchanged.
+
+### Workloads 2.8.0 and 2.8.1 — structured public evidence (decision D-0034)
+
+Workloads **2.8.0** and **2.8.1** bind **`workflow-controller-v3`**. Their
+system prompt stays byte-identical to the 2.4.1 prompt. The task prompt
+adds a generic explanation of structured fields, which names no scenario,
+plus the reviewed hypothesis catalog. The overlay covers the six
+development templates: hypothesis claims on the task prompt and on a
+successful runbook, and `finding` / `mentions` arrays on returned logs
+and health. The controller
+checks whether the selected hypothesis's declared evidence pattern is
+covered. It does not decide that the hypothesis is the correct or unique
+cause. The evaluator, predicates, accepted answers, schedules, floors,
+region, turn budget, and retry policy stay unchanged. W6 differs from W5
+only by `evidence_refs`, which must cite every required witness, including
+health when the claim requires it. W1-W4 keep their controllers, payloads,
+and identity digests. Holdout templates have no overlay in this revision,
+so a W5/W6 holdout or freeze stage refuses to execute rather than invent
+annotations. `validation_scope` is `public-catalog-pre-exposed-holdout`.
+
 Candidates **W1** (2.6.0) and **W2** (2.6.1) are the authorized
 `qualify-agent` bindings: identical model, artifact, serving image, prompt
 bytes, generation pins, catalog, evaluator 3.1.0, 20-task development

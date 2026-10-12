@@ -1,0 +1,2302 @@
+{
+  "public_metadata_version": "1.0.0",
+  "templates": {
+    "memory-pressure-001": {
+      "hypotheses": {
+        "evidence_schema_version": "1.0.0",
+        "diagnosis_hypotheses": [
+          {
+            "id": "memory-leak-in-worker",
+            "about": [
+              {
+                "kind": "process",
+                "id": "worker",
+                "scope": "$task"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: the worker has a memory leak.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "process",
+                    "id": "worker",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "memory_leak",
+                    "state": "present"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "traffic-growth-capacity",
+            "about": [
+              {
+                "kind": "service",
+                "id": "otter-inventory",
+                "scope": "$task"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: increased request traffic exceeds otter-inventory capacity.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "service",
+                    "id": "otter-inventory",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "request_rate",
+                    "state": "exceeds_capacity"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "unbounded-cache-cfg-3300",
+            "about": [
+              {
+                "kind": "configuration",
+                "id": "cfg-3300",
+                "scope": "$task"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: configuration cfg-3300 sets an unbounded cache entry limit.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "configuration",
+                    "id": "cfg-3300",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "cache_max_entries",
+                    "state": "0"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                },
+                {
+                  "subject": {
+                    "kind": "configuration",
+                    "id": "cfg-3300",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "cache_bound",
+                    "state": "unbounded"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "logs": [
+        {
+          "position": 0,
+          "fingerprint": "a89c7064dbd1b3559c87278dd1504da6d98931b584937eaa47b5604d1a9c0e44",
+          "finding": [
+            {
+              "subject": {
+                "kind": "process",
+                "id": "worker",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "memory_pressure",
+                "state": "oom"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "symptom",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 54,
+                  "quote": "worker killed: out of memory (anon-rss grew unbounded)"
+                }
+              ]
+            }
+          ],
+          "mentions": []
+        },
+        {
+          "position": 1,
+          "fingerprint": "57d4328f79518d93c89615e509677b50c2d67bc033fe5159f984518445b4faea",
+          "finding": [
+            {
+              "subject": {
+                "kind": "configuration",
+                "id": "cfg-3300",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "cache_max_entries",
+                "state": "0"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "condition",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 102,
+                  "quote": "cache eviction disabled: cfg-3300 set cache_max_entries=0 (unbounded) — cache size 9.1 GiB and growing"
+                }
+              ]
+            },
+            {
+              "subject": {
+                "kind": "configuration",
+                "id": "cfg-3300",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "cache_bound",
+                "state": "unbounded"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "condition",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 102,
+                  "quote": "cache eviction disabled: cfg-3300 set cache_max_entries=0 (unbounded) — cache size 9.1 GiB and growing"
+                }
+              ]
+            }
+          ],
+          "mentions": []
+        },
+        {
+          "position": 2,
+          "fingerprint": "cbdf48b4f9e502d04e285898d04d9ac10c3d0f4ad07625ae5b2a6509b04bce58",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 3,
+          "fingerprint": "495b3221c34250e1643079146c95bac930c9a411b697427d865a82648b4a70f0",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 4,
+          "fingerprint": "11e0cb35b83c2b1475005fe050e27600b3e2a57d4537a24a5087980671d3fe6c",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 5,
+          "fingerprint": "7faadbb0b174abd0446436a7c60c37305880f6e4865844c3341e9906687c29f4",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 6,
+          "fingerprint": "b5291236b488eaf2c1e61d9cbc9c5f51d55c989e2691987ea25ad4549a0db783",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 7,
+          "fingerprint": "aa6b9774512bb9a7d428acf6b52ed0543ef9b4390251c802c6871611b53f206c",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 8,
+          "fingerprint": "5e6ac5ebb6cc30003a78362fd9fc5bf4b9f7d163e870caa7b8ff202c1e6c7d82",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 9,
+          "fingerprint": "6cb2850e25500f0da826c86e64561b15fe0234f833ef318b61f7f5a7467a9b55",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 10,
+          "fingerprint": "252e0b160464992cc316600ee9d4bca62b022eee45d631b8ffa85a70d6fb8d89",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 11,
+          "fingerprint": "a07a1afffdc450399efc1de840dee84f27e2ccea61c02989518433126d1dd2bd",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 12,
+          "fingerprint": "ceab703425fecc8ec268c0f486bcafe76ec95149bd74035b37adf6a8184f86b8",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 13,
+          "fingerprint": "49ab684d47766c0543881ebf75b264da23212179e157ac725bf65b614d80cb58",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 14,
+          "fingerprint": "2b81d68fdd2eb00053e5b3240f1937510c1c2f8c08980b5dae9220b5a5a03a68",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 15,
+          "fingerprint": "e5d23f7b9e83ccd4989bba46729904d85df2787552e916fe28ff8dda1c7aed0e",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 16,
+          "fingerprint": "6b2770107de3a3a1ee711c37a27d99e6d2b618ffb8c5e643228a7c0fc0986ae1",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 17,
+          "fingerprint": "e1b3bb586362deebd819a9700579b651fe15dfb2ae781c01096e1f7976af3af7",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 18,
+          "fingerprint": "40fe025f641eaecab9a6794aab1607b4924201b7a66d46679b0e851d99370cb6",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 19,
+          "fingerprint": "d689a206c25906853493d00cf00ac2ecac77f52378e9b72fa0fb42daea2679ba",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 20,
+          "fingerprint": "e6a089761a121f1c9df61885368e206a765e52395f935b4d6fe429d9e23bf932",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 21,
+          "fingerprint": "4347823fc6dc41b8ea33a784d59537ab31770d85e304bfd56b2b72edb5185782",
+          "finding": [],
+          "mentions": []
+        }
+      ],
+      "health": [
+        {
+          "service": "otter-inventory",
+          "component": "api",
+          "status": "degraded",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "otter-inventory",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "api.status",
+              "state": "degraded"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/otter-inventory/api",
+                "value": "degraded"
+              }
+            ]
+          }
+        },
+        {
+          "service": "otter-inventory",
+          "component": "worker",
+          "status": "unhealthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "otter-inventory",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "worker.status",
+              "state": "unhealthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/otter-inventory/worker",
+                "value": "unhealthy"
+              }
+            ]
+          }
+        },
+        {
+          "service": "otter-inventory",
+          "component": "cache",
+          "status": "degraded",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "otter-inventory",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "cache.status",
+              "state": "degraded"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/otter-inventory/cache",
+                "value": "degraded"
+              }
+            ]
+          }
+        },
+        {
+          "service": "badger-queue",
+          "component": "broker",
+          "status": "healthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "badger-queue",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "broker.status",
+              "state": "healthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/badger-queue/broker",
+                "value": "healthy"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "gpu-saturation-001": {
+      "hypotheses": {
+        "evidence_schema_version": "1.0.0",
+        "diagnosis_hypotheses": [
+          {
+            "id": "batch-job-gpu-contention",
+            "about": [
+              {
+                "kind": "batch-job",
+                "id": "embed-refresh-44",
+                "scope": "lynx-inference-1.node.lab.example"
+              },
+              {
+                "kind": "allocator",
+                "id": "kv-cache",
+                "scope": "lynx-inference-1.node.lab.example"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: batch GPU work is contending with online inference for shared GPU resources.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "batch-job",
+                    "id": "embed-refresh-44",
+                    "scope": "lynx-inference-1.node.lab.example"
+                  },
+                  "condition": {
+                    "name": "online_gpu_pool_admission",
+                    "state": "without_priority_cap"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                },
+                {
+                  "subject": {
+                    "kind": "allocator",
+                    "id": "kv-cache",
+                    "scope": "lynx-inference-1.node.lab.example"
+                  },
+                  "condition": {
+                    "name": "capacity",
+                    "state": "saturated"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "model-regression-slow-kernels",
+            "about": [
+              {
+                "kind": "model",
+                "id": "inference",
+                "scope": "lynx-inference"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: a model regression makes GPU kernels slow.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "model",
+                    "id": "inference",
+                    "scope": "lynx-inference"
+                  },
+                  "condition": {
+                    "name": "kernel_performance",
+                    "state": "regressed"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "traffic-spike-overload",
+            "about": [
+              {
+                "kind": "service",
+                "id": "lynx-inference",
+                "scope": "$task"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: an incoming traffic spike overloads online inference.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "service",
+                    "id": "lynx-inference",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "request_rate",
+                    "state": "exceeds_capacity"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "logs": [
+        {
+          "position": 0,
+          "fingerprint": "d45cc5444d194293c5f2fe29630aec7c9fb9633ea0126dfbb1d9251e8c3a24ed",
+          "finding": [
+            {
+              "subject": {
+                "kind": "batch-job",
+                "id": "embed-refresh-44",
+                "scope": "lynx-inference-1.node.lab.example"
+              },
+              "condition": {
+                "name": "online_gpu_pool_admission",
+                "state": "without_priority_cap"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "condition",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 86,
+                  "quote": "scheduler: batch job embed-refresh-44 admitted to online GPU pool without priority cap"
+                }
+              ]
+            }
+          ],
+          "mentions": []
+        },
+        {
+          "position": 1,
+          "fingerprint": "c808a50818705952030f8b3683b4200d7d3e83f1a2f2107ea3272ca149628411",
+          "finding": [
+            {
+              "subject": {
+                "kind": "allocator",
+                "id": "kv-cache",
+                "scope": "lynx-inference-1.node.lab.example"
+              },
+              "condition": {
+                "name": "capacity",
+                "state": "saturated"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "condition",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 63,
+                  "quote": "online queue wait exceeded 800 ms; kv-cache allocator saturated"
+                }
+              ]
+            }
+          ],
+          "mentions": []
+        },
+        {
+          "position": 2,
+          "fingerprint": "6d7c30a87e8d3d10bad2732ce672fff654ee0854bff01fda8b0ac1de8ee3840c",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 3,
+          "fingerprint": "9b5e55ed15e8f43ad20d2343f8d31d9c8788006f79bd633efecaa8728dec3b75",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 4,
+          "fingerprint": "d5c5cddf635382a86b34e2a699d23b20db71b325df77502ecc38f0acf20e5693",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 5,
+          "fingerprint": "a5f0fb0c657defeb746aaa2d651c137661ad9e975a1399bb5463363475a2cc56",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 6,
+          "fingerprint": "9476995c931e57f9cf86c890614b38eb8b6e802d3a13dfb298d8036586394ca3",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 7,
+          "fingerprint": "cf77302573b979f071b44b469c7ad1b9d3a1ca58f8b051c98fa2f2cc3c8ad447",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 8,
+          "fingerprint": "e0f9685c00a8ce26f5275e4f3cb26c03aa2a01be3222abbdf97916caf82b62d3",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 9,
+          "fingerprint": "0765ddbd9fc70b1d95234817db0749c20f3f6e3ac3eb1765f56ff4689ba631df",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 10,
+          "fingerprint": "f3503d2278c10e1ad92c00d283b711e3a810c61e5cee786440aef8f4825f0d57",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 11,
+          "fingerprint": "8155ce2c25296abf7252fe3f3f595275132a143b64625ea358d4461b74281213",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 12,
+          "fingerprint": "caba18ff6d1ee8c9c848961f6b833254897e8d801b5f43d25d1504e01a6451bc",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 13,
+          "fingerprint": "ff33fe46bf759b8d165b7da4b2f4a3e107b0de2bb126910270c5926256ae7bb5",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 14,
+          "fingerprint": "4b35522fb97b2690d1eb8c7e17383ab4c6b8ec7e1f573304d0376b601f4be872",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 15,
+          "fingerprint": "6042c855d725c4035a7d0eec462defd40ad08701cbfec564080102d62b95235e",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 16,
+          "fingerprint": "43a490988899c370804883cb5f8f44093d0e76149a6b69c1a19db57918baa998",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 17,
+          "fingerprint": "ed6c1dd61a7f8bf9b07c2ddde957565fdc8fa3f930d2622c868074fa7a463e13",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 18,
+          "fingerprint": "ac5e5825bd199558ac63c1b82570bc91ba33040459668ac55b1bc647aacc6577",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 19,
+          "fingerprint": "a35bde97bfb49872f1fb310be43a1f04b514be9c4641cbfd0d598a8e7484a23b",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 20,
+          "fingerprint": "c2a454399cc6e6b2901b6884584f69de7231586c3dc45b7b29170bf8e4ef6c37",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 21,
+          "fingerprint": "c2596c833aebe68a75e840214bdd5cb5f628b329717e08bc7c87f03d112d98d0",
+          "finding": [],
+          "mentions": []
+        }
+      ],
+      "health": [
+        {
+          "service": "lynx-inference",
+          "component": "online-serving",
+          "status": "degraded",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "lynx-inference",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "online-serving.status",
+              "state": "degraded"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/lynx-inference/online-serving",
+                "value": "degraded"
+              }
+            ]
+          }
+        },
+        {
+          "service": "lynx-inference",
+          "component": "batch-lane",
+          "status": "healthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "lynx-inference",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "batch-lane.status",
+              "state": "healthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/lynx-inference/batch-lane",
+                "value": "healthy"
+              }
+            ]
+          }
+        },
+        {
+          "service": "falcon-frontend",
+          "component": "api",
+          "status": "healthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "falcon-frontend",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "api.status",
+              "state": "healthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/falcon-frontend/api",
+                "value": "healthy"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "failed-deployment-001": {
+      "hypotheses": {
+        "evidence_schema_version": "1.0.0",
+        "diagnosis_hypotheses": [
+          {
+            "id": "bad-image-artifact",
+            "about": [
+              {
+                "kind": "deployment",
+                "id": "dep-9004",
+                "scope": "$task"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: the image artifact for deployment dep-9004 is invalid.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "deployment",
+                    "id": "dep-9004",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "image_artifact",
+                    "state": "invalid"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "missing-migration-dep-9004",
+            "about": [
+              {
+                "kind": "deployment",
+                "id": "dep-9004",
+                "scope": "$task"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: deployment dep-9004 requires a migration that was not applied.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "deployment",
+                    "id": "dep-9004",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "required_migration",
+                    "state": "not_applied"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "readiness-probe-misconfigured",
+            "about": [
+              {
+                "kind": "probe",
+                "id": "readiness",
+                "scope": "ibis-notify"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: the readiness probe configuration is incorrect.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "probe",
+                    "id": "readiness",
+                    "scope": "ibis-notify"
+                  },
+                  "condition": {
+                    "name": "configuration",
+                    "state": "misconfigured"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "logs": [
+        {
+          "position": 0,
+          "fingerprint": "4f2bde98332f4cfd175d4fd87e0f47e8731d4719cd053f9398c6d817d0c4a647",
+          "finding": [
+            {
+              "subject": {
+                "kind": "probe",
+                "id": "readiness",
+                "scope": "ibis-notify"
+              },
+              "condition": {
+                "name": "readiness_result",
+                "state": "failing"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "symptom",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 129,
+                  "quote": "readiness probe failing: schema_version=41 required by dep-9004 but database reports schema_version=40 (migration 41 not applied)"
+                }
+              ]
+            },
+            {
+              "subject": {
+                "kind": "deployment",
+                "id": "dep-9004",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "required_migration",
+                "state": "not_applied"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "condition",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 129,
+                  "quote": "readiness probe failing: schema_version=41 required by dep-9004 but database reports schema_version=40 (migration 41 not applied)"
+                }
+              ]
+            }
+          ],
+          "mentions": []
+        },
+        {
+          "position": 1,
+          "fingerprint": "e9f59d84b2136f704e4b1f9f56f4cdb19c70d0855bbb3fc7ac7b33a836a9c93d",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 2,
+          "fingerprint": "dbb51cda82499476567be7a6fb30a1b292e9987660d5f609ef706e8b0b2bb2b5",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 3,
+          "fingerprint": "488dcfce74ba1004ca837cd8135d017ad13e1e9a1148469541a195fe3767bf34",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 4,
+          "fingerprint": "805c3760118dfadc41233c3ddb7788e8581fc01c0cb87d8029848f40721e168a",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 5,
+          "fingerprint": "252c2e578c27523cb1cb562e6519541eab580ddea662fc1d2347e6eb1a1ee76c",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 6,
+          "fingerprint": "569081dc4777fd58c71077b252e29e1e10924f5aa9714c0d8587c806e49bd7b1",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 7,
+          "fingerprint": "b1f0341fcb5a1429c9b3ca4017d26a963741815817b80a57b428e55b2953afea",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 8,
+          "fingerprint": "5dff38d160b8e3079e8f26f196ffb34cae4b1e97b63a3d72a8521c2c88a0e93c",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 9,
+          "fingerprint": "ed200e3d367be41ebc1aa119eac8b8e2acb3357ef4f5d6323682b7156d9e826f",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 10,
+          "fingerprint": "d8c862b2e70c0e60b3cd761241bffcaa5f37373d9cbec037305094c9f635f87b",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 11,
+          "fingerprint": "19328aec5c49a0b38d110fda3ead13a514338785cc74a6a9e1a1932787c88bdb",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 12,
+          "fingerprint": "50ed788df85e6d18260028180eb600cb56c13a7163dfb24f0b1a158c9fb35bf0",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 13,
+          "fingerprint": "8bdf4d50ed23027acbe1f2c4619b94a9a5d4bfead7f92a1f6524d1db3a5b03f0",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 14,
+          "fingerprint": "21d45497da96976c7044b1f7203f4c4b46a87574e763f997e3906795535901c8",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 15,
+          "fingerprint": "bff281c94180204c0fdd39784a284c931355d131b6e44bbe414bc23341cdb000",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 16,
+          "fingerprint": "e5999a0aa7b82bda022614255c248ad0d2571ed1091e61f138f1c9bc7fdb68ef",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 17,
+          "fingerprint": "dda4ee878510c27b9ae070ec8890b2cff305a57ab7041c019700c3b0f3709444",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 18,
+          "fingerprint": "a35e2282db062753e1d722b3fe332fd4129b93edf15df59daa2e5616b31ba445",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 19,
+          "fingerprint": "9136f190a86cb799997ae519210179b39293d6b49f495f7a3ba1f0c1a3746849",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 20,
+          "fingerprint": "f4ab012e243391e61dd0f4c7733873eda47167160ad21904c2a4fc62e267a35e",
+          "finding": [],
+          "mentions": []
+        }
+      ],
+      "health": [
+        {
+          "service": "ibis-notify",
+          "component": "api",
+          "status": "degraded",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "ibis-notify",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "api.status",
+              "state": "degraded"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/ibis-notify/api",
+                "value": "degraded"
+              }
+            ]
+          }
+        },
+        {
+          "service": "ibis-notify",
+          "component": "rollout",
+          "status": "stalled",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "ibis-notify",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "rollout.status",
+              "state": "stalled"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/ibis-notify/rollout",
+                "value": "stalled"
+              }
+            ]
+          }
+        },
+        {
+          "service": "quokka-payments",
+          "component": "api",
+          "status": "healthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "quokka-payments",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "api.status",
+              "state": "healthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/quokka-payments/api",
+                "value": "healthy"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "unhealthy-upstream-001": {
+      "hypotheses": {
+        "evidence_schema_version": "1.0.0",
+        "diagnosis_hypotheses": [
+          {
+            "id": "edge-lb-misroute",
+            "about": [
+              {
+                "kind": "load-balancer",
+                "id": "edge-lb",
+                "scope": "falcon-frontend"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: the frontend edge load balancer routes traffic incorrectly.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "load-balancer",
+                    "id": "edge-lb",
+                    "scope": "falcon-frontend"
+                  },
+                  "condition": {
+                    "name": "routing",
+                    "state": "misrouted"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "frontend-bad-deploy",
+            "about": [
+              {
+                "kind": "deployment",
+                "id": "frontend",
+                "scope": "falcon-frontend"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: the frontend deployment is faulty.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "deployment",
+                    "id": "frontend",
+                    "scope": "falcon-frontend"
+                  },
+                  "condition": {
+                    "name": "deployment_state",
+                    "state": "faulty"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "unhealthy-upstream-heron-auth",
+            "about": [
+              {
+                "kind": "service",
+                "id": "heron-auth",
+                "scope": "$task"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: heron-auth is an unhealthy upstream for the affected caller.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "service",
+                    "id": "heron-auth",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "api.status",
+                    "state": "unhealthy"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "health",
+                  "role": "condition"
+                },
+                {
+                  "subject": {
+                    "kind": "service",
+                    "id": "heron-auth",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "service_role",
+                    "state": "upstream"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "context"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "logs": [
+        {
+          "position": 0,
+          "fingerprint": "9646b76cf5468f7f2e08be13c5fb628b6a1ad8bd463dbe91388097225ef244df",
+          "finding": [
+            {
+              "subject": {
+                "kind": "service",
+                "id": "heron-auth",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "service_role",
+                "state": "upstream"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "context",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 94,
+                  "quote": "upstream heron-auth timed out after 2000 ms (endpoint 203.0.113.41); circuit breaker half-open"
+                }
+              ]
+            }
+          ],
+          "mentions": []
+        },
+        {
+          "position": 1,
+          "fingerprint": "caf7bd36be63b157cf449deca6b1c21b2f04a4ce68ff106e93b9bc3ee8bcabe7",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 2,
+          "fingerprint": "e7721ffa9dc14283169374f1348159e50892b5d5fe33f33eb2774a2a89b90c6c",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 3,
+          "fingerprint": "b27a69ca9f5feb8d37b33ed7c0122c3662ffc83f56e56403ea7d9f3ae9a390c6",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 4,
+          "fingerprint": "449ac70b133ff844ae1e7b3ad39f396c37624c4b92d58be053ee2b8a930c0891",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 5,
+          "fingerprint": "372c97e4b39e3bde6762c3558ce70e191b8f417f4bfea4532797ba4e4c4d723f",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 6,
+          "fingerprint": "6a8fb7946a23b89186c4dc9124160537b526e5c8b902aa26e2ee1beb202450dd",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 7,
+          "fingerprint": "542ae1374efd9943641e8cc012687d83d776360dee27e34e3fa2630e45905aba",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 8,
+          "fingerprint": "17ef73dd3a6feb2e72034eac868e0a3c1f19f2e8ac2fa905a40b8f4550c91e40",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 9,
+          "fingerprint": "844aacbf554364ab40073ccd42673e809b436f9dd05582b733ade70016483b49",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 10,
+          "fingerprint": "cc9c9bee9c66ead2ad69a2e5f5db47482e6de7f084a0064b0692e77dfbc7424f",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 11,
+          "fingerprint": "b7c12419fd2ba88a288db3ae677ce9e1da726860fd6f04032511fe328f501eb4",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 12,
+          "fingerprint": "61137cbae4752bbd9f9e37126a0fc3dc37fd4d11cd0b93d26399fafaf638adc6",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 13,
+          "fingerprint": "f9bc519866a942579e8ed3acfc2f70e63dcf8bd84434323b2af56fb3be851836",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 14,
+          "fingerprint": "2246664c45216fb13312a8845f117bf7025dbaff8e5920e7b2468d08d3298113",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 15,
+          "fingerprint": "bcda77f434c7e7ac296829c2a485a1da44f0b1bdd0d0847db9ff5bbca3e4032c",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 16,
+          "fingerprint": "4904edf06ac212e1ba3892767e3bb1bdd20b0e8d942bc90a515e7cd7fdd976c7",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 17,
+          "fingerprint": "67c96635b82e3e362b38f45d0fce1e2147093ef7638ea5f0a2748b84241ad648",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 18,
+          "fingerprint": "2c170ddb5626be5de85df0fa24f235a77aed5c1cf314d94a21e027fbdf5755d1",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 19,
+          "fingerprint": "7fff9d5eed13e6c599210f5b2fb315ea5a74a0359b17ddac6e10dfe5d32cad56",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 20,
+          "fingerprint": "366b2e8884a0a8ccd513b59df28103e52b85c0bde914a42fa34ffc03cc55b934",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 21,
+          "fingerprint": "09db57c86aa5c9694edeedab5e54f43269876898d0f9067d3de8fb5a7c962322",
+          "finding": [],
+          "mentions": []
+        }
+      ],
+      "health": [
+        {
+          "service": "falcon-frontend",
+          "component": "api",
+          "status": "degraded",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "falcon-frontend",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "api.status",
+              "state": "degraded"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/falcon-frontend/api",
+                "value": "degraded"
+              }
+            ]
+          }
+        },
+        {
+          "service": "heron-auth",
+          "component": "api",
+          "status": "unhealthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "heron-auth",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "api.status",
+              "state": "unhealthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/heron-auth/api",
+                "value": "unhealthy"
+              }
+            ]
+          }
+        },
+        {
+          "service": "heron-auth",
+          "component": "token-signer",
+          "status": "unhealthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "heron-auth",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "token-signer.status",
+              "state": "unhealthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/heron-auth/token-signer",
+                "value": "unhealthy"
+              }
+            ]
+          }
+        },
+        {
+          "service": "marmot-search",
+          "component": "api",
+          "status": "healthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "marmot-search",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "api.status",
+              "state": "healthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/marmot-search/api",
+                "value": "healthy"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "dns-failures-001": {
+      "hypotheses": {
+        "evidence_schema_version": "1.0.0",
+        "diagnosis_hypotheses": [
+          {
+            "id": "badger-queue-outage",
+            "about": [
+              {
+                "kind": "service",
+                "id": "badger-queue",
+                "scope": "$task"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: badger-queue is in an outage.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "service",
+                    "id": "badger-queue",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "availability",
+                    "state": "outage"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "dns-search-domain-typo-cfg-5150",
+            "about": [
+              {
+                "kind": "configuration",
+                "id": "cfg-5150",
+                "scope": "$task"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: configuration cfg-5150 contains a DNS search-domain typo.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "configuration",
+                    "id": "cfg-5150",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "dns.search_domain",
+                    "state": "typo"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "network-firewall-block",
+            "about": [
+              {
+                "kind": "network-path",
+                "id": "DNS",
+                "scope": "$task"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: a firewall is blocking the relevant DNS network path.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "network-path",
+                    "id": "DNS",
+                    "scope": "$task"
+                  },
+                  "condition": {
+                    "name": "firewall_action",
+                    "state": "blocked"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "logs": [
+        {
+          "position": 0,
+          "fingerprint": "40f8d2548410796961b3e3157fa62c11b80f1eaa525b0acadbf4eb858e610a06",
+          "finding": [
+            {
+              "subject": {
+                "kind": "dns-query",
+                "id": "badger-queue.svc.lab.example",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "resolution",
+                "state": "SERVFAIL"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "symptom",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 90,
+                  "quote": "resolve badger-queue.svc.lab.example: SERVFAIL (search domain 'svc.1ab.example' not found)"
+                }
+              ]
+            }
+          ],
+          "mentions": [
+            {
+              "text": "badger-queue.svc.lab.example",
+              "role": "entity",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 90,
+                  "quote": "resolve badger-queue.svc.lab.example: SERVFAIL (search domain 'svc.1ab.example' not found)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "position": 1,
+          "fingerprint": "e2e7fe26cb911aa6ee2ddaef571d425f81534afc4f0c8a6add48056d92522870",
+          "finding": [
+            {
+              "subject": {
+                "kind": "configuration",
+                "id": "cfg-5150",
+                "scope": "$task"
+              },
+              "condition": {
+                "name": "dns.search_domain",
+                "state": "typo"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "condition",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 109,
+                  "quote": "config release cfg-5150 loaded: search domain changed to 'svc.1ab.example' (typo: digit one for the letter l)"
+                }
+              ]
+            }
+          ],
+          "mentions": []
+        },
+        {
+          "position": 2,
+          "fingerprint": "3947a24c33fbf2ef74e1d78da0d94f89e52bd8897d726c9564183a0bba1b4596",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 3,
+          "fingerprint": "14d2ebcbadc4deae5c0cb0b2f00f3c29633b4a54f24af2d1400a1fb3512e777e",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 4,
+          "fingerprint": "3f4761d89ea09e8c7fa3b237b1df930fcf1dc3e4138ce10ca8631aec56a7a1a7",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 5,
+          "fingerprint": "54ab86edc2ac69656a96694ae67f1aff972e4c6a6bab4141b434d6ea1df7fd01",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 6,
+          "fingerprint": "75c4d796c2cd16e2d9fec5e48cf290a6c47f14faa00f759cc36bf9b8e94fdc3b",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 7,
+          "fingerprint": "dd9a1b31b97fec54100fcae1a94e3607a461e68a6a376cecd6148706c8c9ded6",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 8,
+          "fingerprint": "a3ee56ff52e6404da790029545744550fec9c839e770085b3a72d8b3deb36e1a",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 9,
+          "fingerprint": "90918b883fcc57b3120fbdd511e2e5678855be8420249435add2f909b1cf33f7",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 10,
+          "fingerprint": "88968dfcf649dcf6e5386c1bbb674724ba1d3d54f5ab97098215c5bd1c669c1e",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 11,
+          "fingerprint": "13471376eceeb2edfd58dc330a9fea14351a2f66acefeaa1cd92fd920e222e36",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 12,
+          "fingerprint": "0d3d97bb5e70993c42d2473d4a87da00a33bf0eb0004a02911efef8809f02663",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 13,
+          "fingerprint": "65936043b8ee804379588580b16157fe61a57dd497aa431fd33d5c252c4865da",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 14,
+          "fingerprint": "8fe34db7a07dfc0cc1f12ce3700b1c90750c164b55338d88bb49a6c8fe69b073",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 15,
+          "fingerprint": "9c59ca8f53fbaa3af3e33b3c6a5e2a8531f11b9859f0d4d6922d92a21a3e74f1",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 16,
+          "fingerprint": "ff25d57327f5e1385a873b4c08a81e04156c6ce3b902ca5957e9c27cfa3ad7e5",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 17,
+          "fingerprint": "1f73aac81449d58d17d22a335e95732ead0a5581a749b705defe2456a3e40b86",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 18,
+          "fingerprint": "f086a3e88f3c68779356241156b9322baab8d83d029555788f2966d0dcdf0dec",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 19,
+          "fingerprint": "1773b3b4033c8953366b6841cd45490850fb09f86e19514095897988645cb64f",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 20,
+          "fingerprint": "63719d6a673e152de054cd589b1b3c0a3aa30bed19a864e26016c2aa36cea03c",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 21,
+          "fingerprint": "acfff635b122d413890bcf08b2aa376a8b88f857e75b09c0e8e60db23916fda9",
+          "finding": [],
+          "mentions": []
+        }
+      ],
+      "health": [
+        {
+          "service": "walrus-batch",
+          "component": "scheduler",
+          "status": "healthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "walrus-batch",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "scheduler.status",
+              "state": "healthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/walrus-batch/scheduler",
+                "value": "healthy"
+              }
+            ]
+          }
+        },
+        {
+          "service": "walrus-batch",
+          "component": "workers",
+          "status": "degraded",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "walrus-batch",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "workers.status",
+              "state": "degraded"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/walrus-batch/workers",
+                "value": "degraded"
+              }
+            ]
+          }
+        },
+        {
+          "service": "dns-resolver",
+          "component": "resolver",
+          "status": "degraded",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "dns-resolver",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "resolver.status",
+              "state": "degraded"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/dns-resolver/resolver",
+                "value": "degraded"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "capacity-exhaustion-001": {
+      "hypotheses": {
+        "evidence_schema_version": "1.0.0",
+        "diagnosis_hypotheses": [
+          {
+            "id": "autoscaler-ceiling-exhausted",
+            "about": [
+              {
+                "kind": "component",
+                "id": "autoscaler",
+                "scope": "badger-queue-1.node.lab.example"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: the autoscaler replica ceiling prevents requested scale-out.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "component",
+                    "id": "autoscaler",
+                    "scope": "badger-queue-1.node.lab.example"
+                  },
+                  "condition": {
+                    "name": "desired_replicas",
+                    "state": "40"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                },
+                {
+                  "subject": {
+                    "kind": "component",
+                    "id": "autoscaler",
+                    "scope": "badger-queue-1.node.lab.example"
+                  },
+                  "condition": {
+                    "name": "max_replicas",
+                    "state": "24"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                },
+                {
+                  "subject": {
+                    "kind": "component",
+                    "id": "autoscaler",
+                    "scope": "badger-queue-1.node.lab.example"
+                  },
+                  "condition": {
+                    "name": "scaling",
+                    "state": "capped_by_ceiling"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "broker-disk-saturation",
+            "about": [
+              {
+                "kind": "disk",
+                "id": "broker",
+                "scope": "badger-queue"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: the broker disk is saturated.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "disk",
+                    "id": "broker",
+                    "scope": "badger-queue"
+                  },
+                  "condition": {
+                    "name": "capacity",
+                    "state": "saturated"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          },
+          {
+            "id": "consumer-deadlock",
+            "about": [
+              {
+                "kind": "process-group",
+                "id": "consumers",
+                "scope": "badger-queue"
+              }
+            ],
+            "claim": {
+              "text": "Hypothesis: the consumers are deadlocked.",
+              "support_all_of": [
+                {
+                  "subject": {
+                    "kind": "process-group",
+                    "id": "consumers",
+                    "scope": "badger-queue"
+                  },
+                  "condition": {
+                    "name": "progress",
+                    "state": "deadlocked"
+                  },
+                  "polarity": "affirmed",
+                  "witness_type": "log",
+                  "role": "condition"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "logs": [
+        {
+          "position": 0,
+          "fingerprint": "289dc1e467ef83edcfb51cf463251e574e8ec9cf8a81e2c37fb1bcb8e0fbac4d",
+          "finding": [
+            {
+              "subject": {
+                "kind": "component",
+                "id": "autoscaler",
+                "scope": "badger-queue-1.node.lab.example"
+              },
+              "condition": {
+                "name": "desired_replicas",
+                "state": "40"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "condition",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 90,
+                  "quote": "autoscaler: desired replicas 40 exceeds ceiling max_replicas=24; scaling capped since t+5m"
+                }
+              ]
+            },
+            {
+              "subject": {
+                "kind": "component",
+                "id": "autoscaler",
+                "scope": "badger-queue-1.node.lab.example"
+              },
+              "condition": {
+                "name": "max_replicas",
+                "state": "24"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "condition",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 90,
+                  "quote": "autoscaler: desired replicas 40 exceeds ceiling max_replicas=24; scaling capped since t+5m"
+                }
+              ]
+            },
+            {
+              "subject": {
+                "kind": "component",
+                "id": "autoscaler",
+                "scope": "badger-queue-1.node.lab.example"
+              },
+              "condition": {
+                "name": "scaling",
+                "state": "capped_by_ceiling"
+              },
+              "polarity": "affirmed",
+              "certainty": "asserted",
+              "role": "condition",
+              "sources": [
+                {
+                  "kind": "log_span",
+                  "start": 0,
+                  "end": 90,
+                  "quote": "autoscaler: desired replicas 40 exceeds ceiling max_replicas=24; scaling capped since t+5m"
+                }
+              ]
+            }
+          ],
+          "mentions": []
+        },
+        {
+          "position": 1,
+          "fingerprint": "5aa563e51ce4f499448c1d51dcea872bdc654924b856d1f754179ad2404011a9",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 2,
+          "fingerprint": "da5f09e629e4ad7f27ee4a6e63e9236e4e01079599d910d698e8b946d7b13cc3",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 3,
+          "fingerprint": "48adeeb3c8e70bf4c6556b397fb2438efe7e8ecb05b517d2bed77b5462ca630c",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 4,
+          "fingerprint": "6d3e7cd28f1bb2ac1e489613e598722ee4135615654725ab611797bbc9ed73a4",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 5,
+          "fingerprint": "8fd62d44f62fcdc9a1200debf1e1e9da615dc3425ae8e385469c2d01151aa284",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 6,
+          "fingerprint": "ebf8fabe07e66ef69b89b37dc9edb94b6f3c1d48fbff6758a4829cf19de05a40",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 7,
+          "fingerprint": "0917030ba13ac798c88bc91c81f7684fb9d099cda681f0879f76d29c2c08d57b",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 8,
+          "fingerprint": "5178c359c80f8d14a3ba6b984eb693ee404755c1b76135a824a628daf8326840",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 9,
+          "fingerprint": "a328795a595e682d4483113b88ac7d08962fc13a5f30f0fbca1aa8ed606ea020",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 10,
+          "fingerprint": "0e5b1c9d8135b966a902cccac9ccf66623b7420845bb1c6635cd43ce8f4e3767",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 11,
+          "fingerprint": "060d0381b8acec99df3f218831ad7715c32a4515963be9522bc0d1af3da6b0e5",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 12,
+          "fingerprint": "d9a547ddf844af9cdfbc0cadec148ad9ae30e75cee5c439ad47f44b066006451",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 13,
+          "fingerprint": "9971689016878b01c49c114a576382834706c21bdf8d4c1b3813e5ac4a5c899b",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 14,
+          "fingerprint": "4d36276e17dc99c443c17169dc26f07abb75536f11aabdacf158b72e6e5476c1",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 15,
+          "fingerprint": "9f2bd7fc00af6f6657af0bbf94eddfd736ab6e7a55711ef037872996c9ab2663",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 16,
+          "fingerprint": "860b5c3c7c9046828f73a00bf54a3f1522a8180f2c17fd68b8537f750fc33928",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 17,
+          "fingerprint": "214749c10570cf141630df3038864267b1084dd37206436eb9dc926aa96815aa",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 18,
+          "fingerprint": "c53b4332ce59aa490b9d3970d2df666a44a184f6f5e776efbd7c1b18a4574d44",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 19,
+          "fingerprint": "9fc53f604adfa8c2ffda3de86dc719193766d00ce8c718a29792edee5c69657c",
+          "finding": [],
+          "mentions": []
+        },
+        {
+          "position": 20,
+          "fingerprint": "52ec1476d1912625892dc6d896e32940451ab9d98a3f4ca6ad33fab7b3bcd191",
+          "finding": [],
+          "mentions": []
+        }
+      ],
+      "health": [
+        {
+          "service": "badger-queue",
+          "component": "broker",
+          "status": "healthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "badger-queue",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "broker.status",
+              "state": "healthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/badger-queue/broker",
+                "value": "healthy"
+              }
+            ]
+          }
+        },
+        {
+          "service": "badger-queue",
+          "component": "consumers",
+          "status": "healthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "badger-queue",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "consumers.status",
+              "state": "healthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/badger-queue/consumers",
+                "value": "healthy"
+              }
+            ]
+          }
+        },
+        {
+          "service": "badger-queue",
+          "component": "autoscaler",
+          "status": "at-ceiling",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "badger-queue",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "autoscaler.status",
+              "state": "at-ceiling"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/badger-queue/autoscaler",
+                "value": "at-ceiling"
+              }
+            ]
+          }
+        },
+        {
+          "service": "ibis-notify",
+          "component": "api",
+          "status": "healthy",
+          "finding": {
+            "subject": {
+              "kind": "service",
+              "id": "ibis-notify",
+              "scope": "$task"
+            },
+            "condition": {
+              "name": "api.status",
+              "state": "healthy"
+            },
+            "polarity": "affirmed",
+            "certainty": "asserted",
+            "role": "condition",
+            "sources": [
+              {
+                "kind": "health_field",
+                "path": "/services/ibis-notify/api",
+                "value": "healthy"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

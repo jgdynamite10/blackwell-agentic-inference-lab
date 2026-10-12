@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:blackwell-lab:evidence-contract:1.0.0",
+  "title": "D-0034 proposed evidence identity binding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "evidence_schema_version",
+    "evidence_schema_sha256",
+    "public_metadata_version",
+    "public_metadata_sha256",
+    "normalization_policy_sha256",
+    "controller_id",
+    "controller_sha256",
+    "surface_renderer_sha256"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "1.0.0"
+    },
+    "evidence_schema_version": {
+      "const": "1.0.0"
+    },
+    "evidence_schema_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "public_metadata_version": {
+      "const": "1.0.0"
+    },
+    "public_metadata_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "normalization_policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "controller_id": {
+      "const": "workflow-controller-v3"
+    },
+    "controller_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "surface_renderer_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

@@ -1,0 +1,432 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:blackwell-lab:public-evidence:1.0.0",
+  "title": "D-0034 proposed public evidence schema, design revision 0.2",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/hypothesis_catalog"
+    },
+    {
+      "$ref": "#/$defs/log_result"
+    },
+    {
+      "$ref": "#/$defs/health_result"
+    }
+  ],
+  "$defs": {
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "scope"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "state"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "condition",
+        "polarity",
+        "witness_type",
+        "role"
+      ],
+      "properties": {
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "condition": {
+          "$ref": "#/$defs/condition"
+        },
+        "polarity": {
+          "const": "affirmed"
+        },
+        "witness_type": {
+          "enum": [
+            "log",
+            "health"
+          ]
+        },
+        "role": {
+          "enum": [
+            "condition",
+            "context",
+            "symptom"
+          ]
+        }
+      }
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "start",
+        "end",
+        "quote"
+      ],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "log_span"
+        }
+      }
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "condition",
+        "polarity",
+        "certainty",
+        "role",
+        "sources"
+      ],
+      "properties": {
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "condition": {
+          "$ref": "#/$defs/condition"
+        },
+        "polarity": {
+          "enum": [
+            "affirmed",
+            "denied"
+          ]
+        },
+        "certainty": {
+          "enum": [
+            "asserted",
+            "ambiguous"
+          ]
+        },
+        "role": {
+          "enum": [
+            "condition",
+            "symptom",
+            "context"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    },
+    "mention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "role",
+        "sources"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": [
+            "entity",
+            "symptom",
+            "context"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    },
+    "hypothesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "about",
+        "claim"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "about": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/subject"
+          }
+        },
+        "claim": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "support_all_of"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1
+            },
+            "support_all_of": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/assertion"
+              }
+            }
+          }
+        }
+      }
+    },
+    "line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "t_offset_s",
+        "host",
+        "level",
+        "message",
+        "finding",
+        "mentions"
+      ],
+      "properties": {
+        "t_offset_s": {
+          "type": "integer"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "level": {
+          "enum": [
+            "DEBUG",
+            "INFO",
+            "WARN",
+            "ERROR",
+            "CRITICAL"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "finding": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fact"
+          }
+        },
+        "mentions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mention"
+          }
+        }
+      }
+    },
+    "hypothesis_catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_schema_version",
+        "diagnosis_hypotheses"
+      ],
+      "properties": {
+        "evidence_schema_version": {
+          "const": "1.0.0"
+        },
+        "diagnosis_hypotheses": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/hypothesis"
+          }
+        }
+      }
+    },
+    "log_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_schema_version",
+        "query",
+        "total_matches",
+        "lines"
+      ],
+      "properties": {
+        "evidence_schema_version": {
+          "const": "1.0.0"
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "total_matches": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        }
+      }
+    },
+    "health_field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path",
+        "value"
+      ],
+      "properties": {
+        "kind": {
+          "const": "health_field"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/services/[^/]+/[^/]+$"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "log_field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path",
+        "value"
+      ],
+      "properties": {
+        "kind": {
+          "const": "log_field"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/lines/[0-9]+/(host|level|t_offset_s)$"
+        },
+        "value": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        }
+      }
+    },
+    "source": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/span"
+        },
+        {
+          "$ref": "#/$defs/health_field"
+        },
+        {
+          "$ref": "#/$defs/log_field"
+        }
+      ]
+    },
+    "health_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_schema_version",
+        "services",
+        "finding",
+        "mentions"
+      ],
+      "properties": {
+        "evidence_schema_version": {
+          "const": "1.0.0"
+        },
+        "services": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "finding": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fact"
+          }
+        },
+        "mentions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mention"
+          }
+        }
+      }
+    }
+  }
+}

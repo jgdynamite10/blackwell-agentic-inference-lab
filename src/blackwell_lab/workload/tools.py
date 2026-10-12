@@ -80,6 +80,15 @@ TOOL_SPECS_BY_VERSION: dict[str, dict[str, dict[str, dict[str, type | tuple[type
     # argument schema is the pair's only model-visible difference.
     "2.6.0": TOOL_SPECS,
     "2.6.1": TOOL_SPECS_V250,
+    # Successor pair (decision D-0033): 2.7.0 (W3, control) keeps the
+    # original argument contract; 2.7.1 (W4, treatment) exposes evidence_refs.
+    "2.7.0": TOOL_SPECS,
+    "2.7.1": TOOL_SPECS_V250,
+    # Structured-evidence pair (decision D-0034): 2.8.0 keeps the original
+    # argument contract; 2.8.1 exposes evidence_refs. Finding metadata is
+    # attached by the 2.8 renderer, not by a new argument.
+    "2.8.0": TOOL_SPECS,
+    "2.8.1": TOOL_SPECS_V250,
 }
 
 
@@ -125,7 +134,7 @@ class ToolResult:
 
 #: Workloads whose terminal schema failures are a correctable controller
 #: rejection rather than an immediate ``invalid_tool_arguments`` stop.
-WORKFLOW_TERMINAL_VERSIONS = frozenset({"2.6.0", "2.6.1"})
+WORKFLOW_TERMINAL_VERSIONS = frozenset({"2.6.0", "2.6.1", "2.7.0", "2.7.1", "2.8.0", "2.8.1"})
 
 
 def workflow_terminal_schema_is_correctable(name: str, workload_version: str | None) -> bool:
@@ -227,6 +236,14 @@ class SimulatedToolbox:
         # task's duration, timeout budget, and the cell's wall time.
         self._clock.sleep(latency_ms / 1000.0)
         payload = handler(**arguments)
+        from blackwell_lab.workload.native_tools import require_workload_version
+        from blackwell_lab.workload.public_metadata import (
+            render_tool_payload,
+            structured_evidence_workload,
+        )
+
+        if structured_evidence_workload(require_workload_version(workload_version)):
+            payload = render_tool_payload(self._scenario, name, payload)
         return ToolResult(tool=name, payload=payload, simulated_latency_ms=latency_ms)
 
     def consume_latency(self, name: str) -> float:

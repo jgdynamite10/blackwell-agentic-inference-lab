@@ -37,6 +37,10 @@ from blackwell_lab.cloud.matched_control import (
     CONTROL_KIND,
     P1_P2C_PAIR,
     W1_W2_PAIR,
+    W3_CONTROL_KIND,
+    W3_W4_PAIR,
+    W5_CONTROL_KIND,
+    W5_W6_PAIR,
     W_CONTROL_KIND,
     audit_matched_controls,
     authenticate_matched_development_control,
@@ -124,9 +128,21 @@ class TestCandidateTables:
 
     def test_workflow_pair_lives_in_its_own_tables(self):
         assert WORKFLOW_CANDIDATES == ("W1", "W2")
-        assert ALL_AUTHORIZED_CANDIDATES == ("C1", "C2", "P1", "P2", "P2C", "W1", "W2")
+        assert ALL_AUTHORIZED_CANDIDATES == (
+            "C1",
+            "C2",
+            "P1",
+            "P2",
+            "P2C",
+            "W1",
+            "W2",
+            "W3",
+            "W4",
+            "W5",
+            "W6",
+        )
         assert not set(WORKFLOW_CANDIDATES) & set(AUTHORIZED_CANDIDATES)
-        assert DEVELOPMENT_CONTROL_PAIRS == {"P2C": "P1", "W2": "W1"}
+        assert DEVELOPMENT_CONTROL_PAIRS == {"P2C": "P1", "W2": "W1", "W4": "W3", "W6": "W5"}
         for candidate in WORKFLOW_CANDIDATES:
             assert is_catalog_candidate(candidate)
             assert candidate_controller(candidate) == "workflow-controller-v1"
@@ -140,7 +156,7 @@ class TestCandidateTables:
 
     def test_workflow_identities_are_distinct_and_pinned(self):
         digests = {c: candidate_identity_digest(c) for c in ALL_AUTHORIZED_CANDIDATES}
-        assert len(set(digests.values())) == 7
+        assert len(set(digests.values())) == 11
         for candidate, digest in CA_CENTRAL_IDENTITY_DIGESTS.items():
             assert digests[candidate] == digest, candidate
         for candidate, digest in WORKFLOW_IDENTITY_DIGESTS.items():
@@ -181,10 +197,10 @@ class TestCandidateTables:
         assert len(spec["template_ids"]) == 6
 
     def test_unknown_candidate_messages_name_the_pair(self):
-        with pytest.raises(ConfigError, match="W1, or W2"):
-            frozen_candidate_fields("W3")
-        with pytest.raises(ConfigError, match="W1, or W2"):
-            candidate_controller("W3")
+        with pytest.raises(ConfigError, match="W5, or W6"):
+            frozen_candidate_fields("W7")
+        with pytest.raises(ConfigError, match="W5, or W6"):
+            candidate_controller("W7")
 
 
 class TestConfigs:
@@ -256,6 +272,23 @@ class TestConfigs:
             require_w_catalog_execution(
                 "W1", stage="holdout", template_ids=None, sealed_set=object(), sealed_tasks=None
             )
+        for candidate in ("W5", "W6"):
+            require_w_catalog_execution(
+                candidate,
+                stage="development",
+                template_ids=spec["template_ids"],
+                sealed_set=None,
+                sealed_tasks=None,
+            )
+            for blocked in ("holdout", "freeze"):
+                with pytest.raises(ConfigError, match="development catalog only"):
+                    require_w_catalog_execution(
+                        candidate,
+                        stage=blocked,
+                        template_ids=stage_spec(blocked)["template_ids"],
+                        sealed_set=None,
+                        sealed_tasks=None,
+                    )
 
     def test_development_control_section_is_pair_specific(self):
         config = qualification_config_dict("W2", "development")
@@ -296,12 +329,20 @@ class TestPairs:
         assert pair_for_treatment("W2") is W1_W2_PAIR
         assert pair_for_control("P1") is P1_P2C_PAIR
         assert pair_for_control("W1") is W1_W2_PAIR
-        for other in ("C1", "C2", "P2", "W3"):
+        for other in ("C1", "C2", "P2"):
             assert pair_for_treatment(other) is None and pair_for_control(other) is None
         assert P1_P2C_PAIR.kind == CONTROL_KIND == "matched-p1-development-control"
         assert W1_W2_PAIR.kind == W_CONTROL_KIND == "matched-w1-development-control"
+        assert W3_W4_PAIR.kind == W3_CONTROL_KIND == "matched-w3-development-control"
+        assert W5_W6_PAIR.kind == W5_CONTROL_KIND == "matched-w5-development-control"
         assert P1_P2C_PAIR.label_key == "p1_run_label"
         assert W1_W2_PAIR.label_key == "w1_run_label"
+        assert W3_W4_PAIR.label_key == "w3_run_label"
+        assert pair_for_treatment("W4") is W3_W4_PAIR
+        assert pair_for_control("W3") is W3_W4_PAIR
+        assert pair_for_treatment("W6") is W5_W6_PAIR
+        assert pair_for_control("W5") is W5_W6_PAIR
+        assert W5_W6_PAIR.label_key == "w5_run_label"
 
     def test_historical_messages_are_unchanged(self):
         assert (
@@ -416,9 +457,106 @@ class TestMatchedControlForTheWorkflowPair:
         from blackwell_lab.cloud.matched_control import _load_schema
 
         schema = _load_schema()
-        assert set(schema["properties"]["kind"]["enum"]) == {CONTROL_KIND, W_CONTROL_KIND}
-        assert set(schema["properties"]["candidate_id"]["enum"]) == {"P1", "W1"}
-        assert len(schema["oneOf"]) == 2
+        assert set(schema["properties"]["kind"]["enum"]) == {
+            CONTROL_KIND,
+            W_CONTROL_KIND,
+            W3_CONTROL_KIND,
+        }
+        assert set(schema["properties"]["candidate_id"]["enum"]) == {"P1", "W1", "W3"}
+        assert len(schema["oneOf"]) == 3
+        bindings = {
+            branch["properties"]["kind"]["const"]: branch["properties"]["candidate_id"]["const"]
+            for branch in schema["oneOf"]
+        }
+        assert bindings == {
+            CONTROL_KIND: "P1",
+            W_CONTROL_KIND: "W1",
+            W3_CONTROL_KIND: "W3",
+        }
+
+    def test_w3_control_authenticates_w4_and_refuses_cross_pair(self, tmp_path, monkeypatch):
+        import jsonschema
+
+        from blackwell_lab.cloud.matched_control import _load_schema
+
+        external = _external(tmp_path, monkeypatch)
+        config = qualification_config_dict("W4", "development")
+        section = install_verified_p1_development_control(
+            external,
+            config,
+            run_tag=RUN_TAG,
+            p1_run_label="qual-w3",
+            canonical_commit=COMMIT,
+            pair=W3_W4_PAIR,
+        )
+        assert set(section) == set(W3_W4_PAIR.section_keys)
+        record_path = control_record_path(external, "qual-w3", pair=W3_W4_PAIR)
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        jsonschema.validate(record, _load_schema())
+        assert record["kind"] == W3_CONTROL_KIND
+        assert record["candidate_id"] == "W3"
+        assert record["workload_version"] == "2.7.0"
+        assert record["identity_sha256"] == candidate_identity_digest("W3")
+        block = authenticate_matched_development_control(
+            config,
+            results_dir=external,
+            run_tag=RUN_TAG,
+            p2c_run_label="qual-w4",
+            pair=W3_W4_PAIR,
+        )
+        assert block["kind"] == W3_CONTROL_KIND
+        assert block["w3_run_label"] == "qual-w3"
+        assert block["w3_identity_sha256"] == candidate_identity_digest("W3")
+        assert "w1_run_label" not in block
+        assert "p1_run_label" not in block
+        assert audit_matched_controls(external) == []
+
+        payload = record_path.read_bytes()
+        w1_copy = control_record_path(external, "qual-w3", pair=W1_W2_PAIR)
+        w1_copy.write_bytes(payload)
+        w2 = qualification_config_dict("W2", "development")
+        w2["development_control"] = {
+            **{key: value for key, value in section.items() if key != "w3_run_label"},
+            "w1_run_label": "qual-w3",
+            "control_record_sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        with pytest.raises(QualificationError, match="malformed"):
+            authenticate_matched_development_control(
+                w2,
+                results_dir=external,
+                run_tag=RUN_TAG,
+                p2c_run_label="qual-w2",
+                pair=W1_W2_PAIR,
+            )
+
+    def test_w4_does_not_authenticate_a_w1_control(self, tmp_path, monkeypatch):
+        external = _external(tmp_path, monkeypatch)
+        w2 = qualification_config_dict("W2", "development")
+        section = install_verified_p1_development_control(
+            external,
+            w2,
+            run_tag=RUN_TAG,
+            p1_run_label="qual-w1",
+            canonical_commit=COMMIT,
+            pair=W1_W2_PAIR,
+        )
+        payload = control_record_path(external, "qual-w1", pair=W1_W2_PAIR).read_bytes()
+        w3_copy = control_record_path(external, "qual-w1", pair=W3_W4_PAIR)
+        w3_copy.write_bytes(payload)
+        w4 = qualification_config_dict("W4", "development")
+        w4["development_control"] = {
+            **{key: value for key, value in section.items() if key != "w1_run_label"},
+            "w3_run_label": "qual-w1",
+            "control_record_sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        with pytest.raises(QualificationError, match="malformed"):
+            authenticate_matched_development_control(
+                w4,
+                results_dir=external,
+                run_tag=RUN_TAG,
+                p2c_run_label="qual-w4",
+                pair=W3_W4_PAIR,
+            )
 
 
 class TestCli:

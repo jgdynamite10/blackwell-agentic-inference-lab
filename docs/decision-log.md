@@ -2079,3 +2079,147 @@ matching the region, or reusing the aborted run tag, is not enough.
 Tested with synthetic fixtures only. No provider, credential, inference
 endpoint, download, private result, custody package, publication system,
 plan, apply, or the secondary repository was accessed.
+
+## 2026-10-08 — D-0033: Diagnosis-relevant evidence successor W3/W4
+
+**Decision.** Add a versioned successor candidate pair. **W3** (workload
+2.7.0, control) and **W4** (workload 2.7.1, `evidence-refs` treatment)
+bind `workflow-controller-v2`. W1 and W2 stay on `workflow-controller-v1`
+with workloads 2.6.0 and 2.6.1. Their identities are unchanged. W3 is the
+same-session development control for W4. That pair does not authenticate
+across generations: a W1 control cannot bind W4, and a W3 control cannot
+bind W2.
+
+The successor keeps the usable-log and valid-runbook requirements. It also
+requires at least one usable direct log observation relevant to the
+diagnosis selected in `recommend_remediation`. Relevance is a generic
+category named by that diagnosis id, or a token of that id that appears
+in a returned log line. Short technical tokens and acronyms in the
+agent-visible diagnosis id count. Ordinary stopwords and pure numbers do
+not. A retrieved runbook's categories are not copied onto every published
+diagnosis candidate, so a topical log does not authorize an unsupported
+distractor. W4's `evidence_refs` must include one such log. Runbook and
+recent-change observations stay ineligible as direct evidence. A repeated
+equivalent zero-match search receives a typed correctable rejection that
+tells the model to change the query, source, or diagnostic hypothesis.
+`max_turns` stays 12, one native call per turn, `RETRIES` stays 0, and the
+remaining-turn warning stays at three. If relevant evidence is never
+found, the terminal is rejected and budget exhaustion is
+`workflow_requirements_unmet`.
+
+The matched-control schema admits a genuine W3 record
+(`matched-w3-development-control`, candidate `W3`) so W4 can authenticate
+it. P1 and W1 records stay valid. A W3 record does not authenticate W2,
+and a W1 record does not authenticate W4.
+
+A ten-task development canary passed 3 of 10. Six controller-accepted
+terminals missed diagnosis-relevant evidence, and one task exhausted the
+turn budget with no infrastructure, endpoint, timeout, or model-serving
+failure. generic log sufficiency did not guarantee diagnosis-relevant
+evidence.
+
+The evaluator, the 0.40 floor, the ten-task canary schedule, the measured
+canary seed `20261007`, the official 20-task schedule, holdout protection,
+task fixtures, and the `ca-central` region lock are unchanged. D-0027
+through D-0032 are not rewritten.
+
+Identity digests below were recomputed with `candidate_identity_digest`.
+The 2026-10-09 correction of the W3 schema admission and the relevance
+predicate recomputed the same four digests: the identity serialization is
+the frozen candidate fields, not the relevance predicate or the
+matched-control schema. The D-0032 W1 and W2 cells stay the current
+contract for those candidates.
+
+| Candidate | D-0033 (`ca-central`, recomputed) |
+| --- | --- |
+| W1 | `2b7c5745084f4459af66e58fa5701d5c513108a9536385acbed00722c02e68cf` |
+| W2 | `06d673972a696efcddc9ce00d6c9f6a15a032e0c516d4dc8b54f01dbba0917a2` |
+| W3 | `bdb9947bf5c0934833d077536ae85740857c36bfd08d88f7fee8b7b54f0f857e` |
+| W4 | `66df267f60f062f867678331fc466305cde5432bc9cba861ebe90e8cef108414` |
+
+**This decision does not authorize** a canary rerun, qualification,
+holdout, freeze, provisioning, downloads, or live execution. Those still
+require their own decisions and exact approval phrases.
+
+**Rationale.** The frozen controller treated any successful log observation
+as sufficient for the selected diagnosis. A separate controller version is
+what keeps that historical behavior attached to W1 and W2. Tested with
+synthetic fixtures only. No provider, credential, inference endpoint,
+download, private result, custody package, publication system, plan,
+apply, destroy, or the secondary repository was accessed.
+
+## 2026-10-09 — D-0034: Structured public evidence for W5/W6
+
+**Decision.** Add a versioned pair on top of the pinned D-0033 head.
+**W5** (workload 2.8.0, control) and **W6** (workload 2.8.1,
+`evidence-refs` treatment) bind `workflow-controller-v3` and public
+evidence schema 1.0.0. The controller accepts a terminal only when the
+selected hypothesis's declared `support_all_of` pattern is covered by
+eligible earlier log and health findings. Coverage is exact on witness
+type, role, subject, scope, condition name, condition state, affirmed
+polarity, and asserted certainty. Mentions, symptoms, and context cannot
+be the whole pattern. A covered pattern is not a proof of unique cause.
+The unchanged evaluator still decides diagnosis correctness, remediation
+correctness, and every frozen evidence predicate.
+
+W6 `evidence_refs` must cite every required witness. Uncited observations
+still count for contradictions. Metrics, runbooks, and change records
+cannot replace a required log or health witness. The GPU hypothesis still
+says contention. Its support pattern requires uncapped admission of
+`embed-refresh-44` and a saturated KV-cache allocator on the same returned
+host. The upstream hypothesis requires returned `heron-auth` API status
+`unhealthy` and a log finding that names that service as an upstream.
+
+W5 mints only `matched-w5-development-control` (schema 2.0.0) and
+authenticates only W6. A canary cannot mint it. W1 cannot authenticate W4
+or W6. W3 cannot authenticate W2 or W6. W5 cannot authenticate W2 or W4.
+Historical prompts, tool payloads, and controller behavior for W1-W4 stay
+on their existing versions. The W5/W6 system prompt is byte-identical to
+`SYSTEM_PROMPT_V241`. The generic structured-field explanation is on the
+task prompt. The controller hash covers observation eligibility, and the
+renderer hash covers task rendering and tool-payload dispatch. Identity
+digests below were recomputed with `candidate_identity_digest` after that
+review correction. The Python 3.12.2 full suite passed at
+`bc58cc87dd26e0443bd9973810f3eb7bf11fddd3` (ended 2026-10-09T17:45:15Z) and
+the Python 3.10.19 full suite passed at the same commit (ended
+2026-10-09T18:27:01Z). Those suites predate this correction. The D-0033
+W1-W4 cells stay the current contract for those candidates.
+
+| Candidate | D-0034 (`ca-central`, recomputed) |
+| --- | --- |
+| W1 | `2b7c5745084f4459af66e58fa5701d5c513108a9536385acbed00722c02e68cf` |
+| W2 | `06d673972a696efcddc9ce00d6c9f6a15a032e0c516d4dc8b54f01dbba0917a2` |
+| W3 | `bdb9947bf5c0934833d077536ae85740857c36bfd08d88f7fee8b7b54f0f857e` |
+| W4 | `66df267f60f062f867678331fc466305cde5432bc9cba861ebe90e8cef108414` |
+| W5 | `4aaec2742359ce7d35f04ed5b167132e68783dc073b3d8516c30851a8f7e5f27` |
+| W6 | `cbff1ba63b6f43e2b4b672ee5559b95ebcdb464ab9ec6ea1b6b2f288a32c541a` |
+
+The shared evidence contract records
+`evidence_schema_sha256=4ae2ad3d28b806d20c5452cfd306cca8baca3706d3bf63962f952e4bca90f8ed`,
+`public_metadata_sha256=78160f7f0b8d8f96bc20248d742e4e156b4f3934fd60fd5bbb21ed898ba208cf`,
+`normalization_policy_sha256=d847fcceddfa29fe83ac53e6e74839644ae123f24a4cd0cad8d70c2869b57d7b`,
+`controller_sha256=1b0ebd2deff2b91e2f87f1dfee2e4e9ff59b6cec5a669dda65ce8ec1999fa97e`,
+and
+`surface_renderer_sha256=c966ae7652105128a2e0355bd2d6774d8c1222cc7cb33440cb85513e772619db`.
+Both candidates record `system_prompt_sha256=37b3a4fb615dc21c8d39a5301dc4318870fea3498fbed196c50bfcbe67de1bd3`.
+Manifests for these workloads set
+`validation_scope=public-catalog-pre-exposed-holdout` and
+`blind_generalization_evidence=false`.
+
+Holdout and freeze stages are not executable on W5/W6 in this revision.
+The development overlay does not annotate holdout templates, and the
+implementation refuses those stages instead of inventing findings. The
+scheduled holdout and its 0.50 floor remain defined.
+
+**This decision does not authorize** a canary, qualification, holdout,
+freeze, provisioning, downloads, publication, or live execution.
+
+**Rationale.** Workload 2.7.x treats a shared token or category as support.
+The public log fields cannot separate a mention from a finding without new
+metadata. Revision 0.2 publishes that metadata for the development catalog
+and leaves diagnosis correctness with the evaluator. Tested with synthetic
+fixtures only. No provider, credential, inference endpoint, download,
+private result, custody package, publication system, plan, apply, destroy,
+or the secondary repository was accessed. Results that predate this change
+are the W1 canary at commit `47b6d742` and the D-0033 implementation at
+`8888927`; neither used this overlay.
