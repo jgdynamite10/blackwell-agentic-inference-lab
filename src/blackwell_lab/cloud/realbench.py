@@ -196,20 +196,24 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
     if spec.artifact_family == "qualified-baseline-runs":
         binding = spec.study_entry_binding
         if (
-            spec.workload_version != "2.9.0"
-            or not isinstance(binding, dict)
-            or binding.get("candidate_id") != "W7"
+            not isinstance(binding, dict)
             or binding.get("study_entry_passed") is not True
+            or {
+                "W7": "2.9.0",
+                "W8": "2.10.0",
+            }.get(binding.get("candidate_id"))
+            != spec.workload_version
         ):
-            raise ConfigError("qualified baseline requires a verified W7 study-entry binding")
+            raise ConfigError("qualified baseline requires a verified W7 or W8 study-entry binding")
         from blackwell_lab.cloud.qualified_mvl import validate_study_entry_binding
 
         validate_study_entry_binding(binding)
         from blackwell_lab.cloud.qualification import frozen_candidate_fields
 
-        expected = frozen_candidate_fields("W7")["generation"]
+        candidate_id = str(binding["candidate_id"])
+        expected = frozen_candidate_fields(candidate_id)["generation"]
         if any(getattr(spec.generation, key) != value for key, value in expected.items()):
-            raise ConfigError("qualified baseline generation must match the qualified W7 settings")
+            raise ConfigError("qualified baseline generation must match the qualified candidate")
     elif spec.study_entry_binding is not None:
         raise ConfigError("study-entry binding is valid only for qualified baseline artifacts")
     validate_runner_config(

@@ -11,9 +11,10 @@ p50/p95 remain primary; p99 stays exploratory and subject to existing
 sample limits. Do not mix warm-up, qualification, or earlier diagnostic
 observations into baseline summaries.
 
-D-0035's `qualified-baseline` binds standalone W7/workload 2.9.0 and its
-version-2.0.0 public evidence contract to a verified successful freeze from
-the same source/resource session. W7 retains temperature 0.2/top-p 0.95,
+D-0035's `qualified-baseline` binds a verified successful freeze of
+standalone W7/workload 2.9.0 or, under D-0037, W8/workload 2.10.0 and its
+version-2.0.0 public evidence contract from the same source/resource
+session. W7 and W8 retain temperature 0.2/top-p 0.95,
 frozen model/serving pins, BF16, and `ca-central`; it does not reuse
 historical MVL-F/workload-2.3.0 qualification. Final study entry is 0.60
 aggregate (120 of 200; D-0036), 0.40 each scenario, and all structural

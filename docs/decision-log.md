@@ -2338,3 +2338,29 @@ study entry. This revision does not reclassify that receipt, its verdict,
 or its artifacts. A later freeze is a new attempt under D-0036. The
 qualified baseline still requires a receipt that passes the gate in force
 when it is re-checked, including every-scenario 0.40.
+
+## 2026-10-13 — D-0037: Successor W8 adds literal search tokens
+
+**Decision.** Add standalone candidate **W8** on workload **2.10.0**. It
+uses the same controller, evidence contract, catalog, schedules, floors,
+and generation settings as W7. The catalog agent keeps the 2.4.1 system
+prompt and appends one sentence that names the literal `search_logs` tokens
+the public evaluator already accepts: `servfail`, `search domain`,
+`readiness`, `migration`, `startup`, and `dep-8102`. The sentence names no
+diagnosis, remediation, or scenario. W7 still sends `SYSTEM_PROMPT_V241`.
+The sentence lives in the catalog agent so `agent.py` and the W5/W6
+renderer closure stay byte-identical and those identity pins do not move.
+
+**Rationale.** The owner directed this successor on 2026-10-13, before any
+new GPU session. Private qualification evidence showed log searches that
+omitted a literal token the evaluator requires. This guidance applies only
+to a later W8 run.
+
+**Results that predate the change.** The live W7 freeze from run
+`w7-akamai-20261012a` remains a failed study entry under the rule in force
+when it ran. D-0037 does not reclassify that receipt. W8 qualification and
+any qualified baseline still require their own passing freeze, including
+0.60 overall (120 of 200), 0.40 in every scenario, and the structural gates.
+Shared renderer-closure files change the current W7 source identity hash;
+the saved receipt stays bound to the commit that produced it.
+

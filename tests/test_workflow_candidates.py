@@ -141,6 +141,7 @@ class TestCandidateTables:
             "W5",
             "W6",
             "W7",
+            "W8",
         )
         assert not set(WORKFLOW_CANDIDATES) & set(AUTHORIZED_CANDIDATES)
         assert DEVELOPMENT_CONTROL_PAIRS == {"P2C": "P1", "W2": "W1", "W4": "W3", "W6": "W5"}
@@ -157,7 +158,7 @@ class TestCandidateTables:
 
     def test_workflow_identities_are_distinct_and_pinned(self):
         digests = {c: candidate_identity_digest(c) for c in ALL_AUTHORIZED_CANDIDATES}
-        assert len(set(digests.values())) == 12
+        assert len(set(digests.values())) == len(ALL_AUTHORIZED_CANDIDATES)
         for candidate, digest in CA_CENTRAL_IDENTITY_DIGESTS.items():
             assert digests[candidate] == digest, candidate
         for candidate, digest in WORKFLOW_IDENTITY_DIGESTS.items():
@@ -198,10 +199,10 @@ class TestCandidateTables:
         assert len(spec["template_ids"]) == 6
 
     def test_unknown_candidate_messages_name_the_pair(self):
-        with pytest.raises(ConfigError, match="W6, or W7"):
-            frozen_candidate_fields("W8")
-        with pytest.raises(ConfigError, match="W6, or W7"):
-            candidate_controller("W8")
+        with pytest.raises(ConfigError, match="W7, or W8"):
+            frozen_candidate_fields("W9")
+        with pytest.raises(ConfigError, match="W7, or W8"):
+            candidate_controller("W9")
 
 
 class TestConfigs:

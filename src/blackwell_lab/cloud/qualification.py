@@ -106,8 +106,10 @@ CANDIDATE_W5 = "W5"
 CANDIDATE_W6 = "W6"
 STRUCTURED_EVIDENCE_CANDIDATES = (CANDIDATE_W5, CANDIDATE_W6)
 CANDIDATE_W7 = "W7"
-CATALOG_EVIDENCE_CANDIDATES = (CANDIDATE_W7,)
+CANDIDATE_W8 = "W8"
+CATALOG_EVIDENCE_CANDIDATES = (CANDIDATE_W7, CANDIDATE_W8)
 W7_WORKLOAD_VERSION = "2.9.0"
+W8_WORKLOAD_VERSION = "2.10.0"
 #: Every candidate any qualification command may name.
 ALL_AUTHORIZED_CANDIDATES = (
     *AUTHORIZED_CANDIDATES,
@@ -378,7 +380,7 @@ DEVELOPMENT_CONTROL_PAIRS: dict[str, str] = {
     CANDIDATE_W6: CANDIDATE_W5,
 }
 UNKNOWN_CANDIDATE_MESSAGE = (
-    "qualification candidate must be C1, C2, P1, P2, P2C, W1, W2, W3, W4, W5, W6, or W7"
+    "qualification candidate must be C1, C2, P1, P2, P2C, W1, W2, W3, W4, W5, W6, W7, or W8"
 )
 _UNKNOWN_CANDIDATE = UNKNOWN_CANDIDATE_MESSAGE
 
@@ -460,6 +462,7 @@ def candidate_workload_version(candidate_id: str) -> str:
             **SUCCESSOR_CANDIDATE_WORKLOAD_VERSIONS,
             **STRUCTURED_CANDIDATE_WORKLOAD_VERSIONS,
             CANDIDATE_W7: W7_WORKLOAD_VERSION,
+            CANDIDATE_W8: W8_WORKLOAD_VERSION,
         }[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
@@ -478,6 +481,7 @@ def candidate_controller(candidate_id: str) -> str | None:
             **SUCCESSOR_CANDIDATE_CONTROLLERS,
             **STRUCTURED_CANDIDATE_CONTROLLERS,
             CANDIDATE_W7: CONTROLLER_WORKFLOW_V3,
+            CANDIDATE_W8: CONTROLLER_WORKFLOW_V3,
         }[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
@@ -567,6 +571,24 @@ def _structured_identity_fields(candidate_id: str) -> dict[str, Any]:
         return {
             "evidence_contract": evidence_contract(),
             "system_prompt_sha256": hashlib.sha256(SYSTEM_PROMPT_V241.encode()).hexdigest(),
+            "native_tool_contract_sha256": hashlib.sha256(tools).hexdigest(),
+        }
+    if candidate_id == CANDIDATE_W8:
+        from blackwell_lab.workload.agent import SYSTEM_PROMPT_V241
+        from blackwell_lab.workload.catalog_agent import SEARCH_GUIDANCE_V210
+        from blackwell_lab.workload.native_tools import openai_tool_definitions
+        from blackwell_lab.workload.public_metadata.catalog_v2 import evidence_contract
+
+        prompt = f"{SYSTEM_PROMPT_V241} {SEARCH_GUIDANCE_V210}"
+        tools = json.dumps(
+            openai_tool_definitions(W8_WORKLOAD_VERSION),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return {
+            "evidence_contract": evidence_contract(),
+            "system_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
             "native_tool_contract_sha256": hashlib.sha256(tools).hexdigest(),
         }
     if candidate_id not in STRUCTURED_EVIDENCE_CANDIDATES:
@@ -1136,7 +1158,7 @@ def require_w_config(config: dict, *, candidate_id: str) -> None:
     for key in ("system_prompt", "prompt", "evaluator_version", "evaluator", "max_turns"):
         if key in config or key in generation:
             raise ConfigError(f"qualify-agent {candidate_id} does not accept a {key} override")
-    if candidate_id == CANDIDATE_W7:
+    if candidate_id in CATALOG_EVIDENCE_CANDIDATES:
         require_catalog_contract()
         from blackwell_lab.workload.public_metadata.catalog_v2 import require_evidence_contract
 
@@ -1816,10 +1838,10 @@ def sanitized_receipt(
             "matched-control provenance is valid only for P2C or W2 development"
         )
     structured_binding: dict[str, Any] = {}
-    if candidate_id == CANDIDATE_W7:
+    if candidate_id in CATALOG_EVIDENCE_CANDIDATES:
         from blackwell_lab.workload.catalog_runtime import manifest_workload_binding
 
-        structured_binding = manifest_workload_binding(W7_WORKLOAD_VERSION)
+        structured_binding = manifest_workload_binding(candidate_workload_version(candidate_id))
     if candidate_id in STRUCTURED_EVIDENCE_CANDIDATES:
         from blackwell_lab.workload.public_metadata import VALIDATION_SCOPE, evidence_contract
 

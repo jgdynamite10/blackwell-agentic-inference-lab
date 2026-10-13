@@ -1502,7 +1502,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
                 require_manifest_provenance(manifest, sealed.binding)
         metrics_factory = (
             qualification.compute_catalog_metrics
-            if candidate_id == qualification.CANDIDATE_W7
+            if candidate_id in qualification.CATALOG_EVIDENCE_CANDIDATES
             else qualification.compute_qualification_metrics
         )
         metrics = metrics_factory(
@@ -1531,7 +1531,7 @@ def cmd_qualify_agent(args: argparse.Namespace) -> int:
         )
         from blackwell_lab.cloud.artifacts import write_private_json
 
-        if candidate_id == qualification.CANDIDATE_W7:
+        if candidate_id in qualification.CATALOG_EVIDENCE_CANDIDATES:
             from blackwell_lab.cloud.matched_control import resource_identity_sha256
 
             receipt["artifact_sha256"] = {
@@ -1677,7 +1677,7 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
             qualification.require_w_pair_contract()
         elif candidate_id in qualification.SUCCESSOR_WORKFLOW_CANDIDATES:
             qualification.require_successor_pair_contract()
-        elif candidate_id == qualification.CANDIDATE_W7:
+        elif candidate_id in qualification.CATALOG_EVIDENCE_CANDIDATES:
             qualification.require_catalog_contract()
             from blackwell_lab.cloud.structured_canary import preflight_canary_execution
 
@@ -1887,7 +1887,7 @@ def cmd_canary_agent(args: argparse.Namespace) -> int:
         )
         if candidate_id in (
             *qualification.STRUCTURED_EVIDENCE_CANDIDATES,
-            qualification.CANDIDATE_W7,
+            *qualification.CATALOG_EVIDENCE_CANDIDATES,
         ):
             from blackwell_lab.cloud.structured_canary import enrich_canary_receipt
 
@@ -2172,7 +2172,7 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7"),
+        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8"),
         help=(
             "C1 (temperature 1.0, workload 2.4.0), "
             "C2 (temperature 0.2, workload 2.4.0), "
@@ -2189,7 +2189,9 @@ def build_parser() -> argparse.ArgumentParser:
             "W4 (workload 2.7.1, workflow-controller-v2 with evidence-refs that "
             "must cite a diagnosis-relevant log; W3 is its same-session control), "
             "W5/W6 (development-only structured evidence), or W7 (workload "
-            "2.9.0, complete public catalog, unchanged v3 support matcher)."
+            "2.9.0, complete public catalog, unchanged v3 support matcher), "
+            "or W8 (workload 2.10.0, the same catalog with literal search "
+            "tokens in the system prompt; decision D-0037)."
         ),
     )
     qualify_parser.add_argument(
@@ -2250,7 +2252,7 @@ def build_parser() -> argparse.ArgumentParser:
     canary_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7"),
+        choices=("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8"),
         help="Public-catalog candidate to canary (P2 is sealed and refused).",
     )
     canary_parser.add_argument(
@@ -2283,7 +2285,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7"),
+        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8"),
     )
     analyze_parser.add_argument(
         "--stage", default="development", choices=("development", "holdout", "freeze")

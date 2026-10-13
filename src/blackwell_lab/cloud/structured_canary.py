@@ -42,12 +42,12 @@ def preflight_canary_execution(config: dict, *, candidate_id: str, run_label: st
     Uses the approved config pins. It does not read a ledger, contact an
     endpoint, or accept holdout templates.
     """
-    from blackwell_lab.cloud.qualification import CANDIDATE_W7
+    from blackwell_lab.cloud.qualification import CATALOG_EVIDENCE_CANDIDATES
     from blackwell_lab.cloud.realbench import RealRunSpec, _validate_spec
     from blackwell_lab.workload.model_client import GenerationSettings
     from blackwell_lab.workload.public_metadata import render_tool_payload
 
-    if candidate_id == CANDIDATE_W7:
+    if candidate_id in CATALOG_EVIDENCE_CANDIDATES:
         from blackwell_lab.workload.public_metadata.catalog_v2 import render_tool_payload
     from blackwell_lab.workload.scenarios import catalog as scenario_catalog
 
@@ -85,7 +85,7 @@ def preflight_canary_execution(config: dict, *, candidate_id: str, run_label: st
     )
     _validate_spec(run_spec)
     executed = require_measured_schedule(run_spec)
-    if candidate_id in (*STRUCTURED_EVIDENCE_CANDIDATES, CANDIDATE_W7):
+    if candidate_id in (*STRUCTURED_EVIDENCE_CANDIDATES, *CATALOG_EVIDENCE_CANDIDATES):
         if candidate_id in STRUCTURED_EVIDENCE_CANDIDATES:
             require_structured_canary_metadata(tuple(run_spec.template_ids or ()))
         for instance in executed:
@@ -107,7 +107,7 @@ def enrich_canary_receipt(receipt: dict) -> dict:
     """
     from blackwell_lab.workload.public_metadata import VALIDATION_SCOPE, evidence_contract
 
-    if receipt.get("candidate_id") == "W7":
+    if receipt.get("candidate_id") in {"W7", "W8"}:
         from blackwell_lab.workload.public_metadata.catalog_v2 import evidence_contract
 
     enriched = dict(receipt)
