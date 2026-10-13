@@ -1,8 +1,9 @@
 # D-0035: Complete-catalog qualification and the Akamai baseline
 
-Status: offline implementation for owner review. No W7 qualification or
-qualified baseline has been executed. Passing source tests does not establish
-that the model will pass the live study-entry gate.
+Status: study-entry aggregate is 120 of 200 (0.60) under D-0036. A live
+W7 freeze preserved before that decision remains a failed study entry
+under the prior 0.70 rule. No qualified baseline has been executed.
+Passing source tests does not establish that a later freeze will pass.
 
 ## The versioned change
 
@@ -15,7 +16,9 @@ metadata blocks retain their previous compiled content; the new coverage
 does not tune those claims from the official W5/W6 failures.
 W7 repairs coverage and runner bindings with the same agent policy; it
 does not establish a model-quality gain. Live freeze may still fail the
-0.70 aggregate or 0.40 per-scenario floor.
+0.60 aggregate (120 of 200) or 0.40 per-scenario floor. Decision D-0036
+lowered only the aggregate count. A live freeze preserved before that
+decision remains a failed study entry under the 0.70 rule then in force.
 
 | Binding | W7 contract |
 | --- | --- |
@@ -90,7 +93,7 @@ controlled-resource comparison, and Dynamo remain later work.
 | Diagnostic canary | 10 development-only tasks; schedule seed `20261007` | At least 4 passes; diagnostic only |
 | Development | 20 tasks; no warm-up | At least 8 passes, quality 0.40 |
 | Holdout-labelled public split | 20 tasks; no warm-up | At least 10 passes, quality 0.50 |
-| Freeze / study entry | 200 balanced measured tasks plus one separate 200-task warm-up | At least 140 measured passes, quality 0.70 overall, at least 0.40 each scenario, and all structural gates |
+| Freeze / study entry | 200 balanced measured tasks plus one separate 200-task warm-up | At least 120 measured passes, quality 0.60 overall, at least 0.40 each scenario, and all structural gates |
 | Qualified baseline | Interactive/1, batch-heavy/4, batch-heavy/8 | Each cell: one 200-task warm-up plus three measured repetitions of 200; 1,800 measured observations total |
 | Session closure | Immutable external archive and exact recorded resources | Artifacts verified, deletion confirmed, orphan report clear |
 

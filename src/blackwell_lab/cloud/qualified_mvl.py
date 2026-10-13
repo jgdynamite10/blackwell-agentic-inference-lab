@@ -283,7 +283,7 @@ def authenticate_freeze(config: dict, *, results_dir: Path, run_tag: str, ledger
     )
     gates = qualification.evaluate_stage_thresholds("freeze", metrics)
     if gates["stopped"] or receipt.get("gates") != gates:
-        raise MvlError("freeze qualification did not pass the unchanged study-entry gate")
+        raise MvlError("freeze qualification did not pass the study-entry gate")
     duration_s = max((row["ended_offset_ms"] for row in measured["observations"]), default=0) / 1000
     return {
         "candidate_id": "W7",
