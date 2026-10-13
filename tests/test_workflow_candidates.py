@@ -142,6 +142,7 @@ class TestCandidateTables:
             "W6",
             "W7",
             "W8",
+            "W9",
         )
         assert not set(WORKFLOW_CANDIDATES) & set(AUTHORIZED_CANDIDATES)
         assert DEVELOPMENT_CONTROL_PAIRS == {"P2C": "P1", "W2": "W1", "W4": "W3", "W6": "W5"}
@@ -199,10 +200,10 @@ class TestCandidateTables:
         assert len(spec["template_ids"]) == 6
 
     def test_unknown_candidate_messages_name_the_pair(self):
-        with pytest.raises(ConfigError, match="W7, or W8"):
-            frozen_candidate_fields("W9")
-        with pytest.raises(ConfigError, match="W7, or W8"):
-            candidate_controller("W9")
+        with pytest.raises(ConfigError, match="W8, or W9"):
+            frozen_candidate_fields("W10")
+        with pytest.raises(ConfigError, match="W8, or W9"):
+            candidate_controller("W10")
 
 
 class TestConfigs:

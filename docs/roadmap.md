@@ -5,10 +5,11 @@
 The immediate deliverable is one **qualified Akamai provider-native
 baseline**, not completion of the entire roadmap. D-0035 adds standalone
 W7 (workload 2.9.0), complete public-catalog evidence coverage, and
-`qualified-baseline`, requiring a verified same-session successful W7 or
-W8 freeze before measurement. Decision D-0037 adds W8 (workload 2.10.0)
+`qualified-baseline`, requiring a verified same-session successful W7, W8, or
+W9 freeze before measurement. Decision D-0037 adds W8 (workload 2.10.0)
 with the public evaluator's literal search tokens in its catalog-agent
-guidance. W1–W6 and historical MVL-F stay frozen;
+guidance. Decision D-0038 adds W9 (workload 2.11.0), which keeps that
+guidance and requires exactly one native tool call on every turn. W1–W6 and historical MVL-F stay frozen;
 W5/W6 remain development-only. This is public-catalog evaluation with
 `blind_generalization_evidence=false`, not blind holdout evidence.
 
@@ -26,7 +27,11 @@ and the new renderer's cached schema validation. Historical profiles and
 data stay unchanged. Coverage repair does not prove live quality will
 meet study entry. Decision D-0037 adds successor W8 (workload 2.10.0),
 whose system prompt also names the public evaluator's literal search
-tokens. The saved W7 freeze remains a failed study entry.
+tokens. The saved W7 freeze remains a failed study entry. The saved W8
+freeze also remains a failed study entry. Decision D-0038 adds successor
+W9 (workload 2.11.0). Its system prompt keeps the W8 search tokens and
+adds one sentence requiring exactly one native tool call per turn. The
+0.99 native-call floor is unchanged.
 
 Work proceeds phase by phase. **Each phase begins only after the project owner
 explicitly authorizes it, and work stops at the end of the currently

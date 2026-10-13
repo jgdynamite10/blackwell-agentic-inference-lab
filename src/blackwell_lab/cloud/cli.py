@@ -2150,7 +2150,8 @@ def build_parser() -> argparse.ArgumentParser:
     mvl_parser.add_argument("--approve", help="The exact MVL approval phrase.")
 
     qualified_parser = sub.add_parser(
-        "qualified-baseline", help="Qualification-bound W7 Akamai baseline (three cells)."
+        "qualified-baseline",
+        help="Qualification-bound W7, W8, or W9 Akamai baseline (three cells).",
     )
     qualified_parser.add_argument("--run-tag", required=True)
     qualified_parser.add_argument("--run-label", required=True)
@@ -2172,7 +2173,22 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8"),
+        choices=(
+            "C1",
+            "C2",
+            "P1",
+            "P2",
+            "P2C",
+            "W1",
+            "W2",
+            "W3",
+            "W4",
+            "W5",
+            "W6",
+            "W7",
+            "W8",
+            "W9",
+        ),
         help=(
             "C1 (temperature 1.0, workload 2.4.0), "
             "C2 (temperature 0.2, workload 2.4.0), "
@@ -2191,7 +2207,9 @@ def build_parser() -> argparse.ArgumentParser:
             "W5/W6 (development-only structured evidence), or W7 (workload "
             "2.9.0, complete public catalog, unchanged v3 support matcher), "
             "or W8 (workload 2.10.0, the same catalog with literal search "
-            "tokens in the system prompt; decision D-0037)."
+            "tokens in the system prompt; decision D-0037), "
+            "or W9 (workload 2.11.0, the W8 prompt plus one-native-call "
+            "guidance; decision D-0038)."
         ),
     )
     qualify_parser.add_argument(
@@ -2252,7 +2270,21 @@ def build_parser() -> argparse.ArgumentParser:
     canary_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8"),
+        choices=(
+            "C1",
+            "C2",
+            "P1",
+            "P2C",
+            "W1",
+            "W2",
+            "W3",
+            "W4",
+            "W5",
+            "W6",
+            "W7",
+            "W8",
+            "W9",
+        ),
         help="Public-catalog candidate to canary (P2 is sealed and refused).",
     )
     canary_parser.add_argument(
@@ -2285,7 +2317,22 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_parser.add_argument(
         "--candidate",
         required=True,
-        choices=("C1", "C2", "P1", "P2", "P2C", "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8"),
+        choices=(
+            "C1",
+            "C2",
+            "P1",
+            "P2",
+            "P2C",
+            "W1",
+            "W2",
+            "W3",
+            "W4",
+            "W5",
+            "W6",
+            "W7",
+            "W8",
+            "W9",
+        ),
     )
     analyze_parser.add_argument(
         "--stage", default="development", choices=("development", "holdout", "freeze")
