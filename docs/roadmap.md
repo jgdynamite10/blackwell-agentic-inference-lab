@@ -5,8 +5,10 @@
 The immediate deliverable is one **qualified Akamai provider-native
 baseline**, not completion of the entire roadmap. D-0035 adds standalone
 W7 (workload 2.9.0), complete public-catalog evidence coverage, and
-`qualified-baseline`, requiring a verified same-session successful W7
-freeze before measurement. W1–W6 and historical MVL-F stay frozen;
+`qualified-baseline`, requiring a verified same-session successful W7 or
+W8 freeze before measurement. Decision D-0037 adds W8 (workload 2.10.0)
+with the public evaluator's literal search tokens in its catalog-agent
+guidance. W1–W6 and historical MVL-F stay frozen;
 W5/W6 remain development-only. This is public-catalog evaluation with
 `blind_generalization_evidence=false`, not blind holdout evidence.
 
@@ -22,7 +24,9 @@ broader historical scope.
 The opt-in W7 measurement instrument uses 1,024 tokens for both profiles
 and the new renderer's cached schema validation. Historical profiles and
 data stay unchanged. Coverage repair does not prove live quality will
-meet study entry.
+meet study entry. Decision D-0037 adds successor W8 (workload 2.10.0),
+whose system prompt also names the public evaluator's literal search
+tokens. The saved W7 freeze remains a failed study entry.
 
 Work proceeds phase by phase. **Each phase begins only after the project owner
 explicitly authorizes it, and work stops at the end of the currently

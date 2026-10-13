@@ -125,7 +125,10 @@ def _invoke(config, ledger, tmp_path, monkeypatch, *, validate_only, expect_priv
         config=config_path,
         validate_only=validate_only,
         approve=qualified_mvl.MVL_APPROVAL_TEMPLATE.format(
-            run_tag=RUN_TAG, run_label="baseline-a", config_sha256=digest
+            run_tag=RUN_TAG,
+            run_label="baseline-a",
+            candidate_id=config["candidate_id"],
+            config_sha256=digest,
         ),
     )
     before = {
@@ -231,7 +234,7 @@ def test_receipt_contract_mismatch_refuses_live_before_external_work(
     config, ledger, cell = valid_freeze
     _change_receipt(config, cell, lambda receipt: receipt.update({field: value}))
     assert _invoke(config, ledger, tmp_path, monkeypatch, validate_only=False) == 1
-    assert "completed W7 candidate" in capsys.readouterr().err
+    assert "completed qualified candidate" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("mutation", ["digest", "gates", "run-tag", "commit", "resource-id"])

@@ -1,8 +1,9 @@
 """Qualification-bound Akamai baseline; historical MVL-F is unchanged.
 
-This command requires a verified W7 freeze result from the same resource
+This command requires a verified W7 or W8 freeze result from the same resource
 session before any client is constructed. The three measurement cells and
-sample counts are D-0017's; workload/generation are W7's explicit contract.
+sample counts are D-0017's. Workload and generation follow the bound
+qualified candidate.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ WORKFLOW = "qualified-baseline"
 ARTIFACT_FAMILY = "qualified-baseline-runs"
 MVL_APPROVAL_TEMPLATE = (
     "I approve the Akamai qualified baseline for run {run_tag} "
-    "({run_label}) using candidate W7 config sha256:{config_sha256}"
+    "({run_label}) using candidate {candidate_id} config sha256:{config_sha256}"
 )
 FROZEN_WORKLOAD_VERSION = qualification.W7_WORKLOAD_VERSION
 FROZEN_TEMPERATURE = qualification.W_TEMPERATURE
@@ -74,12 +75,14 @@ def validate_study_entry_binding(binding: object) -> None:
     }
     if not isinstance(binding, dict) or set(binding) != fields:
         raise ConfigError("qualified baseline requires the complete study-entry digest binding")
-    if binding["candidate_id"] != "W7" or binding["study_entry_passed"] is not True:
-        raise ConfigError("qualified baseline requires a verified W7 study-entry binding")
+    if binding["candidate_id"] not in {"W7", "W8"} or binding["study_entry_passed"] is not True:
+        raise ConfigError("qualified baseline requires a verified W7 or W8 study-entry binding")
     for field in fields - {"candidate_id", "study_entry_passed"}:
         if not isinstance(binding[field], str) or not _SHA256.fullmatch(binding[field]):
             raise ConfigError("qualified baseline study-entry digest is malformed")
-    if binding["candidate_identity_sha256"] != qualification.candidate_identity_digest("W7"):
+    if binding["candidate_identity_sha256"] != qualification.candidate_identity_digest(
+        binding["candidate_id"]
+    ):
         raise ConfigError("qualified baseline study-entry candidate identity mismatch")
 
 
@@ -105,19 +108,25 @@ def load_mvl_config(path: Path) -> tuple[dict, str]:
         raise ConfigError("qualified baseline config is not valid JSON") from exc
     if not isinstance(config, dict):
         raise ConfigError("qualified baseline config must be an object")
-    if config.get("workflow") != WORKFLOW or config.get("candidate_id") != "W7":
+    candidate_id = config.get("candidate_id")
+    if config.get("workflow") != WORKFLOW or candidate_id not in {"W7", "W8"}:
         raise ConfigError(
-            "qualified baseline requires workflow qualified-baseline and candidate W7"
+            "qualified baseline requires workflow qualified-baseline and candidate W7 or W8"
         )
-    if config.get("workload_version") != FROZEN_WORKLOAD_VERSION:
-        raise ConfigError("qualified baseline requires workload 2.9.0")
-    if config.get("candidate_identity_sha256") != qualification.candidate_identity_digest("W7"):
+    expected_version = qualification.candidate_workload_version(str(candidate_id))
+    if config.get("workload_version") != expected_version:
+        raise ConfigError(f"qualified baseline requires workload {expected_version}")
+    if config.get("candidate_identity_sha256") != qualification.candidate_identity_digest(
+        str(candidate_id)
+    ):
         raise ConfigError("qualified baseline candidate identity mismatch")
     generation = config.get("generation")
-    expected = qualification.frozen_candidate_fields("W7")["generation"]
+    expected = qualification.frozen_candidate_fields(str(candidate_id))["generation"]
     if generation != expected:
-        raise ConfigError("qualified baseline generation must equal the qualified W7 settings")
-    qualification.require_w_config(config, candidate_id="W7")
+        raise ConfigError(
+            "qualified baseline generation must equal the qualified candidate settings"
+        )
+    qualification.require_w_config(config, candidate_id=str(candidate_id))
     # Reuse the historical matrix/infra/serving validators. This is only a
     # validation view; the executed settings and manifests always bind W7.
     view = dict(
@@ -161,19 +170,20 @@ def _inside(cell: Path, name: object) -> Path:
 def authenticate_freeze(config: dict, *, results_dir: Path, run_tag: str, ledger: dict) -> dict:
     """Verify the bound receipt, all persisted observations, gates and session."""
     binding = config["qualification_binding"]
-    label = qualification.output_label(binding["run_label"], "freeze", "W7")
+    candidate_id = str(config["candidate_id"])
+    label = qualification.output_label(binding["run_label"], "freeze", candidate_id)
     cell = result_directory(results_dir, label)
     receipt, digest = _read(cell.parent / f"{label}-receipt.json")
     if digest != binding["receipt_sha256"]:
         raise MvlError("freeze receipt digest mismatch")
     required = {
         "workflow": "qualify-agent",
-        "candidate_id": "W7",
+        "candidate_id": candidate_id,
         "stage": "freeze",
         "run_label": label,
         "stopped": False,
         "candidate_identity_sha256": config["candidate_identity_sha256"],
-        "workload_version": FROZEN_WORKLOAD_VERSION,
+        "workload_version": config["workload_version"],
         "controller": "workflow-controller-v3",
         "evidence_contract": evidence_contract(),
         "blind_generalization_evidence": False,
@@ -183,7 +193,7 @@ def authenticate_freeze(config: dict, *, results_dir: Path, run_tag: str, ledger
         or receipt.get("stopped") is not False
         or receipt.get("blind_generalization_evidence") is not False
     ):
-        raise MvlError("freeze receipt does not bind this completed W7 candidate")
+        raise MvlError("freeze receipt does not bind this completed qualified candidate")
     hashes = receipt.get("artifact_sha256")
     if not isinstance(hashes, dict) or set(hashes) != set(receipt.get("files") or []):
         raise MvlError("freeze receipt does not bind its complete artifact set")
@@ -216,7 +226,7 @@ def authenticate_freeze(config: dict, *, results_dir: Path, run_tag: str, ledger
         or manifest["execution_mode"] != "gpu"
         or manifest["git"]["commit"] != config["canonical_commit"]
         or manifest["git"]["dirty"]
-        or manifest["workload"]["version"] != FROZEN_WORKLOAD_VERSION
+        or manifest["workload"]["version"] != config["workload_version"]
         or manifest["workload"]["profile"] != "interactive"
         or manifest["workload"]["concurrency"] != 1
         or manifest["workload"]["tasks_per_repetition"] != 200
@@ -286,7 +296,7 @@ def authenticate_freeze(config: dict, *, results_dir: Path, run_tag: str, ledger
         raise MvlError("freeze qualification did not pass the study-entry gate")
     duration_s = max((row["ended_offset_ms"] for row in measured["observations"]), default=0) / 1000
     return {
-        "candidate_id": "W7",
+        "candidate_id": candidate_id,
         "candidate_identity_sha256": config["candidate_identity_sha256"],
         "receipt_sha256": digest,
         "result_sha256": result_sha,
@@ -307,7 +317,6 @@ def _mvl_stop(message: str, *, results_dir: Path | None, run_label: str) -> int:
 
 
 def execute(args: argparse.Namespace) -> int:
-
     from blackwell_lab.cloud import lifecycle, provenance, realbench, telemetry
     from blackwell_lab.cloud import qualified_mvl as mvl
     from blackwell_lab.cloud.cli import (
@@ -333,6 +342,7 @@ def execute(args: argparse.Namespace) -> int:
     expected = MVL_APPROVAL_TEMPLATE.format(
         run_tag=args.run_tag,
         run_label=run_label,
+        candidate_id=config["candidate_id"],
         config_sha256=config_sha256,
     )
     if not validate_only and (args.approve or "") != expected:
@@ -458,9 +468,9 @@ def execute(args: argparse.Namespace) -> int:
                 top_p=mvl.FROZEN_TOP_P,
                 seed=mvl.FROZEN_SEED,
                 reasoning_mode=mvl.FROZEN_REASONING_MODE,
-                workload_version=mvl.FROZEN_WORKLOAD_VERSION,
+                workload_version=config["workload_version"],
             ),
-            workload_version=mvl.FROZEN_WORKLOAD_VERSION,
+            workload_version=config["workload_version"],
             controller="workflow-controller-v3",
             artifact_family=mvl.ARTIFACT_FAMILY,
             study_entry_binding={

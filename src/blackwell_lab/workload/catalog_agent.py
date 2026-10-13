@@ -45,9 +45,22 @@ from blackwell_lab.workload.public_metadata.catalog_v2 import (
 )
 from blackwell_lab.workload.tools import workflow_terminal_schema_is_correctable
 
+# Workload 2.10.0 keeps the 2.4.1 prompt and adds the literal search_logs
+# tokens the public evaluator already accepts. The sentence names no
+# diagnosis, remediation, or scenario. It lives here, not in agent.py, so
+# the W5/W6 renderer closure and identity digests stay pinned.
+SEARCH_GUIDANCE_V210 = (
+    "search_logs matches literal substrings. When gathering log evidence, "
+    "include a literal query token the incident supports. The accepted literal "
+    "tokens are: servfail, search domain, readiness, migration, startup, and dep-8102."
+)
+
 
 def _system_prompt(scenario, workload_version=None):
-    return system_prompt(scenario, "2.8.0")
+    prompt = system_prompt(scenario, "2.8.0")
+    if workload_version == "2.10.0":
+        return f"{prompt} {SEARCH_GUIDANCE_V210}"
+    return prompt
 
 
 def _task_prompt(scenario, instance, workload_version=None):
@@ -94,10 +107,10 @@ def run_task(
     from blackwell_lab.workload.native_tools import require_workload_version
 
     executed_version = require_workload_version(settings.workload_version)
-    if executed_version != "2.9.0":
+    if executed_version not in {"2.9.0", "2.10.0"}:
         from blackwell_lab.workload.validation import ConfigError
 
-        raise ConfigError("the catalog agent requires workload 2.9.0")
+        raise ConfigError("the catalog agent requires workload 2.9.0 or 2.10.0")
     controller = build_controller(executed_version, evidence_context or uuid.uuid4().hex)
     started_at = clock.monotonic()
     submitted = submitted_at if submitted_at is not None else started_at
