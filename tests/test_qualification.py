@@ -703,8 +703,8 @@ class TestStageEvidenceCompleteness:
 
 class TestGates:
     def test_study_entry_aggregate_boundary(self):
-        passing = [_outcome(success=True)] * 70 + [_outcome(success=False)] * 30
-        failing = [_outcome(success=True)] * 69 + [_outcome(success=False)] * 31
+        passing = [_outcome(success=True)] * 60 + [_outcome(success=False)] * 40
+        failing = [_outcome(success=True)] * 59 + [_outcome(success=False)] * 41
         assert evaluate_study_entry_gate(_metrics(passing))["passed"] is True
         assert evaluate_study_entry_gate(_metrics(failing))["passed"] is False
 
@@ -1277,7 +1277,7 @@ class TestPromptVariantP1:
         assert stage_spec("freeze")["tasks"] == 200
         assert DEVELOPMENT_QUALITY_FLOOR == 0.40
         assert HOLDOUT_QUALITY_FLOOR == 0.50
-        assert STUDY_ENTRY_MIN_AGGREGATE == 0.70
+        assert STUDY_ENTRY_MIN_AGGREGATE == 0.60
         assert STUDY_ENTRY_MIN_SCENARIO == 0.40
         assert PRODUCTION_LIKE_MIN_AGGREGATE == 0.90
         assert PRODUCTION_LIKE_MIN_SCENARIO == 0.80

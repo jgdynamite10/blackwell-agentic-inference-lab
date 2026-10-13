@@ -15,9 +15,10 @@ D-0035's `qualified-baseline` binds standalone W7/workload 2.9.0 and its
 version-2.0.0 public evidence contract to a verified successful freeze from
 the same source/resource session. W7 retains temperature 0.2/top-p 0.95,
 frozen model/serving pins, BF16, and `ca-central`; it does not reuse
-historical MVL-F/workload-2.3.0 qualification. Final study entry stays
-0.70 aggregate, 0.40 each scenario, and all structural gates; development
-0.40 and holdout 0.50 are earlier screening floors. All ten templates are
+historical MVL-F/workload-2.3.0 qualification. Final study entry is 0.60
+aggregate (120 of 200; D-0036), 0.40 each scenario, and all structural
+gates. D-0036 does not reclassify a freeze judged under the prior 0.70
+aggregate. Development 0.40 and holdout 0.50 are earlier screening floors. All ten templates are
 public and pre-exposed, so manifests declare
 `blind_generalization_evidence=false`. W1–W6 remain historical. See the
 [D-0035 execution and acceptance contract](../docs/d-0035-qualified-baseline.md).

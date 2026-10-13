@@ -11,7 +11,7 @@ W5/W6 remain development-only. This is public-catalog evaluation with
 `blind_generalization_evidence=false`, not blind holdout evidence.
 
 The sequence is canary, development (20 / 0.40), holdout-labelled public
-split (20 / 0.50), freeze (200 measured / 0.70 overall / 0.40 each scenario
+split (20 / 0.50), freeze (200 measured / 120 passes, 0.60 overall / 0.40 each scenario
 plus structural gates), then the D-0017 three-cell baseline (1,800
 measured observations). Stop on a failed gate. Source tests do not prove
 live qualification. See the [D-0035 runbook](d-0035-qualified-baseline.md)

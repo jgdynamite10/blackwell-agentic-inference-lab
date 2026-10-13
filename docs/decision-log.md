@@ -2320,3 +2320,21 @@ The deleted W5/W6 session cannot authorize new resources. No W7
 inference, benchmark, provider work, credential access, or genuine result
 publication is established by this entry. AWS, GCP, other
 engines/precision, and the broader charter remain later work.
+
+## 2026-10-13 — D-0036: Freeze study-entry aggregate is 120 of 200
+
+**Decision.** The freeze study-entry aggregate floor is **0.60**, which is
+120 of the 200 measured freeze tasks. This supersedes only the 0.70 / 140
+of 200 aggregate stated in D-0035. The 0.40 per-scenario floor, the
+structural gates, the task count, the schedules, the accepted answers, and
+the production-like 0.90 / 0.80 target are unchanged.
+
+**Rationale.** The owner directed this count change on 2026-10-13 after the
+first live W7 freeze had already been preserved.
+
+**Results that predate the change.** The live W7 freeze from run
+`w7-akamai-20261012a` was judged under the 0.70 rule and remains a failed
+study entry. This revision does not reclassify that receipt, its verdict,
+or its artifacts. A later freeze is a new attempt under D-0036. The
+qualified baseline still requires a receipt that passes the gate in force
+when it is re-checked, including every-scenario 0.40.

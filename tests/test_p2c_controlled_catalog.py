@@ -375,7 +375,7 @@ class TestP2CContract:
         assert WORKLOAD_VERSION == "2.3.0"
         assert catalog_digest().startswith("sha256:")
         assert (DEVELOPMENT_QUALITY_FLOOR, HOLDOUT_QUALITY_FLOOR) == (0.40, 0.50)
-        assert (STUDY_ENTRY_MIN_AGGREGATE, STUDY_ENTRY_MIN_SCENARIO) == (0.70, 0.40)
+        assert (STUDY_ENTRY_MIN_AGGREGATE, STUDY_ENTRY_MIN_SCENARIO) == (0.60, 0.40)
         assert (PRODUCTION_LIKE_MIN_AGGREGATE, PRODUCTION_LIKE_MIN_SCENARIO) == (0.90, 0.80)
         assert MIN_VALID_NATIVE_TOOL_CALL_RATE == 0.99
         assert MAX_INVALID_TOOL_NAME_RATE == 0.0

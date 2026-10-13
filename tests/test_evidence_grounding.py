@@ -1378,7 +1378,7 @@ class TestBackwardCompatibility:
         assert catalog_digest().startswith("sha256:")
         assert DEVELOPMENT_TASKS == HOLDOUT_TASKS == 20 and FREEZE_TASKS == 200
         assert DEVELOPMENT_QUALITY_FLOOR == 0.40 and HOLDOUT_QUALITY_FLOOR == 0.50
-        assert STUDY_ENTRY_MIN_AGGREGATE == 0.70 and STUDY_ENTRY_MIN_SCENARIO == 0.40
+        assert STUDY_ENTRY_MIN_AGGREGATE == 0.60 and STUDY_ENTRY_MIN_SCENARIO == 0.40
         assert PRODUCTION_LIKE_MIN_AGGREGATE == 0.90 and PRODUCTION_LIKE_MIN_SCENARIO == 0.80
         p2 = frozen_candidate_fields("P2")
         c2 = frozen_candidate_fields("C2")
