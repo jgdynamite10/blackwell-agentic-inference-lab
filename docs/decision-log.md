@@ -2392,3 +2392,22 @@ scenario, and the structural gates. Shared renderer-closure files change
 the current W7 and W8 source identity hashes; each saved receipt stays
 bound to the commit that produced it.
 
+## 2026-10-13 — D-0039: Baseline manifests may name W7, W8, or W9
+
+**Decision.** A qualified-baseline run manifest's `study_entry_binding`
+candidate id may be W7, W8, or W9. This corrects the manifest schema,
+which still required the constant W7 after D-0037 and D-0038 allowed
+those successors to bind a baseline. Floors, prompts, controllers, and
+the W9 single-call sentence are unchanged.
+
+**Rationale.** The owner directed completion of the Akamai finish on
+2026-10-13. The qualified-baseline command accepted W9, and the first
+measured cell could not persist a manifest because the schema rejected
+that candidate id.
+
+**Results that predate the change.** Run `w9-akamai-20261013a` produced
+a W9 freeze that met the study-entry gate in force when it ran. No
+qualified baseline measurement was persisted. That receipt stays bound
+to the commit that produced it and does not authorize a baseline on a
+later commit. D-0039 does not reclassify the saved W7 or W8 freezes.
+
