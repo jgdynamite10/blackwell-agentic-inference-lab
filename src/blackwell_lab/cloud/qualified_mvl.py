@@ -1,6 +1,6 @@
 """Qualification-bound Akamai baseline; historical MVL-F is unchanged.
 
-This command requires a verified W7 or W8 freeze result from the same resource
+This command requires a verified W7, W8, or W9 freeze result from the same resource
 session before any client is constructed. The three measurement cells and
 sample counts are D-0017's. Workload and generation follow the bound
 qualified candidate.
@@ -75,8 +75,12 @@ def validate_study_entry_binding(binding: object) -> None:
     }
     if not isinstance(binding, dict) or set(binding) != fields:
         raise ConfigError("qualified baseline requires the complete study-entry digest binding")
-    if binding["candidate_id"] not in {"W7", "W8"} or binding["study_entry_passed"] is not True:
-        raise ConfigError("qualified baseline requires a verified W7 or W8 study-entry binding")
+    candidate_id = binding["candidate_id"]
+    passed = binding["study_entry_passed"] is True
+    if candidate_id not in {"W7", "W8", "W9"} or not passed:
+        raise ConfigError(
+            "qualified baseline requires a verified W7, W8, or W9 study-entry binding"
+        )
     for field in fields - {"candidate_id", "study_entry_passed"}:
         if not isinstance(binding[field], str) or not _SHA256.fullmatch(binding[field]):
             raise ConfigError("qualified baseline study-entry digest is malformed")
@@ -109,9 +113,9 @@ def load_mvl_config(path: Path) -> tuple[dict, str]:
     if not isinstance(config, dict):
         raise ConfigError("qualified baseline config must be an object")
     candidate_id = config.get("candidate_id")
-    if config.get("workflow") != WORKFLOW or candidate_id not in {"W7", "W8"}:
+    if config.get("workflow") != WORKFLOW or candidate_id not in {"W7", "W8", "W9"}:
         raise ConfigError(
-            "qualified baseline requires workflow qualified-baseline and candidate W7 or W8"
+            "qualified baseline requires workflow qualified-baseline and candidate W7, W8, or W9"
         )
     expected_version = qualification.candidate_workload_version(str(candidate_id))
     if config.get("workload_version") != expected_version:

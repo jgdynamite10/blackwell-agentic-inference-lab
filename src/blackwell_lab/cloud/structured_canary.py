@@ -107,7 +107,7 @@ def enrich_canary_receipt(receipt: dict) -> dict:
     """
     from blackwell_lab.workload.public_metadata import VALIDATION_SCOPE, evidence_contract
 
-    if receipt.get("candidate_id") in {"W7", "W8"}:
+    if receipt.get("candidate_id") in {"W7", "W8", "W9"}:
         from blackwell_lab.workload.public_metadata.catalog_v2 import evidence_contract
 
     enriched = dict(receipt)

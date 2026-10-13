@@ -21,7 +21,7 @@ NORMALIZATION_POLICY_VERSION = "2.0.0"
 CONTROLLER_ID = "workflow-controller-v3"
 CONTRACT_VERSION = "2.0.0"
 VALIDATION_SCOPE = "public-catalog-pre-exposed-holdout"
-STRUCTURED_WORKLOADS = frozenset({"2.9.0", "2.10.0"})
+STRUCTURED_WORKLOADS = frozenset({"2.9.0", "2.10.0", "2.11.0"})
 
 #: Generic explanation appended to the 2.9.0 task prompts.
 #: The system prompt stays the 2.4.1 text. This names no scenario,

@@ -2364,3 +2364,31 @@ any qualified baseline still require their own passing freeze, including
 Shared renderer-closure files change the current W7 source identity hash;
 the saved receipt stays bound to the commit that produced it.
 
+## 2026-10-13 — D-0038: Successor W9 requires one native tool call
+
+**Decision.** Add standalone candidate **W9** on workload **2.11.0**. It
+uses the same controller, evidence contract, catalog, schedules, floors,
+and generation settings as W8. The catalog agent keeps the W8 system
+prompt, including the literal `search_logs` tokens, and appends one
+sentence: each turn must contain exactly one native tool call. The
+sentence names no diagnosis, remediation, or scenario. W7 still sends
+`SYSTEM_PROMPT_V241`. W8 still sends that prompt plus the D-0037 search
+sentence only. The new sentence lives in the catalog agent so `agent.py`
+and the W5/W6 renderer closure stay byte-identical and those identity
+pins do not move. The 0.99 valid native tool-call floor is unchanged.
+
+**Rationale.** The owner directed this successor on 2026-10-13, before any
+new GPU session. The saved W8 freeze failed the valid native tool-call
+structural gate. Tasks in that category ended on a turn that was not
+exactly one native tool call. This guidance applies only to a later W9 run.
+
+**Results that predate the change.** The live W7 freeze from run
+`w7-akamai-20261012a` remains a failed study entry. The live W8 freeze
+from run `w8-akamai-20261013a` remains a failed study entry under the
+structural gate in force when it ran. D-0038 does not reclassify either
+receipt. W9 qualification and any qualified baseline still require their
+own passing freeze, including 0.60 overall (120 of 200), 0.40 in every
+scenario, and the structural gates. Shared renderer-closure files change
+the current W7 and W8 source identity hashes; each saved receipt stays
+bound to the commit that produced it.
+
