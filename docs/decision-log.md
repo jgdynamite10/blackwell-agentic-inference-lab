@@ -2532,3 +2532,50 @@ later AWS cell that should count as evidence has to copy its result
 directory to `LAB_RESULTS_DIR` before teardown, with the schema files
 present on the first attempt.
 
+## 2026-10-14 — D-0043: Keepable AWS W11 diagnostic after Akamai finished
+
+**Decision.** The owner reported that the Akamai run is finished and
+approved proceeding with AWS. This authorizes one on-demand single-GPU
+G7e in `us-east-1`, run tag `aws-w11-20261014a`. `g7e.4xlarge`
+($3.99816/hour, 16 vCPU) was preferred. Live `RunInstances` returned
+`InsufficientInstanceCapacity` for that size in both offering zones
+(`us-east-1a` and `us-east-1c`). `g7e.8xlarge` ($5.26824/hour, 32 vCPU,
+256 GiB, still one RTX PRO 6000) launched in `us-east-1a`. That is a
+capacity substitution, the same environmental difference recorded for
+D-0042. On-Demand G/VT quota is 32 vCPU and this size uses all of it.
+The root volume is 400 GB gp3, deleted with the
+instance. A 10-hour self-terminate is the backstop. No savings plan,
+reservation, or Spot. No second GPU.
+
+The host uses the frozen D-0017 pins. Serving stays on loopback. The
+cell is a private diagnostic of workload 2.13.0 (W11,
+`workflow-controller-v3`), ten interactive tasks, concurrency 1,
+generation temperature 0.2, top_p 0.95, generation seed 20260906. The
+schedule seed is 20261016. It is a diagnostic. It is not a qualification,
+a canary receipt, a development control, or a score to set beside Akamai.
+The result directory is copied to the private results location outside
+the repository before the instance is terminated. Schema files are on
+the host before the first save.
+
+Phase 4 live execution, Google Cloud, the Phase 6 comparative matrix,
+and publication remain unauthorized. Akamai approval phrases are
+unchanged.
+
+**Rationale.** The morning diagnostic showed the pins and the agent loop
+run on a G7e, and its raw files were deleted with the disk. Akamai has
+since moved the candidate to W11. One keepable cell of that candidate,
+on the 16-vCPU size when capacity allows, is the AWS step that can be
+kept. The comparative matrix is still a separate decision.
+
+**Close-out (same day).** `g7e.4xlarge` had no live capacity in either
+offering zone. The host was `g7e.8xlarge` in `us-east-1a`. The frozen
+pins came up: open driver 580.178.04, container CUDA 13.0, and the
+pinned model on loopback. The first bootstrap stopped before serving
+because the model was not on the host yet. The retry verified the model,
+served it, and the W11 cell wrote a valid result. That result directory
+was copied off the host before teardown. Task outcomes stay private.
+The instance then ran about 0.47 hours and was terminated. The root
+volume deleted with it. The token secret, staging bucket, instance
+role, and security group for `aws-w11-20261014a` were deleted. This
+decision authorizes nothing further.
+

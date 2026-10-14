@@ -60,8 +60,8 @@ ten-task diagnostic canary (`blackwell-cloud canary-agent`), the read-only
 environment; live W1/W2 and canary execution still require their own
 digest-bearing approval phrases. **Phase 4 live execution and
 later phases remain unauthorized.** Decision **D-0042** records one
-closed same-day AWS diagnostic in `us-east-1` and authorizes no further
-AWS resource.
+closed AWS diagnostic. Decision **D-0043** records one closed keepable
+W11 diagnostic on a single G7e in `us-east-1`.
 
 ## Phase 1 — Repository foundation and feasibility *(complete)*
 
@@ -239,6 +239,13 @@ was a `g7e.8xlarge` ($5.26824/hour) for about 0.83 hours. The private
 cell used workload 2.7.0. Its result file was on the instance disk and
 was deleted with that volume; it was not copied to `LAB_RESULTS_DIR`.
 The host, token secret, and staging bucket were removed the same day.
+
+Decision **D-0043** (2026-10-14) records one later cell after the owner
+reported the Akamai run finished. `g7e.4xlarge` at $3.99816/hour had no
+live capacity, so the host was a `g7e.8xlarge` at $5.26824/hour for
+about 0.47 hours. The cell was workload 2.13.0. The result directory
+was copied off the host before the instance, token secret, and staging
+bucket were deleted. It does not authorize the comparative matrix.
 
 ## Phase 7 — Analysis and publication
 
