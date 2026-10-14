@@ -191,7 +191,8 @@ record; freeze it in the archive after execution. Do not alter archived
 hashes after reconciliation. Prepare canary, development, holdout, and freeze
 configs bound to the actual candidate identity, evidence contract, commit, pins,
 generation, and this session. D-0037 uses candidate W8 and workload 2.10.0.
-D-0038 uses candidate W9 and workload 2.11.0;
+D-0038 uses candidate W9 and workload 2.11.0.
+D-0040 uses candidate W10 and workload 2.12.0;
 the W7 commands below remain the historical contract. Use the implementation's frozen schedules.
 
 ```bash
@@ -239,8 +240,8 @@ audit without replacing the active operator ledger.
 ### 4. Baseline bound to the successful freeze
 
 Generate the external baseline config only after the bound freeze passes.
-Set workflow `qualified-baseline`, candidate `W7`, `W8`, or `W9`, the matching
-workload (`2.9.0`, `2.10.0`, or `2.11.0`), that candidate's generation and evidence
+Set workflow `qualified-baseline`, candidate `W7`, `W8`, `W9`, or `W10`, the matching
+workload (`2.9.0`, `2.10.0`, `2.11.0`, or `2.12.0`), that candidate's generation and evidence
 contract, the approved commit, and this session. Its
 `qualification_binding` has exactly two fields: `run_label` (the freeze
 command's original, unsuffixed label) and `receipt_sha256` (the actual

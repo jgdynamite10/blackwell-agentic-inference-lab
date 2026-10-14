@@ -61,6 +61,15 @@ SINGLE_CALL_GUIDANCE_V211 = (
     "Each turn must contain exactly one native tool call. Do not answer with "
     "prose alone, and do not emit more than one tool call in the same turn."
 )
+# Workload 2.12.0 keeps the 2.11.0 prompt and names the permitted tool
+# identifiers. The sentence names no diagnosis, remediation action, or
+# scenario.
+KNOWN_TOOL_GUIDANCE_V212 = (
+    "Call only a tool whose name is in the provided tool list. The permitted "
+    "names are get_service_health, query_metrics, search_logs, "
+    "check_recent_changes, retrieve_runbook, and recommend_remediation. "
+    "Do not invent a tool name."
+)
 
 
 def _system_prompt(scenario, workload_version=None):
@@ -69,6 +78,11 @@ def _system_prompt(scenario, workload_version=None):
         return f"{prompt} {SEARCH_GUIDANCE_V210}"
     if workload_version == "2.11.0":
         return f"{prompt} {SEARCH_GUIDANCE_V210} {SINGLE_CALL_GUIDANCE_V211}"
+    if workload_version == "2.12.0":
+        return (
+            f"{prompt} {SEARCH_GUIDANCE_V210} {SINGLE_CALL_GUIDANCE_V211} "
+            f"{KNOWN_TOOL_GUIDANCE_V212}"
+        )
     return prompt
 
 
@@ -116,10 +130,10 @@ def run_task(
     from blackwell_lab.workload.native_tools import require_workload_version
 
     executed_version = require_workload_version(settings.workload_version)
-    if executed_version not in {"2.9.0", "2.10.0", "2.11.0"}:
+    if executed_version not in {"2.9.0", "2.10.0", "2.11.0", "2.12.0"}:
         from blackwell_lab.workload.validation import ConfigError
 
-        raise ConfigError("the catalog agent requires workload 2.9.0, 2.10.0, or 2.11.0")
+        raise ConfigError("the catalog agent requires workload 2.9.0, 2.10.0, 2.11.0, or 2.12.0")
     controller = build_controller(executed_version, evidence_context or uuid.uuid4().hex)
     started_at = clock.monotonic()
     submitted = submitted_at if submitted_at is not None else started_at

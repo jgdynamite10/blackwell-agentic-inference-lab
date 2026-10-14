@@ -120,6 +120,7 @@ TOOL_DESCRIPTIONS_BY_VERSION: dict[str, dict[str, str]] = {
     "2.9.0": TOOL_DESCRIPTIONS_V240,
     "2.10.0": TOOL_DESCRIPTIONS_V240,
     "2.11.0": TOOL_DESCRIPTIONS_V240,
+    "2.12.0": TOOL_DESCRIPTIONS_V240,
 }
 
 #: Default catalog contract (workload 2.3.0). Callers that execute a
@@ -140,7 +141,7 @@ def require_workload_version(version: str | None) -> str:
 
 def _tool_surface_version(version: str | None) -> str | None:
     """2.9.0 changes evidence metadata, not the native tool argument surface."""
-    return "2.8.0" if version in {"2.9.0", "2.10.0", "2.11.0"} else version
+    return "2.8.0" if version in {"2.9.0", "2.10.0", "2.11.0", "2.12.0"} else version
 
 
 def tool_descriptions(workload_version: str | None = None) -> dict[str, str]:
