@@ -8,7 +8,7 @@ from blackwell_lab.workload.tools import SimulatedToolbox, ToolResult
 from blackwell_lab.workload.validation import ConfigError
 
 WORKLOAD_VERSION = "2.9.0"
-CATALOG_WORKLOAD_VERSIONS = frozenset({WORKLOAD_VERSION, "2.10.0", "2.11.0"})
+CATALOG_WORKLOAD_VERSIONS = frozenset({WORKLOAD_VERSION, "2.10.0", "2.11.0", "2.12.0"})
 
 
 def controller_for_workload(workload_version: str | None) -> str | None:
@@ -49,7 +49,7 @@ def require_manifest_binding(workload: dict) -> None:
 
 def build_controller(workload_version: str, context: str):
     if workload_version not in CATALOG_WORKLOAD_VERSIONS:
-        raise ConfigError("the catalog runtime requires workload 2.9.0, 2.10.0, or 2.11.0")
+        raise ConfigError("the catalog runtime requires workload 2.9.0, 2.10.0, 2.11.0, or 2.12.0")
     from blackwell_lab.workload.workflow_v3 import StructuredEvidenceWorkflowController
 
     # Validate this catalog's contract, rather than invoking the development
@@ -65,7 +65,9 @@ class CatalogToolbox(SimulatedToolbox):
         self, name: str, arguments: dict, workload_version: str | None = None
     ) -> ToolResult:
         if workload_version not in CATALOG_WORKLOAD_VERSIONS:
-            raise ConfigError("the catalog toolbox requires workload 2.9.0, 2.10.0, or 2.11.0")
+            raise ConfigError(
+                "the catalog toolbox requires workload 2.9.0, 2.10.0, 2.11.0, or 2.12.0"
+            )
         # 2.7.0 has the same terminal argument schema and does not render v1.
         # Avoid invoking the development-only renderer for a holdout template.
         result = super().execute(name, arguments, workload_version="2.7.0")

@@ -2151,7 +2151,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     qualified_parser = sub.add_parser(
         "qualified-baseline",
-        help="Qualification-bound W7, W8, or W9 Akamai baseline (three cells).",
+        help="Qualification-bound W7, W8, W9, or W10 Akamai baseline (three cells).",
     )
     qualified_parser.add_argument("--run-tag", required=True)
     qualified_parser.add_argument("--run-label", required=True)
@@ -2188,6 +2188,7 @@ def build_parser() -> argparse.ArgumentParser:
             "W7",
             "W8",
             "W9",
+            "W10",
         ),
         help=(
             "C1 (temperature 1.0, workload 2.4.0), "
@@ -2209,7 +2210,9 @@ def build_parser() -> argparse.ArgumentParser:
             "or W8 (workload 2.10.0, the same catalog with literal search "
             "tokens in the system prompt; decision D-0037), "
             "or W9 (workload 2.11.0, the W8 prompt plus one-native-call "
-            "guidance; decision D-0038)."
+            "guidance; decision D-0038), "
+            "or W10 (workload 2.12.0, the W9 prompt plus the permitted "
+            "tool names; decision D-0040)."
         ),
     )
     qualify_parser.add_argument(
@@ -2284,6 +2287,7 @@ def build_parser() -> argparse.ArgumentParser:
             "W7",
             "W8",
             "W9",
+            "W10",
         ),
         help="Public-catalog candidate to canary (P2 is sealed and refused).",
     )
@@ -2332,6 +2336,7 @@ def build_parser() -> argparse.ArgumentParser:
             "W7",
             "W8",
             "W9",
+            "W10",
         ),
     )
     analyze_parser.add_argument(

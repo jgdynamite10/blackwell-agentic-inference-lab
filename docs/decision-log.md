@@ -2411,3 +2411,38 @@ qualified baseline measurement was persisted. That receipt stays bound
 to the commit that produced it and does not authorize a baseline on a
 later commit. D-0039 does not reclassify the saved W7 or W8 freezes.
 
+## 2026-10-14 — D-0040: Successor W10 names the permitted tools
+
+**Decision.** Add standalone candidate **W10** on workload **2.12.0**. It
+uses the same controller, evidence contract, catalog, tool-argument
+surface, schedules, floors, and generation settings as W9. The catalog
+agent keeps the W9 system prompt and appends one sentence naming the
+permitted tool identifiers: `get_service_health`, `query_metrics`,
+`search_logs`, `check_recent_changes`, `retrieve_runbook`, and
+`recommend_remediation`. The sentence says not to invent a tool name. It
+names no diagnosis, remediation action, or scenario. W7, W8, and W9 keep
+the prompts they already send. The sentence lives in the catalog agent so
+`agent.py` and the W5/W6 renderer closure stay byte-identical and those
+identity pins do not move. The zero invalid-tool-name floor is unchanged.
+A qualified-baseline manifest may name W10.
+
+**Rationale.** The owner directed this successor on 2026-10-14, before
+any new GPU session. The saved W9 freeze from run `w9-akamai-20261014a`
+failed the invalid-tool-name structural gate. A task in that category
+named a tool that is not in the provided list. This guidance applies only
+to a later W10 run.
+
+**Results that predate the change.** The live W7 freeze from run
+`w7-akamai-20261012a` and the live W8 freeze from run
+`w8-akamai-20261013a` remain failed study entries. The W9 freeze from run
+`w9-akamai-20261013a` met the study-entry gate in force when it ran, no
+baseline measurement was persisted, and that receipt stays bound to the
+commit that produced it. The W9 freeze from run `w9-akamai-20261014a`
+remains a failed study entry under the invalid-tool-name gate. D-0040
+does not reclassify any of those receipts. W10 qualification and any
+qualified baseline still require their own passing freeze, including 0.60
+overall (120 of 200), 0.40 in every scenario, and the structural gates.
+Shared renderer-closure files change the current W7, W8, and W9 source
+identity hashes; each saved receipt stays bound to the commit that
+produced it.
+

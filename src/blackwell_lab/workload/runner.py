@@ -318,7 +318,7 @@ def _run_pass(
             scenario = scenarios_by_id[instance.template_id]
             toolbox_type = SimulatedToolbox
             task_runner = run_task
-            if settings.workload_version in {"2.9.0", "2.10.0", "2.11.0"}:
+            if settings.workload_version in {"2.9.0", "2.10.0", "2.11.0", "2.12.0"}:
                 from blackwell_lab.workload.catalog_agent import run_task as catalog_run_task
                 from blackwell_lab.workload.catalog_runtime import CatalogToolbox
 

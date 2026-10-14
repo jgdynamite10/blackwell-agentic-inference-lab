@@ -259,6 +259,7 @@ class TestApprovalAndConfig:
             "W7",
             "W8",
             "W9",
+            "W10",
         )
         with pytest.raises(ConfigError, match="public-catalog"):
             validate_canary_config(_canary_config("W1"), candidate_id="P2")

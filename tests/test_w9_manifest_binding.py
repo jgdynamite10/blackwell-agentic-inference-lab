@@ -23,11 +23,11 @@ def _binding(candidate_id: str) -> dict:
     }
 
 
-@pytest.mark.parametrize("candidate_id", ("W7", "W8", "W9"))
+@pytest.mark.parametrize("candidate_id", ("W7", "W8", "W9", "W10"))
 def test_baseline_manifest_accepts_the_qualified_candidates(candidate_id):
     jsonschema.validate(_binding(candidate_id), _binding_schema())
 
 
 def test_baseline_manifest_rejects_an_unqualified_candidate():
     with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate(_binding("W10"), _binding_schema())
+        jsonschema.validate(_binding("W11"), _binding_schema())

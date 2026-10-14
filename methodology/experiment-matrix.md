@@ -13,9 +13,9 @@ observations into baseline summaries.
 
 D-0035's `qualified-baseline` binds a verified successful freeze of
 standalone W7/workload 2.9.0 or, under D-0037, W8/workload 2.10.0 or,
-under D-0038, W9/workload 2.11.0 and its
-version-2.0.0 public evidence contract from the same source/resource
-session. W7, W8, and W9 retain temperature 0.2/top-p 0.95,
+under D-0038, W9/workload 2.11.0 or, under D-0040, W10/workload 2.12.0
+and its version-2.0.0 public evidence contract from the same source/resource
+session. W7, W8, W9, and W10 retain temperature 0.2/top-p 0.95,
 frozen model/serving pins, BF16, and `ca-central`; it does not reuse
 historical MVL-F/workload-2.3.0 qualification. Final study entry is 0.60
 aggregate (120 of 200; D-0036), 0.40 each scenario, and all structural
