@@ -59,7 +59,9 @@ ten-task diagnostic canary (`blackwell-cloud canary-agent`), the read-only
 `analyze-qualification` command, and the isolated qualification
 environment; live W1/W2 and canary execution still require their own
 digest-bearing approval phrases. **Phase 4 live execution and
-later phases remain unauthorized.**
+later phases remain unauthorized.** Decision **D-0042** records one
+closed same-day AWS diagnostic in `us-east-1` and authorizes no further
+AWS resource.
 
 ## Phase 1 — Repository foundation and feasibility *(complete)*
 
@@ -230,6 +232,13 @@ the AWS instance size selected during feasibility analysis (initial candidate
 it) and preserve the same model artifact, container digest, serving
 configuration, workload, generation parameters, and measurement contract used
 for the other providers.
+
+Decision **D-0042** (2026-10-14) records one closed diagnostic, not this
+matrix. `g7e.4xlarge` ($3.99816/hour) had no live capacity, so the host
+was a `g7e.8xlarge` ($5.26824/hour) for about 0.83 hours. The private
+cell used workload 2.7.0. Its result file was on the instance disk and
+was deleted with that volume; it was not copied to `LAB_RESULTS_DIR`.
+The host, token secret, and staging bucket were removed the same day.
 
 ## Phase 7 — Analysis and publication
 

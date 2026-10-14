@@ -2479,3 +2479,56 @@ baseline still require their own passing freeze, including 0.60 overall
 renderer-closure files change the current W7 through W10 source identity
 hashes; each saved receipt stays bound to the commit that produced it.
 
+## 2026-10-14 — D-0042: Closed AWS diagnostic while Akamai qualification continues
+
+**Decision.** The owner explicitly approved, on 2026-10-14, a same-day AWS
+session, the billing for that session, and one AWS GPU overlapping the
+Akamai qualification then in progress. The approval was one instance. It
+approved no second GPU on either provider.
+
+The session was one on-demand single-GPU G7e in `us-east-1`, run tag
+`aws-diag-20261014a`. Read-only preflight found `g7e.4xlarge` offered and
+an On-Demand G/VT vCPU quota of 32. Live `RunInstances` in both offering
+zones (`us-east-1a` and `us-east-1c`) returned
+`InsufficientInstanceCapacity` for `g7e.4xlarge`. `g7e.8xlarge` (32 vCPU,
+256 GiB, still one RTX PRO 6000) launched in `us-east-1a`. That was a
+capacity substitution. The Price List rate for that size, Linux shared
+tenancy, US East (N. Virginia), is **$5.26824 per hour**. Its CPU count
+differs from the Akamai 16-vCPU host and is an environmental difference.
+The root volume was 400 GB gp3, deleted with the instance. A 10-hour
+self-terminate was the backstop. No savings plan, reservation, or Spot.
+
+Notes taken before this record was placed on canonical `main` called the
+session D-0034. D-0034 through D-0040 were already the W5–W10 decisions,
+and D-0041 is successor W11, so the canonical number is D-0042. The run
+tag is unchanged. Resources that existed during the session carried
+`phase=d-0034`.
+
+The host used the frozen D-0017 pins: Ubuntu 24.04, open driver
+`nvidia-driver-580-server-open` at `580.178.04-0ubuntu0.24.04.1`, the
+digest-pinned vLLM 0.27.1 image, and model revision
+`a9904d24bcc1d289a1950fa9d2b978c47cf903b9`. Serving stayed on loopback.
+The agent cell was a private diagnostic of workload 2.7.0, ten interactive
+tasks, concurrency 1. It is a diagnostic. It is not a qualification, a
+canary receipt, a development control, or a score to set beside Akamai.
+
+**Close-out.** The frozen pins came up: open driver 580.178.04, container
+CUDA 13.0, and the pinned model. The cell ran. The first persistence
+attempt wrote only an audit failure record because the schema files were
+not yet on the host. The retry wrote a valid result on the instance disk.
+That disk was deleted with the instance before the result directory was
+copied to `LAB_RESULTS_DIR`. The raw observations are not retained.
+Sanitized counts were read before teardown and are not recorded in this
+repository. The instance ran about 0.83 hours. The token secret and the
+staging bucket for `aws-diag-20261014a` were deleted. Google Cloud, Phase
+4 live execution, the Phase 6 comparative matrix, publication, and any
+further AWS resource remain unauthorized. Akamai approval phrases are
+unchanged.
+
+**Rationale.** Akamai qualification kept its own host. One G7e with the
+same NVIDIA and serving pins answered whether that host can run the agent
+loop. The comparative matrix waits until the Akamai candidate settles. A
+later AWS cell that should count as evidence has to copy its result
+directory to `LAB_RESULTS_DIR` before teardown, with the schema files
+present on the first attempt.
+
