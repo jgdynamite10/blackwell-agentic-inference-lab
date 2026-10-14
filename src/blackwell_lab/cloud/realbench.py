@@ -203,11 +203,12 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
                 "W8": "2.10.0",
                 "W9": "2.11.0",
                 "W10": "2.12.0",
+                "W11": "2.13.0",
             }.get(binding.get("candidate_id"))
             != spec.workload_version
         ):
             raise ConfigError(
-                "qualified baseline requires a verified W7, W8, W9, or W10 study-entry binding"
+                "qualified baseline requires a verified W7, W8, W9, W10, or W11 study-entry binding"
             )
         from blackwell_lab.cloud.qualified_mvl import validate_study_entry_binding
 

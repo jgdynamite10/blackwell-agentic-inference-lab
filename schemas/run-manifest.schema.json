@@ -414,7 +414,7 @@
               {
                 "required": ["version"],
                 "properties": {
-                  "version": { "enum": ["2.8.0", "2.8.1", "2.9.0", "2.10.0", "2.11.0", "2.12.0"] }
+                  "version": { "enum": ["2.8.0", "2.8.1", "2.9.0", "2.10.0", "2.11.0", "2.12.0", "2.13.0"] }
                 }
               },
               {
@@ -480,7 +480,7 @@
           "additionalProperties": false,
           "required": ["candidate_id", "candidate_identity_sha256", "receipt_sha256", "result_sha256", "manifest_sha256", "study_entry_passed"],
           "properties": {
-            "candidate_id": { "enum": ["W7", "W8", "W9", "W10"] },
+            "candidate_id": { "enum": ["W7", "W8", "W9", "W10", "W11"] },
             "candidate_identity_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "result_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },

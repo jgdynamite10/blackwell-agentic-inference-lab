@@ -572,13 +572,13 @@ class TestCandidates:
         assert candidate_identity_digest("C1") != candidate_identity_digest("C2")
 
     def test_unknown_candidate_is_rejected(self):
-        with pytest.raises(ConfigError, match="W9, or W10"):
+        with pytest.raises(ConfigError, match="W10, or W11"):
             frozen_candidate_fields("C3")
-        with pytest.raises(ConfigError, match="W9, or W10"):
+        with pytest.raises(ConfigError, match="W10, or W11"):
             candidate_temperature("C3")
-        with pytest.raises(ConfigError, match="W9, or W10"):
+        with pytest.raises(ConfigError, match="W10, or W11"):
             candidate_workload_version("C3")
-        with pytest.raises(ConfigError, match="W9, or W10"):
+        with pytest.raises(ConfigError, match="W10, or W11"):
             candidate_controller("C3")
 
 
