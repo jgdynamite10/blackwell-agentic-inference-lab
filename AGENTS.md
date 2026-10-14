@@ -17,7 +17,7 @@ explicitly revises them in writing.
 4. During Phase 1, limit Akamai Cloud, Google Cloud, and AWS access to
    read-only identity, availability, quota, instance-type, regional-capacity,
    and pricing checks.
-5. The owner-authorized AWS session `aws-diag-20261014a` (decision D-0041)
+5. The owner-authorized AWS session `aws-diag-20261014a` (decision D-0042)
    is closed. It was one on-demand single-GPU G7e in `us-east-1`, used to
    install the frozen NVIDIA / vLLM pins and run one private diagnostic
    agent cell. `g7e.4xlarge` was preferred. `g7e.8xlarge` was used because
@@ -170,7 +170,7 @@ explicitly revises them in writing.
    qualification, canary, and Phase 4 engine/precision execution still require**
    their separate digest-bearing approval phrases. The D-0014 six-hour /
    $25 pilot envelope remains separately named. **Phase 4 live execution
-   and later phases remain unauthorized.** Decision **D-0041** records one
+   and later phases remain unauthorized.** Decision **D-0042** records one
    closed AWS diagnostic session and authorizes no further AWS resource.
    Actual apply, pilot,
    mvl-baseline, qualify-agent, and destroy commands still require their

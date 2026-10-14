@@ -13,7 +13,7 @@ modified, or deleted without explicit owner approval, regardless of cost.
    per provider, never concurrently across providers unless the owner
    explicitly approves an overlap. On 2026-10-14 the owner approved one
    AWS G7e overlapping the in-progress Akamai qualification (decision
-   D-0041). That approval was one instance, and the instance has been
+   D-0042). That approval was one instance, and the instance has been
    terminated.
 3. **No idle GPUs — and know what actually stops billing.**
    - **Powering off an Akamai Linode does not stop billing.** Akamai bills
@@ -59,7 +59,7 @@ Planning estimates (details and assumptions in
 | 4 — NVIDIA optimization (**not authorized**) | ≈ $240–$600 before incidental costs at the same $3.00/h Seattle observed plan price | 75% of estimate consumed |
 | 5 — Google Cloud | ≈ $280–$650 | 75% of estimate consumed |
 | 6 — AWS comparative matrix (**not authorized**) | ≈ $250–$760 | 75% of estimate consumed |
-| 6 — D-0041 diagnostic (closed 2026-10-14) | One G7e. `g7e.4xlarge` at $3.99816/h had no capacity. The host was `g7e.8xlarge` at $5.26824/h for about 0.83 hours (about $4.40 of compute). The 400 GB volume was deleted with the instance | Terminated after the diagnostic cell |
+| 6 — D-0042 diagnostic (closed 2026-10-14) | One G7e. `g7e.4xlarge` at $3.99816/h had no capacity. The host was `g7e.8xlarge` at $5.26824/h for about 0.83 hours (about $4.40 of compute). The 400 GB volume was deleted with the instance | Terminated after the diagnostic cell |
 
 Reaching a trigger pauses provisioning until the owner reauthorizes. The
 Phase 3–6 ranges remain **planning estimates**, not authorization. Decision

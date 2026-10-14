@@ -109,11 +109,19 @@ CANDIDATE_W7 = "W7"
 CANDIDATE_W8 = "W8"
 CANDIDATE_W9 = "W9"
 CANDIDATE_W10 = "W10"
-CATALOG_EVIDENCE_CANDIDATES = (CANDIDATE_W7, CANDIDATE_W8, CANDIDATE_W9, CANDIDATE_W10)
+CANDIDATE_W11 = "W11"
+CATALOG_EVIDENCE_CANDIDATES = (
+    CANDIDATE_W7,
+    CANDIDATE_W8,
+    CANDIDATE_W9,
+    CANDIDATE_W10,
+    CANDIDATE_W11,
+)
 W7_WORKLOAD_VERSION = "2.9.0"
 W8_WORKLOAD_VERSION = "2.10.0"
 W9_WORKLOAD_VERSION = "2.11.0"
 W10_WORKLOAD_VERSION = "2.12.0"
+W11_WORKLOAD_VERSION = "2.13.0"
 #: Every candidate any qualification command may name.
 ALL_AUTHORIZED_CANDIDATES = (
     *AUTHORIZED_CANDIDATES,
@@ -385,7 +393,7 @@ DEVELOPMENT_CONTROL_PAIRS: dict[str, str] = {
 }
 UNKNOWN_CANDIDATE_MESSAGE = (
     "qualification candidate must be C1, C2, P1, P2, P2C, W1, W2, W3, W4, "
-    "W5, W6, W7, W8, W9, or W10"
+    "W5, W6, W7, W8, W9, W10, or W11"
 )
 _UNKNOWN_CANDIDATE = UNKNOWN_CANDIDATE_MESSAGE
 
@@ -470,6 +478,7 @@ def candidate_workload_version(candidate_id: str) -> str:
             CANDIDATE_W8: W8_WORKLOAD_VERSION,
             CANDIDATE_W9: W9_WORKLOAD_VERSION,
             CANDIDATE_W10: W10_WORKLOAD_VERSION,
+            CANDIDATE_W11: W11_WORKLOAD_VERSION,
         }[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
@@ -491,6 +500,7 @@ def candidate_controller(candidate_id: str) -> str | None:
             CANDIDATE_W8: CONTROLLER_WORKFLOW_V3,
             CANDIDATE_W9: CONTROLLER_WORKFLOW_V3,
             CANDIDATE_W10: CONTROLLER_WORKFLOW_V3,
+            CANDIDATE_W11: CONTROLLER_WORKFLOW_V3,
         }[candidate_id]
     except KeyError as exc:
         raise ConfigError(_UNKNOWN_CANDIDATE) from exc
@@ -637,6 +647,33 @@ def _structured_identity_fields(candidate_id: str) -> dict[str, Any]:
         )
         tools = json.dumps(
             openai_tool_definitions(W10_WORKLOAD_VERSION),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return {
+            "evidence_contract": evidence_contract(),
+            "system_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+            "native_tool_contract_sha256": hashlib.sha256(tools).hexdigest(),
+        }
+    if candidate_id == CANDIDATE_W11:
+        from blackwell_lab.workload.agent import SYSTEM_PROMPT_V241
+        from blackwell_lab.workload.catalog_agent import (
+            CHANGE_GUIDANCE_V213,
+            KNOWN_TOOL_GUIDANCE_V212,
+            SEARCH_GUIDANCE_V210,
+            SINGLE_CALL_GUIDANCE_V211,
+        )
+        from blackwell_lab.workload.native_tools import openai_tool_definitions
+        from blackwell_lab.workload.public_metadata.catalog_v2 import evidence_contract
+
+        prompt = (
+            f"{SYSTEM_PROMPT_V241} {SEARCH_GUIDANCE_V210} "
+            f"{SINGLE_CALL_GUIDANCE_V211} {KNOWN_TOOL_GUIDANCE_V212} "
+            f"{CHANGE_GUIDANCE_V213}"
+        )
+        tools = json.dumps(
+            openai_tool_definitions(W11_WORKLOAD_VERSION),
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,

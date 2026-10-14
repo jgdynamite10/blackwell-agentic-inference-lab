@@ -6,7 +6,7 @@ The immediate deliverable is one **qualified Akamai provider-native
 baseline**, not completion of the entire roadmap. D-0035 adds standalone
 W7 (workload 2.9.0), complete public-catalog evidence coverage, and
 `qualified-baseline`, requiring a verified same-session successful W7, W8,
-W9, or W10 freeze before measurement. Decision D-0037 adds W8 (workload 2.10.0)
+W9, W10, or W11 freeze before measurement. Decision D-0037 adds W8 (workload 2.10.0)
 with the public evaluator's literal search tokens in its catalog-agent
 guidance. Decision D-0038 adds W9 (workload 2.11.0), which keeps that
 guidance and requires exactly one native tool call on every turn. Decision
@@ -36,6 +36,9 @@ adds one sentence requiring exactly one native tool call per turn. The
 0.99 native-call floor is unchanged. Decision D-0040 adds successor W10
 (workload 2.12.0). Its system prompt keeps the W9 sentences and names the
 permitted tool identifiers. The zero invalid-tool-name floor is unchanged.
+Decision D-0041 adds successor W11 (workload 2.13.0). Its system prompt
+keeps the W10 sentences and requires check_recent_changes before the
+terminal recommendation. The 0.40 per-scenario floor is unchanged.
 
 Work proceeds phase by phase. **Each phase begins only after the project owner
 explicitly authorizes it, and work stops at the end of the currently
@@ -56,7 +59,7 @@ ten-task diagnostic canary (`blackwell-cloud canary-agent`), the read-only
 `analyze-qualification` command, and the isolated qualification
 environment; live W1/W2 and canary execution still require their own
 digest-bearing approval phrases. **Phase 4 live execution and
-later phases remain unauthorized.** Decision **D-0041** records one
+later phases remain unauthorized.** Decision **D-0042** records one
 closed same-day AWS diagnostic in `us-east-1` and authorizes no further
 AWS resource.
 
@@ -230,7 +233,7 @@ it) and preserve the same model artifact, container digest, serving
 configuration, workload, generation parameters, and measurement contract used
 for the other providers.
 
-Decision **D-0041** (2026-10-14) records one closed diagnostic, not this
+Decision **D-0042** (2026-10-14) records one closed diagnostic, not this
 matrix. `g7e.4xlarge` ($3.99816/hour) had no live capacity, so the host
 was a `g7e.8xlarge` ($5.26824/hour) for about 0.83 hours. The private
 cell used workload 2.7.0. Its result file was on the instance disk and

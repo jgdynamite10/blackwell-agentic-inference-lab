@@ -1,4 +1,4 @@
-# D-0041 record of the closed session aws-diag-20261014a. No inbound
+# D-0042 record of the closed session aws-diag-20261014a. No inbound
 # ports. Serving stayed on loopback. OS shutdown terminated the instance,
 # and the root volume was deleted with it. The precondition below refuses
 # another plan or apply until a later decision removes it.
@@ -132,16 +132,17 @@ resource "aws_instance" "gpu" {
     ignore_changes = [ami, user_data]
     precondition {
       condition     = var.run_tag != "aws-diag-20261014a"
-      error_message = "D-0041 is closed. This module records aws-diag-20261014a and refuses plan and apply until a new owner decision removes this precondition."
+      error_message = "D-0042 is closed. This module records aws-diag-20261014a and refuses plan and apply until a new owner decision removes this precondition."
     }
   }
 }
 
 locals {
+  # Deleted resources carried phase=d-0034. This label is decision D-0042.
   tags = {
     project = "blackwell-lab"
     run     = var.run_tag
     ttl     = "10h-from-first-boot"
-    phase   = "d-0041"
+    phase   = "d-0042"
   }
 }

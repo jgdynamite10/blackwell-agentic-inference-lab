@@ -70,6 +70,10 @@ KNOWN_TOOL_GUIDANCE_V212 = (
     "check_recent_changes, retrieve_runbook, and recommend_remediation. "
     "Do not invent a tool name."
 )
+# Workload 2.13.0 keeps the 2.12.0 prompt and requires the change feed
+# before the terminal recommendation. The sentence names no diagnosis,
+# remediation action, or scenario.
+CHANGE_GUIDANCE_V213 = "Before the terminal recommendation, call check_recent_changes."
 
 
 def _system_prompt(scenario, workload_version=None):
@@ -82,6 +86,11 @@ def _system_prompt(scenario, workload_version=None):
         return (
             f"{prompt} {SEARCH_GUIDANCE_V210} {SINGLE_CALL_GUIDANCE_V211} "
             f"{KNOWN_TOOL_GUIDANCE_V212}"
+        )
+    if workload_version == "2.13.0":
+        return (
+            f"{prompt} {SEARCH_GUIDANCE_V210} {SINGLE_CALL_GUIDANCE_V211} "
+            f"{KNOWN_TOOL_GUIDANCE_V212} {CHANGE_GUIDANCE_V213}"
         )
     return prompt
 
@@ -130,10 +139,12 @@ def run_task(
     from blackwell_lab.workload.native_tools import require_workload_version
 
     executed_version = require_workload_version(settings.workload_version)
-    if executed_version not in {"2.9.0", "2.10.0", "2.11.0", "2.12.0"}:
+    if executed_version not in {"2.9.0", "2.10.0", "2.11.0", "2.12.0", "2.13.0"}:
         from blackwell_lab.workload.validation import ConfigError
 
-        raise ConfigError("the catalog agent requires workload 2.9.0, 2.10.0, 2.11.0, or 2.12.0")
+        raise ConfigError(
+            "the catalog agent requires workload 2.9.0, 2.10.0, 2.11.0, 2.12.0, or 2.13.0"
+        )
     controller = build_controller(executed_version, evidence_context or uuid.uuid4().hex)
     started_at = clock.monotonic()
     submitted = submitted_at if submitted_at is not None else started_at

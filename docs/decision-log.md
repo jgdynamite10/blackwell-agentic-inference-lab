@@ -2446,7 +2446,40 @@ Shared renderer-closure files change the current W7, W8, and W9 source
 identity hashes; each saved receipt stays bound to the commit that
 produced it.
 
-## 2026-10-14 — D-0041: Closed AWS diagnostic while Akamai qualification continues
+## 2026-10-14 — D-0041: Successor W11 calls the change feed
+
+**Decision.** Add standalone candidate **W11** on workload **2.13.0**. It
+uses the same controller, evidence contract, catalog, tool-argument
+surface, schedules, floors, and generation settings as W10. The catalog
+agent keeps the W10 system prompt and appends one sentence: before the
+terminal recommendation, call `check_recent_changes`. The sentence names
+no diagnosis, remediation action, or scenario. W7 through W10 keep the
+prompts they already send. The sentence lives in the catalog agent so
+`agent.py` and the W5/W6 renderer closure stay byte-identical and those
+identity pins do not move. The 0.40 per-scenario floor is unchanged. A
+qualified-baseline manifest may name W11.
+
+**Rationale.** The owner directed this successor on 2026-10-14, before
+any new GPU session. The saved W10 freeze from run `w10-akamai-20261014a`
+failed the per-scenario floor. Public scenario `gpu-saturation-001` did
+not clear 0.40. Tasks that reached the accepted diagnosis and remediation
+had not called `check_recent_changes`, which is one of that scenario's
+public evidence alternatives. This guidance applies only to a later W11
+run.
+
+**Results that predate the change.** The saved W7 and W8 freezes remain
+failed study entries. The W9 freeze from run `w9-akamai-20261013a` met
+study entry and stays bound to the commit that produced it. The W9 freeze
+from run `w9-akamai-20261014a` remains a failed study entry under the
+invalid-tool-name gate. The W10 freeze from run `w10-akamai-20261014a`
+remains a failed study entry under the per-scenario floor. D-0041 does
+not reclassify any of those receipts. W11 qualification and any qualified
+baseline still require their own passing freeze, including 0.60 overall
+(120 of 200), 0.40 in every scenario, and the structural gates. Shared
+renderer-closure files change the current W7 through W10 source identity
+hashes; each saved receipt stays bound to the commit that produced it.
+
+## 2026-10-14 — D-0042: Closed AWS diagnostic while Akamai qualification continues
 
 **Decision.** The owner explicitly approved, on 2026-10-14, a same-day AWS
 session, the billing for that session, and one AWS GPU overlapping the
@@ -2467,8 +2500,9 @@ self-terminate was the backstop. No savings plan, reservation, or Spot.
 
 Notes taken before this record was placed on canonical `main` called the
 session D-0034. D-0034 through D-0040 were already the W5–W10 decisions,
-so the canonical number is D-0041. The run tag is unchanged. Resources
-that existed during the session carried `phase=d-0034`.
+and D-0041 is successor W11, so the canonical number is D-0042. The run
+tag is unchanged. Resources that existed during the session carried
+`phase=d-0034`.
 
 The host used the frozen D-0017 pins: Ubuntu 24.04, open driver
 `nvidia-driver-580-server-open` at `580.178.04-0ubuntu0.24.04.1`, the

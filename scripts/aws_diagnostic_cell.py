@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Historical D-0041 diagnostic cell for run aws-diag-20261014a.
+"""Historical D-0042 diagnostic cell for run aws-diag-20261014a.
 
 This is the invocation that ran on the GPU host against loopback serving.
 Ten public-catalog tasks, workload 2.7.0, concurrency 1. It is a closed
