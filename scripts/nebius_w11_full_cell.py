@@ -9,8 +9,9 @@ The shape matches the 2026-10-14 Akamai W11 freeze and the D-0044 AWS
 cell: workload 2.13.0, workflow-controller-v3, interactive, concurrency 1,
 one measured pass of 200 tasks, and one separate 200-task warmup.
 Generation is temperature 0.2, top_p 0.95, seed 20260906. The schedule
-seed is 20261020, so this draw is not the Akamai freeze draw and not the
-AWS schedule seed 20261018.
+seed is 20261024. The dirty nebius-w11-20261015a cell used 20261020 and
+is not reused. This draw is not the Akamai freeze draw and not the AWS
+schedule seed 20261018.
 
 Results stay under the directory passed as the only argument, which must
 be outside the repository. Copy that directory off the host before teardown.
@@ -39,9 +40,9 @@ _CONTAINER_DIGEST = (
     "docker.io/vllm/vllm-openai@sha256:"
     "c2f3b1b964e47809b722b5e75b61b1e7b39a50f70388cf2bf2418f16a9f31da2"
 )
-_SCHEDULE_SEED = 20261020
-_RUN_LABEL = "nebius-w11-20261015a"
-_INSTANCE_TYPE = "gpu-rtx6000:1gpu-24vcpu-218gb"
+_SCHEDULE_SEED = 20261024
+_RUN_LABEL = "nebius-w11-20261015b"
+_INSTANCE_TYPE = "gpu-rtx6000-a:1gpu-24vcpu-218gb"
 _LIST_PRICE = 1.80
 _PRICE_DATE = "2026-10-15"
 
@@ -74,7 +75,7 @@ def main(argv: list[str]) -> int:
         concurrency=1,
         comparison_mode="provider-native",
         instance_type=instance_type,
-        region="us-central1",
+        region="eu-south1",
         list_price_usd_per_hour=list_price,
         price_source_date=_PRICE_DATE,
         provider="nebius",

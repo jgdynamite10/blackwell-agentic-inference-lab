@@ -17,8 +17,9 @@ modified, or deleted without explicit owner approval, regardless of cost.
    terminated. Decision D-0043 then authorized one more AWS G7e. That
    instance has also    been terminated. Decision D-0044 authorized one
    further G7e for a freeze-shaped replication. That instance has also
-   been terminated. Decision D-0045 adds the Nebius replication kit
-   only. No Nebius instance has been created. Decision D-0046
+   been terminated. Decision D-0045 adds the Nebius replication kit.
+   The `us-central1` attempt and the dirty `eu-south1` cell were both
+   destroyed. The clean `eu-south1` cell is not launched. Decision D-0046
    authorizes at most one Akamai GPU for the NVFP4 cell, after the
    digest phrase, and requires deletion before any later cell. NIM is
    not launched.
@@ -73,7 +74,7 @@ Planning estimates (details and assumptions in
 | 6 — D-0042 diagnostic (closed 2026-10-14) | One G7e. `g7e.4xlarge` at $3.99816/h had no capacity. The host was `g7e.8xlarge` at $5.26824/h for about 0.83 hours (about $4.40 of compute). The 400 GB volume was deleted with the instance | Terminated after the diagnostic cell |
 | 6 — D-0043 W11 diagnostic (closed 2026-10-14) | One G7e. `g7e.4xlarge` at $3.99816/h had no capacity. The host was `g7e.8xlarge` at $5.26824/h for about 0.47 hours (about $2.46 of compute). The 400 GB volume was deleted with the instance | Terminated after the result directory was copied off the host |
 | 6 — D-0044 W11 freeze-shaped replication (closed 2026-10-14) | One G7e. `g7e.4xlarge` at $3.99816/h had no capacity in `us-east-1a` and launched in `us-east-1c`. About 1.72 hours (about $6.86 of compute). The 400 GB volume was deleted with the instance | Terminated after the result directory was copied off the host |
-| 6 — D-0045 Nebius W11 kit (not launched) | One `gpu-rtx6000` / `1gpu-24vcpu-218gb` at $1.80 per GPU-hour in `us-central1`, plus a 400 GiB network SSD. Ten-hour first-boot shutdown is the compute backstop. Disk billing ends only when the instance is deleted | Do not apply until the D-0045 phrase is set. Check in if the session passes 4 hours |
+| 6 — D-0045 Nebius W11 kit | `us-central1` `gpu-rtx6000` did not place and was destroyed. One dirty `eu-south1` `gpu-rtx6000-a` cell was destroyed the same day and is not the comparison cell. The clean cell is one `gpu-rtx6000-a` / `1gpu-24vcpu-218gb` at $1.80 per GPU-hour in `eu-south1`, plus a 400 GiB network SSD, run tag `nebius-w11-20261015b`. Ten-hour first-boot shutdown is the compute backstop. Disk billing ends only when the instance is deleted | Do not apply until the revised D-0045 phrase is set. Check in if the session passes 4 hours |
 | 4 — D-0046 Akamai vLLM NVFP4 cell (not launched) | One `g3-gpu-rtxpro6000-blackwell-1` in `ca-central` at the $3.00/h normalized rate. Expected session about 2–2.5 hours if serving starts, about $6–$8. The six-hour module tag is a backstop, not a plan to stay up. NIM is skipped | Do not apply until the plan digest is approved. Delete the instance when the cell finishes or serving fails. Check in if the session passes 3 hours |
 
 Reaching a trigger pauses provisioning until the owner reauthorizes. The

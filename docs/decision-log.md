@@ -2651,12 +2651,37 @@ are not authorized.
 The cell script matches the finished freeze shape: workload 2.13.0,
 controller `workflow-controller-v3`, interactive, concurrency 1, 200
 measured tasks, one 200-task warmup, temperature 0.2, top_p 0.95,
-generation seed 20260906. The schedule seed is 20261020. The manifest
-provider is `nebius`. `qualify-agent` is not the entry point. The
-three-cell baseline and the 12-cell matrix are not authorized.
+generation seed 20260906. The schedule seed first written here is
+20261020. The manifest provider is `nebius`. `qualify-agent` is not
+the entry point. The three-cell baseline and the 12-cell matrix are
+not authorized.
 
-**Not yet run.** No Nebius account was available while this kit was
-written, so capacity is unchecked. A public price is not capacity.
+**Revision (same day, after the first attempt).** `us-central1` on
+platform `gpu-rtx6000` did not place preset `1gpu-24vcpu-218gb`. The
+apply returned a VM schedule timeout for insufficient hardware. Those
+resources were destroyed. The owner then directed the same preset onto
+platform `gpu-rtx6000-a` in `eu-south1`. Nebius lists that platform as
+one RTX PRO 6000 Blackwell Server Edition, 96 GB, on the same 24 vCPU
+and 218 GiB Intel Xeon 6776P preset. This kit has no region named
+`us-south1`. `uk-south2`, Spot, the 8-GPU preset, and a second GPU stay
+unauthorized. This revision supersedes only the region and platform
+lock above. It does not create, modify, or delete a resource.
+
+A cell with run tag `nebius-w11-20261015a` finished on that `eu-south1`
+host the same day and was destroyed. Its manifest records commit
+`b144998` with a dirty tree, schedule seed 20261020, and measured draw
+seed 20261021. That result predates this revision as a comparison
+receipt. It stays outside Git and is not the cell that sits beside the
+Akamai and AWS W11 freeze cells. The clean cell uses a new run tag,
+`nebius-w11-20261015b`, and schedule seed 20261024, from a clean commit
+that contains this revision. Live apply and destroy still require the
+phrase in `scripts/nebius_w11_operator.py`, which now names the new
+tag. Saying that phrase is a separate act from this revision.
+
+**Capacity at decision time.** No Nebius account was available while
+this kit was written, so capacity was unchecked. A public price is
+not capacity.
+
 Relative to the finished hosts, this preset has 24 vCPU rather than 16,
 218 GiB of memory rather than 125 GiB (AWS) or 173 GiB (Akamai), and a
 Granite Rapids CPU. The image driver branch is 580.x; bootstrap still

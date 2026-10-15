@@ -1,33 +1,33 @@
 variable "run_tag" {
   description = "Exact run this configuration may create. Teardown targets only this tag."
   type        = string
-  default     = "nebius-w11-20261015a"
+  default     = "nebius-w11-20261015b"
 
   validation {
-    condition     = var.run_tag == "nebius-w11-20261015a"
-    error_message = "run_tag is locked to the D-0045 Nebius replication."
+    condition     = var.run_tag == "nebius-w11-20261015b"
+    error_message = "run_tag is locked to the clean D-0045 Nebius cell."
   }
 }
 
 variable "region" {
-  description = "Project region. gpu-rtx6000 is the us-central1 platform. uk-south2 and eu-south1 are a different platform and are not authorized."
+  description = "Project region. The owner moved this run to eu-south1 after us-central1 could not place a GPU. uk-south2 is not authorized."
   type        = string
-  default     = "us-central1"
+  default     = "eu-south1"
 
   validation {
-    condition     = var.region == "us-central1"
-    error_message = "region is locked to us-central1. There is no fallback region."
+    condition     = var.region == "eu-south1"
+    error_message = "region is locked to eu-south1."
   }
 }
 
 variable "platform" {
-  description = "Nebius compute platform for one RTX PRO 6000 Server Edition."
+  description = "Nebius compute platform for one RTX PRO 6000 Server Edition in eu-south1."
   type        = string
-  default     = "gpu-rtx6000"
+  default     = "gpu-rtx6000-a"
 
   validation {
-    condition     = var.platform == "gpu-rtx6000"
-    error_message = "platform is locked to gpu-rtx6000."
+    condition     = var.platform == "gpu-rtx6000-a"
+    error_message = "platform is locked to gpu-rtx6000-a."
   }
 }
 
@@ -53,7 +53,7 @@ variable "project_id" {
 }
 
 variable "network_id" {
-  description = "Existing VPC network in the us-central1 project. Supply it from the private tfvars file."
+  description = "Existing VPC network in the eu-south1 project. Supply it from the private tfvars file."
   type        = string
 
   validation {

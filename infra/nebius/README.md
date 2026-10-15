@@ -1,27 +1,34 @@
 # Nebius W11 replication kit (D-0045)
 
-One on-demand RTX PRO 6000 Blackwell Server Edition in `us-central1`.
-The purchasable shape is platform `gpu-rtx6000`, preset
+One on-demand RTX PRO 6000 Blackwell Server Edition in `eu-south1`.
+The purchasable shape is platform `gpu-rtx6000-a`, preset
 `1gpu-24vcpu-218gb`: 1 GPU, 24 vCPU, 218 GiB RAM. The published GPU
 price checked on 2026-10-15 is **$1.80 per GPU-hour**. The 400 GiB
 network SSD is billed separately. This kit does not create an instance
 by itself.
 
 The image family is `ubuntu24.04-cuda13.0` (Ubuntu 24.04, CUDA 13.0,
-NVIDIA driver 580.x). Bootstrap still requires the lab pin
+NVIDIA driver 580.x). It is a public family, so the boot disk leaves
+`parent_id` unset and Nebius uses the regional public catalog. Setting
+the user project there makes the lookup return not found. Bootstrap still
+requires the lab pin
 `nvidia-driver-580-server-open=580.178.04-0ubuntu0.24.04.1`. The image
 docs do not promise that exact package. A mismatch stops the cell; the
 pin is not relaxed here.
 
 This host is larger than the finished comparison hosts (16 vCPU, 125 GiB
 on AWS and 173 GiB on Akamai). The CPU is Intel Xeon 6776P. Record those
-differences with the result. There is no second region: `gpu-rtx6000-a`
-in `uk-south2` and `eu-south1` is not authorized.
+differences with the result. `us-central1` could not place this preset
+on 2026-10-15. The owner moved the same preset to `eu-south1` on
+platform `gpu-rtx6000-a`. `uk-south2` is not authorized. The clean cell
+uses run tag `nebius-w11-20261015b`. The earlier
+`nebius-w11-20261015a` result had a dirty tree and is not the
+comparison cell.
 
 ## What stays out of Git
 
 Copy `terraform.tfvars.example` to
-`~/.local/share/blackwell-lab/nebius-w11-20261015a/terraform.tfvars`
+`~/.local/share/blackwell-lab/nebius-w11-20261015b/terraform.tfvars`
 and fill the project, network, and subnet identifiers there. Terraform
 state and plans stay in that same private directory. Genuine results
 stay in `LAB_RESULTS_DIR`, outside this repository.
