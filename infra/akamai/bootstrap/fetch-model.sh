@@ -23,10 +23,10 @@ set +x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/bootstrap.env"
-EXAMPLE_FILE="${SCRIPT_DIR}/bootstrap.env.example"
 
 # shellcheck source=pins.sh
 . "${SCRIPT_DIR}/pins.sh"
+EXAMPLE_FILE="$(resolve_bootstrap_example "${SCRIPT_DIR}")"
 
 log() { printf '[bwlab-fetch-model] %s\n' "$*"; }
 fail() { printf '[bwlab-fetch-model] ERROR: %s\n' "$*" >&2; exit 1; }

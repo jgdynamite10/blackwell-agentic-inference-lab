@@ -24,7 +24,7 @@ live execution remains unauthorized (decision D-0020).
 | Component/path | Status | Current boundary |
 | --- | --- | --- |
 | vLLM BF16, single GPU | ready | Existing validated baseline path only |
-| vLLM NVFP4 | conditional/offline evidence only; live blocked | No official validated RTX PRO 6000 recipe yet |
+| vLLM NVFP4 | ready for the D-0046 aggregate only | One Akamai cell may run after its digest phrase. The model card does not list this GPU. NIM and TensorRT-LLM stay blocked |
 | TensorRT-LLM BF16/NVFP4 | conditional/offline evidence only; live blocked | Exact Nemotron profile, container/build path, and native-tool compatibility unresolved |
 | NVIDIA NIM BF16/W4A16/NVFP4 | conditional; strongest bounded follow-up candidate | Exact immutable image digest, runtime profile ID, embedded model identity, entitlement/terms, and parser/tool behavior require local resolution |
 | NVIDIA Dynamo | blocked/deferred | Current Nemotron path uses experimental images and unsupported/unproven RTX PRO distributed topology |
@@ -48,8 +48,10 @@ opt-in, and the default path can select broken CUTLASS kernels on SM120.
 Sources: [vllm#31085](https://github.com/vllm-project/vllm/issues/31085),
 [vllm#33416](https://github.com/vllm-project/vllm/issues/33416),
 [cutlass#3096](https://github.com/NVIDIA/cutlass/issues/3096). No
-official validated RTX PRO 6000 recipe is recorded. Live cells remain
-blocked.
+official validated RTX PRO 6000 recipe is recorded. Decision D-0046
+pins one aggregate and allows that identity to evaluate as ready. The
+cell still needs its own digest-bearing apply phrase. A different
+digest stays blocked.
 
 **TensorRT-LLM BF16/NVFP4.** Feasibility recorded official RTX Pro 6000
 SE FP4 support and published RTX 6000 Pro performance data for a

@@ -182,7 +182,13 @@ explicitly revises them in writing.
    **D-0045** records the Nebius replication kit (one
    `gpu-rtx6000` / `1gpu-24vcpu-218gb` in `us-central1`). That decision
    does not launch an instance. Live Nebius apply and destroy still
-   require the phrase in `scripts/nebius_w11_operator.py`.
+   require the phrase in `scripts/nebius_w11_operator.py`. Decision
+   **D-0046** pins one Akamai vLLM NVFP4 cell
+   (`akamai-w11-nvfp4-20261015a`, `ca-central`,
+   `g3-gpu-rtxpro6000-blackwell-1`) and skips NIM because that pin
+   cannot be made. The 36-cell matrix and TensorRT-LLM stay unrun.
+   Apply and destroy for D-0046 still require the digest-bearing phrase.
+   Delete the instance before any later cell.
    Actual apply, pilot,
    mvl-baseline, qualify-agent, and destroy commands still require their
    separate exact local approval phrases.

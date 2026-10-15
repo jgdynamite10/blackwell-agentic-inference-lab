@@ -16,7 +16,6 @@ from blackwell_lab.cloud.realbench import RealRunSpec, run_real_cell
 from blackwell_lab.engines import (
     BUILTIN_VLLM_BF16_SINGLE_GPU,
     READINESS_BLOCKED,
-    READINESS_CONDITIONAL,
     READINESS_READY,
     EngineContractError,
     declaration_from_mapping,
@@ -123,20 +122,21 @@ class TestDiscovery:
 
 
 class TestEvidenceConsistentInput:
-    def test_matching_pins_are_conditional_at_most_and_never_ready(self):
-        assert MODEL_ARTIFACT_HASH is None
-        readiness = evaluate_engine_contract(_declare())
-        assert readiness.status in {READINESS_CONDITIONAL, READINESS_BLOCKED}
-        assert readiness.status != READINESS_READY
-        assert readiness.status == READINESS_BLOCKED
-        assert readiness.profile_id == PROFILE_ID
-        text = " ".join(readiness.reasons)
-        assert "live execution remains blocked until the exact RTX PRO 6000 NVFP4 path" in text
-        assert "artifact digest" in text
-        assert "SM120" in text
-        assert "tool-call" in text
+    def test_only_the_d0046_aggregate_is_ready(self):
+        assert MODEL_ARTIFACT_HASH.startswith("sha256:")
+        blocked = evaluate_engine_contract(_declare())
+        assert blocked.status == READINESS_BLOCKED
+        assert blocked.profile_id == PROFILE_ID
+        assert any("artifact digest" in reason for reason in blocked.reasons)
+        identity = _payload()["identity"]
+        identity["model_artifact_hash"] = MODEL_ARTIFACT_HASH
+        ready = evaluate_engine_contract(_declare(identity=identity))
+        assert ready.status == READINESS_READY
+        assert ready.profile_id == PROFILE_ID
+        require_ready_contract(ready)
+        require_supported_contract(ready)
 
-    def test_evaluate_cannot_construct_ready(self):
+    def test_evaluate_ready_is_only_the_matching_aggregate(self):
         tree = ast.parse(COMPONENT_PATH.read_text(encoding="utf-8"))
         statuses: list[str] = []
         for node in ast.walk(tree):
@@ -149,8 +149,7 @@ class TestEvidenceConsistentInput:
             for keyword in node.keywords:
                 if keyword.arg == "status" and isinstance(keyword.value, ast.Name):
                     statuses.append(keyword.value.id)
-        assert statuses
-        assert set(statuses) == {"READINESS_BLOCKED"}
+        assert set(statuses) == {"READINESS_BLOCKED", "READINESS_READY"}
 
     def test_both_genuine_execution_gates_reject_it(self):
         readiness = evaluate_engine_contract(_declare())
@@ -163,6 +162,16 @@ class TestEvidenceConsistentInput:
         payload = _payload(
             entitlements=[{"name": "optional-note", "required": False, "satisfied": True}]
         )
+        readiness = evaluate_engine_contract(declaration_from_mapping(payload))
+        assert readiness.status == READINESS_BLOCKED
+        with pytest.raises(EngineContractError):
+            require_ready_contract(readiness)
+
+    def test_pinned_hash_with_failed_entitlement_stays_blocked(self):
+        payload = _payload(
+            entitlements=[{"name": "optional-note", "required": True, "satisfied": False}]
+        )
+        payload["identity"]["model_artifact_hash"] = MODEL_ARTIFACT_HASH
         readiness = evaluate_engine_contract(declaration_from_mapping(payload))
         assert readiness.status == READINESS_BLOCKED
         with pytest.raises(EngineContractError):

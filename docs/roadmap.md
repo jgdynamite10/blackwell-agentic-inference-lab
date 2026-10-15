@@ -264,6 +264,14 @@ preset `1gpu-24vcpu-218gb`, region `us-central1`, image family
 `ubuntu24.04-cuda13.0`. No instance has been created. Live apply is a
 separate phrase. It does not authorize the comparative matrix.
 
+Decision **D-0046** (2026-10-15) narrows the unmeasured precision factor
+to one Akamai cell: vLLM NVFP4, workload 2.13.0, 200 measured tasks, one
+200-task warmup, interactive, concurrency 1, `ca-central`,
+`g3-gpu-rtxpro6000-blackwell-1`. NIM BF16 was the planned second cell
+and is skipped because its image digest, runtime profile, and embedded
+model hash cannot be pinned. TensorRT-LLM and the 36-cell matrix stay
+unrun. No instance has been created. Live apply is a separate phrase.
+
 ## Phase 7 — Analysis and publication
 
 Calculate outcome-level performance and economic measures across Akamai Cloud,
