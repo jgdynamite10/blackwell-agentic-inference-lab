@@ -27,9 +27,13 @@ explicitly revises them in writing.
    host before teardown. The instance is terminated, no volume remains,
    and this run's token secret, staging bucket, role, instance profile,
    and security group were deleted. Task scores stay out of git. Phase
-   6, the comparative matrix, remains unauthorized. Any further AWS
-   create, resize, start, stop, or delete needs a new owner decision.
-   Google Cloud remains unauthorized.
+   6, the comparative matrix, remains unauthorized. Decision **D-0047**
+   authorizes one on-demand `g7e.4xlarge` NVFP4 cell in `us-east-1`,
+   run tag `aws-w11-nvfp4-20261015a`, trying `us-east-1a` then
+   `us-east-1c`. `g7e.8xlarge`, Spot, reservations, a second GPU, NIM,
+   Nebius, and a new Akamai GPU are not part of that decision. Apply
+   and destroy still require their digest-bearing phrases. Google Cloud
+   remains unauthorized.
 6. Follow the spend controls in [docs/cost-guardrails.md](docs/cost-guardrails.md).
 
 ## 2. Repository publicity and results privacy

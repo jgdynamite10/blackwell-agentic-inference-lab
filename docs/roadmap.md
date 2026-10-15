@@ -272,6 +272,14 @@ and is skipped because its image digest, runtime profile, and embedded
 model hash cannot be pinned. TensorRT-LLM and the 36-cell matrix stay
 unrun. No instance has been created. Live apply is a separate phrase.
 
+Decision **D-0047** (2026-10-15) authorizes one AWS NVFP4 cell that
+matches the finished Akamai NVFP4 cell: workload 2.13.0, 200 measured
+tasks, one 200-task warmup, interactive, concurrency 1, schedule seed
+20261023. The host is one on-demand `g7e.4xlarge` in `us-east-1` at
+$3.99816 per hour. Try `us-east-1a`, then `us-east-1c`. It is a
+real-runs cell, not a qualification receipt, and it does not authorize
+the comparative matrix. Live apply is a separate phrase.
+
 ## Phase 7 — Analysis and publication
 
 Calculate outcome-level performance and economic measures across Akamai Cloud,

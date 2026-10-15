@@ -1,7 +1,6 @@
-# D-0042 record of the closed session aws-diag-20261014a. No inbound
-# ports. Serving stayed on loopback. OS shutdown terminated the instance,
-# and the root volume was deleted with it. The precondition below refuses
-# another plan or apply until a later decision removes it.
+# D-0047 AWS NVFP4 cell, run aws-w11-nvfp4-20261015a. No inbound ports.
+# Serving stays on loopback. OS shutdown terminates the instance, and the
+# root volume is deleted with it. The closed D-0042 tag cannot plan.
 
 data "aws_vpc" "default" {
   default = true
@@ -14,7 +13,7 @@ data "aws_subnets" "default" {
   }
   filter {
     name   = "availability-zone"
-    values = ["us-east-1a"]
+    values = [var.availability_zone]
   }
   filter {
     name   = "default-for-az"
@@ -131,18 +130,22 @@ resource "aws_instance" "gpu" {
   lifecycle {
     ignore_changes = [ami, user_data]
     precondition {
-      condition     = var.run_tag != "aws-diag-20261014a"
-      error_message = "D-0042 is closed. This module records aws-diag-20261014a and refuses plan and apply until a new owner decision removes this precondition."
+      condition = (
+        var.run_tag == "aws-w11-nvfp4-20261015a" &&
+        var.region == "us-east-1" &&
+        var.instance_type == "g7e.4xlarge" &&
+        contains(["us-east-1a", "us-east-1c"], var.availability_zone)
+      )
+      error_message = "D-0047 plans only aws-w11-nvfp4-20261015a on g7e.4xlarge in us-east-1a or us-east-1c."
     }
   }
 }
 
 locals {
-  # Deleted resources carried phase=d-0034. This label is decision D-0042.
   tags = {
     project = "blackwell-lab"
     run     = var.run_tag
     ttl     = "10h-from-first-boot"
-    phase   = "d-0042"
+    phase   = "d-0047"
   }
 }

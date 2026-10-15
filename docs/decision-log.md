@@ -2721,3 +2721,40 @@ available. That cell is not launched.
 and an unpinned run would not sit beside the cloud table. One pinned
 precision cell is the comparison that can be made. The software factor
 stays open until a NIM or TensorRT-LLM pin exists.
+
+## 2026-10-15 — D-0047: One AWS vLLM NVFP4 cell
+
+**Decision.** The owner authorized, on 2026-10-15, one AWS cell that
+matches the finished Akamai NVFP4 cell. This is not the Phase 6
+comparative matrix. NIM, Nebius, a new Akamai GPU, Spot, a reservation,
+and `g7e.8xlarge` are not authorized. Apply and destroy still require
+`I approve creating billable AWS resources for run aws-w11-nvfp4-20261015a using plan sha256:<digest>`
+and
+`I approve deleting the exact recorded AWS resources for run aws-w11-nvfp4-20261015a using destroy plan sha256:<digest>`.
+A sentence that still contains `<digest>` is not approval.
+
+The host is one on-demand `g7e.4xlarge` in `us-east-1` at **$3.99816
+per hour**, dated 2026-10-14. Try `us-east-1a`, then `us-east-1c`. If
+both return `InsufficientInstanceCapacity`, stop. The root volume is
+400 GB gp3, encrypted, and deleted with the instance. No inbound ports.
+IMDSv2 is required. Shutdown behavior is terminate. The 10-hour
+first-boot terminate timer stays. After vLLM is healthy, the bootstrap
+watchdog is disabled because poweroff terminates this host. Check in at
+3 hours.
+
+The cell is real-runs, not `qualify-agent`. Workload 2.13.0, controller
+`workflow-controller-v3`, interactive, concurrency 1, 200 measured
+tasks, one separate 200-task warmup. Generation is temperature 0.2,
+top_p 0.95, seed 20260906, 1024 max tokens, reasoning on. The schedule
+seed is 20261023. The run tag is `aws-w11-nvfp4-20261015a`.
+
+**NVFP4 pin.** The weights, revision, aggregate, vLLM 0.27.1 container
+digest, and served name are the D-0046 pin. `--dtype bfloat16` stays
+omitted. After fetch, the on-host aggregate must match or the cell
+stops and the instance is deleted. The driver pin remains
+`nvidia-driver-580-server-open` `580.178.04-0ubuntu0.24.04.1`. Bootstrap
+exit 2 means reboot once and continue.
+
+**Rationale.** The Akamai NVFP4 cell is the precision measurement. One
+AWS host of the same shape is the comparison that can be made. The
+matrix stays closed.

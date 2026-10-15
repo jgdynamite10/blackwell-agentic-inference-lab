@@ -17,14 +17,14 @@ EOF
 chmod 0755 /usr/local/sbin/bwlab-ttl
 cat > /etc/systemd/system/bwlab-ttl.service <<'EOF'
 [Unit]
-Description=Terminate this D-0042 host at its first-boot deadline
+Description=Terminate this D-0047 host at its first-boot deadline
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/bwlab-ttl
 EOF
 cat > /etc/systemd/system/bwlab-ttl.timer <<'EOF'
 [Unit]
-Description=Check the D-0042 teardown deadline
+Description=Check the D-0047 teardown deadline
 [Timer]
 OnBootSec=1min
 OnUnitActiveSec=1min
