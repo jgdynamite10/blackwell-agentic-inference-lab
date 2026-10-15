@@ -2670,4 +2670,3 @@ the documented one-GPU Server Edition VM whose image matches this lab's
 OS, CUDA major, and driver branch. The kit can be planned and, after
 the phrase, applied from the owner's machine without putting account
 identifiers or results in Git.
-

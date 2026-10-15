@@ -15,7 +15,7 @@ modified, or deleted without explicit owner approval, regardless of cost.
    AWS G7e overlapping the in-progress Akamai qualification (decision
    D-0042). That approval was one instance, and the instance has been
    terminated. Decision D-0043 then authorized one more AWS G7e. That
-   instance has also been terminated. Decision D-0044 authorized one
+   instance has also    been terminated. Decision D-0044 authorized one
    further G7e for a freeze-shaped replication. That instance has also
    been terminated. Decision D-0045 adds the Nebius replication kit
    only. No Nebius instance has been created.
