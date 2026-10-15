@@ -179,10 +179,13 @@ explicitly revises them in writing.
    W11 diagnostic on a single G7e. Decision **D-0044** records one closed
    real-runs replication of the finished W11 freeze shape on one
    `g7e.4xlarge` and authorizes no further AWS resource. Decision
-   **D-0045** records the Nebius replication kit (one
-   `gpu-rtx6000` / `1gpu-24vcpu-218gb` in `us-central1`). That decision
-   does not launch an instance. Live Nebius apply and destroy still
-   require the phrase in `scripts/nebius_w11_operator.py`. Decision
+   **D-0045** records the Nebius replication kit. The same-day revision
+   locks one `gpu-rtx6000-a` / `1gpu-24vcpu-218gb` in `eu-south1` after
+   `us-central1` could not place `gpu-rtx6000`. The dirty
+   `nebius-w11-20261015a` result is not the comparison cell. Live
+   Nebius apply and destroy still require the phrase in
+   `scripts/nebius_w11_operator.py`, now for run tag
+   `nebius-w11-20261015b`. Decision
    **D-0046** pins one Akamai vLLM NVFP4 cell
    (`akamai-w11-nvfp4-20261015a`, `ca-central`,
    `g3-gpu-rtxpro6000-blackwell-1`) and skips NIM because that pin

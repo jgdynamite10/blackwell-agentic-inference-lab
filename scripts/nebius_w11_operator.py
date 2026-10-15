@@ -15,8 +15,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-RUN_TAG = "nebius-w11-20261015a"
-APPROVAL_PHRASE = "I approve the Nebius W11 freeze replication for run nebius-w11-20261015a"
+RUN_TAG = "nebius-w11-20261015b"
+APPROVAL_PHRASE = "I approve the Nebius W11 freeze replication for run nebius-w11-20261015b"
 MODULE = Path(__file__).resolve().parents[1] / "infra" / "nebius"
 
 

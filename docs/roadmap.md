@@ -259,10 +259,13 @@ remains. Task scores stay out of git. It does not authorize the
 comparative matrix.
 
 Decision **D-0045** (2026-10-15) records the Nebius replication kit for
-the same W11 freeze shape. The locked shape is platform `gpu-rtx6000`,
-preset `1gpu-24vcpu-218gb`, region `us-central1`, image family
-`ubuntu24.04-cuda13.0`. No instance has been created. Live apply is a
-separate phrase. It does not authorize the comparative matrix.
+the same W11 freeze shape. `us-central1` platform `gpu-rtx6000` could
+not place preset `1gpu-24vcpu-218gb`. The same-day revision locks
+platform `gpu-rtx6000-a` in `eu-south1`. The image family remains
+`ubuntu24.04-cuda13.0`. The run tagged `nebius-w11-20261015a` finished
+on that host with a dirty tree and is not the comparison cell. The
+clean cell is run tag `nebius-w11-20261015b` and still needs its own
+approval phrase. It does not authorize the comparative matrix.
 
 Decision **D-0046** (2026-10-15) narrows the unmeasured precision factor
 to one Akamai cell: vLLM NVFP4, workload 2.13.0, 200 measured tasks, one

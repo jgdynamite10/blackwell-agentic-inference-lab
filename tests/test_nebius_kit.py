@@ -23,17 +23,22 @@ def _text(name: str) -> str:
     return (MODULE / name).read_text(encoding="utf-8")
 
 
-def test_shape_is_one_rtx_pro_6000_in_us_central1():
+def test_shape_is_one_rtx_pro_6000_in_eu_south1():
     main = _text("main.tf")
     variables = _text("variables.tf")
-    assert 'default     = "gpu-rtx6000"' in variables
+    assert 'default     = "gpu-rtx6000-a"' in variables
     assert 'default     = "1gpu-24vcpu-218gb"' in variables
-    assert 'default     = "us-central1"' in variables
+    assert 'default     = "eu-south1"' in variables
+    assert 'default     = "nebius-w11-20261015b"' in variables
     assert "ubuntu24.04-cuda13.0" in main
+    family = main.split("source_image_family", 1)[1].split("}", 1)[0]
+    assert "parent_id" not in family
     assert "size_gibibytes" in main and "400" in main
     assert "recovery_policy" in main and '"FAIL"' in main
     assert "8gpu-192vcpu-1744gb" not in main
-    assert "gpu-rtx6000-a" not in main
+    assert "uk-south2" not in main
+    assert 'default     = "gpu-rtx6000"\n' not in variables
+    assert 'default     = "us-central1"' not in variables
 
 
 def test_private_identifiers_are_not_committed():
@@ -57,7 +62,9 @@ def test_cell_matches_the_freeze_shape():
     assert 'provider="nebius"' in source
     assert "tasks_per_repetition=200" in source
     assert "warmup_passes=1" in source
-    assert "_SCHEDULE_SEED = 20261020" in source
+    assert "_SCHEDULE_SEED = 20261024" in source
+    assert '_RUN_LABEL = "nebius-w11-20261015b"' in source
+    assert 'region="eu-south1"' in source
     assert "_LIST_PRICE = 1.80" in source
     assert "qualify-agent" not in source.split('"""', 2)[2]
 
@@ -68,6 +75,8 @@ def test_operator_blocks_apply_without_the_phrase(monkeypatch):
     assert operator.main(["nebius_w11_operator.py", "apply"]) == 2
     assert operator.gate("plan", None) is None
     assert operator.gate("apply", operator.APPROVAL_PHRASE) is None
+    old = "I approve the Nebius W11 freeze replication for run nebius-w11-20261015a"
+    assert operator.gate("apply", old) is not None
 
 
 def test_operator_stops_before_terraform_when_the_token_is_missing(monkeypatch):

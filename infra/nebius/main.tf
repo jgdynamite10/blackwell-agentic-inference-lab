@@ -79,8 +79,9 @@ resource "nebius_compute_v1_instance" "gpu" {
         type            = "NETWORK_SSD"
         size_gibibytes  = 400
         forbid_deletion = false
+        # Public family. parent_id is only for a custom family; the user
+        # project has no images and a lookup there returns not found.
         source_image_family = {
-          parent_id    = var.project_id
           image_family = "ubuntu24.04-cuda13.0"
         }
       }
