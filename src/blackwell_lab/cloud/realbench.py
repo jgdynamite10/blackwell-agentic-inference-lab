@@ -172,6 +172,10 @@ class RealRunSpec:
     #: catalog is never consulted and ``run_real_cell`` requires the
     #: matching decoded stage. ``None`` for every catalog-driven run.
     sealed_set: SealedSetBinding | None = None
+    #: Purchasable cloud recorded in the manifest. Defaults to the historical
+    #: Akamai path. An AWS or GCP host must set this; leaving it as Akamai
+    #: would hide the provider.
+    provider: str = "akamai"
 
 
 def _validate_sealed_spec(spec: RealRunSpec) -> None:
@@ -269,6 +273,8 @@ def _validate_spec(spec: RealRunSpec) -> Profile:
         raise ConfigError("list_price_usd_per_hour must be >= 0")
     if not spec.instance_type or not spec.region:
         raise ConfigError("instance_type and region are required for genuine runs")
+    if spec.provider not in {"akamai", "gcp", "aws", "other"}:
+        raise ConfigError("cloud provider must be akamai, gcp, aws, or other")
     if spec.artifact_family not in ALLOWED_ARTIFACT_FAMILIES:
         raise ConfigError("artifact_family must be real-runs, qualification-runs, or canary-runs")
     _validate_sealed_spec(spec)
@@ -309,7 +315,7 @@ def build_real_manifest(
 ) -> dict:
     """A schema-valid gpu-mode run manifest (no fabricated values)."""
     cloud: dict = {
-        "provider": "akamai",
+        "provider": spec.provider,
         "instance_type": spec.instance_type,
         "region": spec.region,
         "comparison_mode": spec.comparison_mode,
