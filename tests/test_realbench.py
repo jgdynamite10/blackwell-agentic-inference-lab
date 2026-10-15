@@ -327,6 +327,7 @@ class TestGenuineCell:
         assert manifest["generation"]["reasoning_mode"] is True
         assert manifest["host"]["gpu_model"].startswith("NVIDIA RTX PRO 6000")
         assert manifest["cloud"]["comparison_mode"] == "provider-native"
+        assert manifest["cloud"]["provider"] == "akamai"
         assert result["execution_mode"] == "gpu"
         assert "mock_diagnostics" not in result
         assert result["latency_ms"]["task_completion"]["available"] is True
@@ -334,6 +335,21 @@ class TestGenuineCell:
         assert result["throughput"]["total_output_tokens"] > 0
         assert isinstance(result["slo"]["slo_attaining_tasks"], int)
         assert result["gpu"]["telemetry_available"] is True
+
+    def test_manifest_records_aws_when_the_cell_declares_it(self, real_results_dir):
+        manifest = self._run(
+            real_results_dir,
+            provider="aws",
+            region="us-east-1",
+            instance_type="g7e.4xlarge",
+        )[0].manifest
+        assert manifest["cloud"]["provider"] == "aws"
+        assert manifest["cloud"]["region"] == "us-east-1"
+        assert manifest["cloud"]["instance_type"] == "g7e.4xlarge"
+
+    def test_unknown_cloud_provider_is_rejected(self, real_results_dir):
+        with pytest.raises(ConfigError, match="cloud provider"):
+            self._run(real_results_dir, provider="linode")
 
     def test_chunks_are_never_tokens_itl_is_unavailable_with_reason(self, real_results_dir):
         result = self._run(real_results_dir)[0].result

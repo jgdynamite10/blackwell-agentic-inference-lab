@@ -2579,3 +2579,52 @@ volume deleted with it. The token secret, staging bucket, instance
 role, and security group for `aws-w11-20261014a` were deleted. This
 decision authorizes nothing further.
 
+## 2026-10-14 — D-0044: AWS replication of the finished W11 freeze cell
+
+**Decision.** The owner approved, on 2026-10-14, billing one AWS GPU so
+a full Akamai-protocol cell could be considered for a presentation, and
+approved recording this decision. This authorizes one on-demand
+single-GPU G7e in `us-east-1`, run tag `aws-w11-full-20261014a`. The
+preferred size was `g7e.4xlarge` at **$3.99816 per hour** (16 vCPU).
+Live `RunInstances` returned `InsufficientInstanceCapacity` for that
+size in `us-east-1a`. The same size launched in `us-east-1c`.
+`g7e.8xlarge` was not used. vCPU matches the Akamai host's 16. System
+memory does not: this manifest records 124.77 GiB, and the Akamai
+manifest records 172.95 GiB. The root volume was 400 GB gp3, encrypted,
+deleted with the instance. A 10-hour first-boot self-terminate was the
+backstop. No Spot, reservation, or second GPU. No inbound ports.
+IMDSv2. Shutdown behavior terminate.
+
+The matched Akamai cell is the W11 freeze from the session that
+finished the same day (about 35 minutes of wall clock). The shape is
+workload 2.13.0, controller `workflow-controller-v3`, interactive,
+concurrency 1, one measured pass of 200 tasks, and one separate
+200-task warmup. Generation is temperature 0.2, top_p 0.95, seed
+20260906, 1024 max tokens, reasoning on. This AWS cell uses that shape
+as a real-runs replication. The schedule seed is 20261018, so the
+measured draw is not the frozen schedule base and not the D-0043
+diagnostic seed. It is not an official qualification receipt.
+`qualify-agent` was not called. The three-cell qualified baseline and
+the 12-cell comparative matrix were not run. Genuine manifests now
+record the declared cloud provider, so this cell is `aws` rather than
+labeled Akamai.
+
+**Close-out (same day).** The frozen D-0017 pins came up: open driver
+580.178.04, container CUDA 13.0, digest-pinned vLLM 0.27.1, and the
+pinned model on loopback. The bootstrap watchdog was disabled after
+serving was healthy; the 10-hour timer stayed. The cell wrote a
+manifest, a result, measured observations, and warmup observations.
+That directory was copied off the host before teardown, and those files
+are present. Task scores stay out of this repository. The instance ran
+about 1.72 hours. List-price compute is about **$6.86** at $3.99816 per
+hour. The instance is terminated and no volume remains. This run's
+token secret, staging bucket, role, instance profile, and security
+group were deleted. Phase 4 live execution, Google Cloud, the
+comparative matrix, and publication remain unauthorized. This decision
+authorizes nothing further.
+
+**Rationale.** The same-day 10-task AWS cells are not the Akamai
+protocol. One 200-task interactive cell with the freeze warmup, on the
+16-vCPU size, is the artifact that can sit beside that Akamai cell.
+The task draw and the system-memory difference are environmental
+limits. The cell does not support a provider-superiority claim.
