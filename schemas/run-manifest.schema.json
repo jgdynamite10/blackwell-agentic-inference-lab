@@ -273,6 +273,7 @@
             "akamai",
             "gcp",
             "aws",
+            "nebius",
             "other"
           ],
           "description": "Cloud provider."

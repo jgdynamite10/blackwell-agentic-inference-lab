@@ -1,0 +1,47 @@
+#cloud-config
+users:
+  - name: bwlab
+    gecos: Blackwell lab operator
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+write_files:
+  - path: /usr/local/sbin/bwlab-ttl
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      deadline="$(cat /var/lib/bwlab/ttl-deadline)"
+      now="$(date -u +%s)"
+      if [ "$${now}" -ge "$${deadline}" ]; then
+        /sbin/shutdown -h now
+      fi
+  - path: /etc/systemd/system/bwlab-ttl.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Stop this D-0045 host at its first-boot deadline
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/bwlab-ttl
+  - path: /etc/systemd/system/bwlab-ttl.timer
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Check the D-0045 teardown deadline
+      [Timer]
+      OnBootSec=1min
+      OnUnitActiveSec=1min
+      AccuracySec=15s
+      [Install]
+      WantedBy=timers.target
+runcmd:
+  - [install, -d, -m, "0700", /var/lib/bwlab]
+  - [bash, -c, "test -f /var/lib/bwlab/ttl-deadline || date -u -d '+10 hours' +%s > /var/lib/bwlab/ttl-deadline"]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, bwlab-ttl.timer]

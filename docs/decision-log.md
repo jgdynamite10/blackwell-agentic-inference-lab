@@ -2628,3 +2628,45 @@ protocol. One 200-task interactive cell with the freeze warmup, on the
 16-vCPU size, is the artifact that can sit beside that Akamai cell.
 The task draw and the system-memory difference are environmental
 limits. The cell does not support a provider-superiority claim.
+
+## 2026-10-15 — D-0045: Nebius replication kit for the W11 freeze cell
+
+**Decision.** The owner asked, on 2026-10-15, for the repository to hold
+everything required to repeat the finished W11 freeze cell on a third
+cloud, with genuine results kept out of Git, and to leave the live run
+until after signing up. This authorizes the Nebius kit only. It does
+not create, modify, or delete a Nebius resource. Live apply and destroy
+remain behind the phrase in `scripts/nebius_w11_operator.py`.
+
+The locked shape is platform `gpu-rtx6000`, preset
+`1gpu-24vcpu-218gb`, region `us-central1`: one RTX PRO 6000 Blackwell
+Server Edition, 24 vCPU, 218 GiB RAM, Intel Xeon 6776P. The published
+GPU price checked the same day is **$1.80 per GPU-hour**. Disk is
+separate. The boot disk is a 400 GiB managed network SSD, deleted with
+the instance. The image family is `ubuntu24.04-cuda13.0`. There is no
+fallback region and no 8-GPU preset. `gpu-rtx6000-a` in `uk-south2` and
+`eu-south1` is not authorized. Spot, reservations, and a second GPU
+are not authorized.
+
+The cell script matches the finished freeze shape: workload 2.13.0,
+controller `workflow-controller-v3`, interactive, concurrency 1, 200
+measured tasks, one 200-task warmup, temperature 0.2, top_p 0.95,
+generation seed 20260906. The schedule seed is 20261020. The manifest
+provider is `nebius`. `qualify-agent` is not the entry point. The
+three-cell baseline and the 12-cell matrix are not authorized.
+
+**Not yet run.** No Nebius account was available while this kit was
+written, so capacity is unchecked. A public price is not capacity.
+Relative to the finished hosts, this preset has 24 vCPU rather than 16,
+218 GiB of memory rather than 125 GiB (AWS) or 173 GiB (Akamai), and a
+Granite Rapids CPU. The image driver branch is 580.x; bootstrap still
+requires `580.178.04-0ubuntu0.24.04.1` and will stop if that package is
+absent. Those differences are recorded, not hidden. Task scores stay
+out of this repository. Phase 4 live execution, Google Cloud, the
+comparative matrix, and publication remain unauthorized.
+
+**Rationale.** Google Cloud still has no RTX PRO 6000 quota. Nebius is
+the documented one-GPU Server Edition VM whose image matches this lab's
+OS, CUDA major, and driver branch. The kit can be planned and, after
+the phrase, applied from the owner's machine without putting account
+identifiers or results in Git.

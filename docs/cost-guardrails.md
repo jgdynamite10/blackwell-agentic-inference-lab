@@ -15,9 +15,10 @@ modified, or deleted without explicit owner approval, regardless of cost.
    AWS G7e overlapping the in-progress Akamai qualification (decision
    D-0042). That approval was one instance, and the instance has been
    terminated. Decision D-0043 then authorized one more AWS G7e. That
-   instance has also been terminated. Decision D-0044 authorized one
+   instance has also    been terminated. Decision D-0044 authorized one
    further G7e for a freeze-shaped replication. That instance has also
-   been terminated.
+   been terminated. Decision D-0045 adds the Nebius replication kit
+   only. No Nebius instance has been created.
 3. **No idle GPUs — and know what actually stops billing.**
    - **Powering off an Akamai Linode does not stop billing.** Akamai bills
      for the service while it exists on the account, powered on or off.
@@ -32,6 +33,10 @@ modified, or deleted without explicit owner approval, regardless of cost.
    - On AWS and GCP, stopped-instance compute treatment differs from
      Akamai's, while disks, addresses, snapshots, and other resources may
      continue billing while an instance is stopped.
+   - On Nebius, compute for a stopped VM is not charged, and disks are.
+     The D-0045 instance uses `recovery_policy = FAIL`, so the 10-hour
+     guest shutdown stops compute and does not restart the VM. Disk
+     billing ends when the instance is deleted.
    - Therefore the end-of-session rule is: export and verify results, then
      **delete** the run's compute service (owner-approved), not merely stop
      it. GPU Linodes bill hourly with no monthly cap, so a forgotten
@@ -65,6 +70,7 @@ Planning estimates (details and assumptions in
 | 6 — D-0042 diagnostic (closed 2026-10-14) | One G7e. `g7e.4xlarge` at $3.99816/h had no capacity. The host was `g7e.8xlarge` at $5.26824/h for about 0.83 hours (about $4.40 of compute). The 400 GB volume was deleted with the instance | Terminated after the diagnostic cell |
 | 6 — D-0043 W11 diagnostic (closed 2026-10-14) | One G7e. `g7e.4xlarge` at $3.99816/h had no capacity. The host was `g7e.8xlarge` at $5.26824/h for about 0.47 hours (about $2.46 of compute). The 400 GB volume was deleted with the instance | Terminated after the result directory was copied off the host |
 | 6 — D-0044 W11 freeze-shaped replication (closed 2026-10-14) | One G7e. `g7e.4xlarge` at $3.99816/h had no capacity in `us-east-1a` and launched in `us-east-1c`. About 1.72 hours (about $6.86 of compute). The 400 GB volume was deleted with the instance | Terminated after the result directory was copied off the host |
+| 6 — D-0045 Nebius W11 kit (not launched) | One `gpu-rtx6000` / `1gpu-24vcpu-218gb` at $1.80 per GPU-hour in `us-central1`, plus a 400 GiB network SSD. Ten-hour first-boot shutdown is the compute backstop. Disk billing ends only when the instance is deleted | Do not apply until the D-0045 phrase is set. Check in if the session passes 4 hours |
 
 Reaching a trigger pauses provisioning until the owner reauthorizes. The
 Phase 3–6 ranges remain **planning estimates**, not authorization. Decision

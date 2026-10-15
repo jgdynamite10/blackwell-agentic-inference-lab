@@ -178,7 +178,11 @@ explicitly revises them in writing.
    closed AWS diagnostic. Decision **D-0043** records one closed keepable
    W11 diagnostic on a single G7e. Decision **D-0044** records one closed
    real-runs replication of the finished W11 freeze shape on one
-   `g7e.4xlarge` and authorizes no further AWS resource.
+   `g7e.4xlarge` and authorizes no further AWS resource. Decision
+   **D-0045** records the Nebius replication kit (one
+   `gpu-rtx6000` / `1gpu-24vcpu-218gb` in `us-central1`). That decision
+   does not launch an instance. Live Nebius apply and destroy still
+   require the phrase in `scripts/nebius_w11_operator.py`.
    Actual apply, pilot,
    mvl-baseline, qualify-agent, and destroy commands still require their
    separate exact local approval phrases.

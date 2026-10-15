@@ -1,0 +1,11 @@
+# Copy this file to the private operator directory named in
+# scripts/nebius_w11_operator.py. Never commit the copy.
+#
+# project_id, network_id, and subnet_id are account identifiers.
+# Leave the placeholders out of Git.
+
+project_id     = "REPLACE_PROJECT_ID"
+network_id     = "REPLACE_NETWORK_ID"
+subnet_id      = "REPLACE_SUBNET_ID"
+ssh_public_key = "ssh-ed25519 REPLACE_PUBLIC_KEY bwlab"
+operator_cidr  = ""
