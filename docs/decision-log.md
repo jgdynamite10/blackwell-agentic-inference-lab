@@ -2628,4 +2628,3 @@ protocol. One 200-task interactive cell with the freeze warmup, on the
 16-vCPU size, is the artifact that can sit beside that Akamai cell.
 The task draw and the system-memory difference are environmental
 limits. The cell does not support a provider-superiority claim.
-
