@@ -247,6 +247,17 @@ about 0.47 hours. The cell was workload 2.13.0. The result directory
 was copied off the host before the instance, token secret, and staging
 bucket were deleted. It does not authorize the comparative matrix.
 
+Decision **D-0044** (2026-10-14) records one later cell after the owner
+approved a full-protocol replication for a possible presentation.
+`g7e.4xlarge` at $3.99816/hour had no capacity in `us-east-1a` and
+launched in `us-east-1c`, so vCPU stayed at 16. The cell matched the
+finished W11 freeze shape: workload 2.13.0, 200 measured tasks, one
+200-task warmup, interactive, concurrency 1. It is a real-runs
+diagnostic, not a qualification receipt. The result directory was
+copied off the host before the instance was terminated. No volume
+remains. Task scores stay out of git. It does not authorize the
+comparative matrix.
+
 ## Phase 7 — Analysis and publication
 
 Calculate outcome-level performance and economic measures across Akamai Cloud,

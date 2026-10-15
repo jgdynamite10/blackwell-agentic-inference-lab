@@ -18,12 +18,15 @@ explicitly revises them in writing.
    read-only identity, availability, quota, instance-type, regional-capacity,
    and pricing checks.
 5. Decision D-0042 (`aws-diag-20261014a`) is closed. Decision D-0043
-   (`aws-w11-20261014a`) is closed. It was one on-demand single-GPU G7e
-   in `us-east-1` after the owner reported the Akamai run finished.
-   `g7e.4xlarge` had no live capacity, so the host was `g7e.8xlarge`.
-   The cell was one private W11 diagnostic. The result directory was
-   copied off the host before teardown. The instance, token secret,
-   staging bucket, and security group for that run were deleted. Phase
+   (`aws-w11-20261014a`) is closed. Decision D-0044
+   (`aws-w11-full-20261014a`) is closed. It was one on-demand
+   single-GPU `g7e.4xlarge` in `us-east-1c` after `us-east-1a` returned
+   `InsufficientInstanceCapacity`. The cell replicated the finished
+   Akamai W11 freeze shape (200 measured tasks plus a 200-task warmup)
+   as a real-runs diagnostic. The result directory was copied off the
+   host before teardown. The instance is terminated, no volume remains,
+   and this run's token secret, staging bucket, role, instance profile,
+   and security group were deleted. Task scores stay out of git. Phase
    6, the comparative matrix, remains unauthorized. Any further AWS
    create, resize, start, stop, or delete needs a new owner decision.
    Google Cloud remains unauthorized.
@@ -173,7 +176,9 @@ explicitly revises them in writing.
    $25 pilot envelope remains separately named.    **Phase 4 live execution
    and later phases remain unauthorized.** Decision **D-0042** records one
    closed AWS diagnostic. Decision **D-0043** records one closed keepable
-   W11 diagnostic on a single G7e and authorizes no further AWS resource.
+   W11 diagnostic on a single G7e. Decision **D-0044** records one closed
+   real-runs replication of the finished W11 freeze shape on one
+   `g7e.4xlarge` and authorizes no further AWS resource.
    Actual apply, pilot,
    mvl-baseline, qualify-agent, and destroy commands still require their
    separate exact local approval phrases.
