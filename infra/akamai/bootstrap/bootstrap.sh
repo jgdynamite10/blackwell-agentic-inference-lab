@@ -23,7 +23,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/bootstrap.env"
-EXAMPLE_FILE="${SCRIPT_DIR}/bootstrap.env.example"
 STATE_DIR="${BWLAB_BOOTSTRAP_STATE_DIR:-/var/lib/bwlab-bootstrap}"
 KEYRING_DIR="${BWLAB_KEYRING_DIR:-/usr/share/keyrings}"
 APT_LIST_DIR="${BWLAB_APT_LIST_DIR:-/etc/apt/sources.list.d}"
@@ -33,6 +32,7 @@ REBOOT_REQUIRED_EXIT=2
 
 # shellcheck source=pins.sh
 . "${SCRIPT_DIR}/pins.sh"
+EXAMPLE_FILE="$(resolve_bootstrap_example "${SCRIPT_DIR}")"
 
 log() { printf '[bwlab-bootstrap] %s\n' "$*"; }
 fail() { printf '[bwlab-bootstrap] ERROR: %s\n' "$*" >&2; exit 1; }

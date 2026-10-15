@@ -2670,3 +2670,54 @@ the documented one-GPU Server Edition VM whose image matches this lab's
 OS, CUDA major, and driver branch. The kit can be planned and, after
 the phrase, applied from the owner's machine without putting account
 identifiers or results in Git.
+
+## 2026-10-15 — D-0046: One Akamai vLLM NVFP4 cell; NIM skipped
+
+**Decision.** The owner authorized, on 2026-10-15, a narrower reading of
+the unmeasured charter factors. The finished Akamai and AWS W11 cells
+remain the cloud finding. The $240–$600 Phase 4 matrix and
+TensorRT-LLM stay unrun. The authorized live scope is one Akamai cell,
+then a second only if its pin exists. The normalized ceiling discussed
+for both cells was about $30 at $3.00 per hour. This decision does not
+create, modify, or delete a resource. Apply and destroy still require
+the digest-bearing phrase
+`I approve creating billable Akamai resources for run akamai-w11-nvfp4-20261015a using plan sha256:<digest>`
+and the matching destroy phrase. The instance is deleted before any
+later cell. Akamai bills until the service is deleted.
+
+The cell shape matches the finished W11 freeze: workload 2.13.0,
+controller `workflow-controller-v3`, interactive, concurrency 1, 200
+measured tasks, one 200-task warmup, temperature 0.2, top_p 0.95,
+generation seed 20260906. The schedule seed is 20261021. The run tag is
+`akamai-w11-nvfp4-20261015a`. The host is
+`g3-gpu-rtxpro6000-blackwell-1` in `ca-central`. `qualify-agent` is not
+the entry point. Hypotheses H1 and H2 are not revised. This is one
+provider-native precision contrast, not an engine-by-precision
+interaction and not a higher-concurrency result.
+
+**NVFP4 pin.** The public model API on 2026-10-15 still reported
+revision `bee7596271d1495f6992ae224aefde4410e816b8` for
+`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4`. The container
+digest is the same linux/amd64 vLLM 0.27.1 digest as the BF16 cell.
+The aggregate is
+`sha256:d2450b268476489d75f0c75cb12461f9b02fb031d9751b3263aadca6c26edb04`,
+computed by the lab's `verify_model_artifact` rule from official Git LFS
+content hashes plus SHA-256 of the non-LFS files downloaded that day.
+`accuracy_plot.png` was downloaded and matched its LFS oid. NVIDIA has
+not published one combined digest. The profile returns ready only for
+that identity. The model card does not list this GPU. `--dtype bfloat16`
+is omitted so the checkpoint quantization is the factor under test. The
+model card's H100 humming recipe and Spark speculative recipe are not
+used. If the server does not become healthy, or the on-host aggregate
+does not match, the cell stops and the instance is deleted. The pin is
+not relaxed.
+
+**NIM skipped.** No NGC credential was present. The 2026-09-28 catalog
+digest was not confirmed with a registry request and is not adopted.
+No RTX PRO 6000 BF16 runtime profile ID and no embedded model hash were
+available. That cell is not launched.
+
+**Rationale.** Two more full-matrix engines would not fit the budget,
+and an unpinned run would not sit beside the cloud table. One pinned
+precision cell is the comparison that can be made. The software factor
+stays open until a NIM or TensorRT-LLM pin exists.

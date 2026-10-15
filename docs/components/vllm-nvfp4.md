@@ -7,11 +7,8 @@ run genuine inference.
 The machine contract is the
 [engine/precision contract](../engine-precision-contract.md). The public
 register row for this path stays in
-[component readiness](../component-readiness.md): conditional or offline
-evidence only, with live execution blocked. This profile is stricter than
-that register row. Because a contract-required artifact digest is
-unpublished, evaluation is **blocked**. Blocked is within the conditional
-ceiling. The profile cannot return `ready`.
+[component readiness](../component-readiness.md). Decision D-0046 makes
+one aggregate `ready`. Every other digest stays blocked.
 
 ## Classification
 
@@ -21,22 +18,21 @@ ceiling. The profile cannot return `ready`.
 | Engine | `vllm` |
 | Precision | `nvfp4` |
 | Topology | `single-gpu` (1 GPU, 1 node) |
-| Status | **blocked** |
-| Genuine inference | refused by both execution gates |
+| Status | **ready** only for aggregate `sha256:d2450b268476489d75f0c75cb12461f9b02fb031d9751b3263aadca6c26edb04` |
+| Genuine inference | that aggregate only; D-0046 still requires a digest-bearing apply phrase |
 | Launch command | none in this profile |
 
-Live execution stays blocked until the exact RTX PRO 6000 NVFP4 path is
-validated. Generic Blackwell support, SM120 compile coverage, an RTX 5090
-hardware-matrix row, or a DGX Spark / H100 recipe does not supply that
-validation.
-
-No genuine inference is authorized. No benchmark finding is recorded.
+The model card still does not list RTX PRO 6000. Generic Blackwell
+support, SM120 compile coverage, an RTX 5090 row, or a DGX Spark / H100
+recipe is not that validation. No benchmark finding is recorded on this
+page.
 
 ## Immutable identities
 
 Retrieved **2026-09-28** from official model-card, release, and public
-registry metadata. Weights, image layers, and provider APIs were not
-downloaded.
+registry metadata. On 2026-10-15 the non-LFS files and one small LFS
+file were downloaded to compute the aggregate. The weight shards were
+not downloaded. Their hashes are the published LFS oids.
 
 | Field | Identity | Source |
 | --- | --- | --- |
@@ -91,28 +87,28 @@ do not match. A different model revision, a different container digest,
 or a different engine version is blocked. A floating engine version such
 as `latest` is rejected by the core contract before evaluation.
 
-Any model artifact digest is blocked. None is the official digest,
-because that digest is unpublished. Required entitlements that are false
-or unknown are blocked.
+Any digest other than the D-0046 aggregate is blocked. Required
+entitlements that are false or unknown are blocked.
 
 `vllm-bf16-single-gpu` is a separate profile and stays the ready BF16
 path. This module does not change it.
 
-## What would have to be true before a later revision could be ready
+## D-0046 pin
 
-This revision cannot become ready. A later change would need all of the
-following, recorded from official or live evidence rather than inferred:
+On 2026-10-15 the public repository HEAD was still
+`bee7596271d1495f6992ae224aefde4410e816b8`. The lab aggregate of that
+tree is `sha256:d2450b268476489d75f0c75cb12461f9b02fb031d9751b3263aadca6c26edb04`.
+It is the SHA-256 of the sorted per-file lines used by
+`verify_model_artifact`. Git LFS oids supplied the weight hashes. The
+non-LFS files were downloaded and hashed. `accuracy_plot.png` was
+downloaded and matched its LFS oid. NVIDIA has not published one
+combined digest. A different hash, revision, container, or engine
+version stays blocked.
 
-1. An official immutable NVFP4 artifact digest for
-   `bee7596271d1495f6992ae224aefde4410e816b8`, pinned exactly.
-2. A live RTX PRO 6000 NVFP4 run on that artifact revision, vLLM
-   `0.27.1` or a newly evidenced exact engine version, and the exact
-   linux/amd64 container digest under test.
-3. Native OpenAI tool-call behavior checked on that same path.
-4. Host driver and container CUDA observed on that path, not copied from
-   the CUDA 13.0 compatibility table or from SM120 compile flags.
-5. A separate owner authorization for live execution. This document does
-   not grant it.
+`ready` means that identity matches. It does not mean an RTX PRO 6000
+NVFP4 server has already succeeded. The model card still does not list
+this GPU. The authorized cell is the measurement. If serving does not
+become healthy, the instance is deleted and the pin is not relaxed.
 
-Until those exist, both genuine-execution gates refuse the cell before a
-model client is used.
+This page does not apply Terraform. Live apply still needs the
+digest-bearing phrase for run `akamai-w11-nvfp4-20261015a`.

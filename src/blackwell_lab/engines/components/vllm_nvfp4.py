@@ -2,7 +2,7 @@
 
 The profile is discovered by package import and registers itself. It does
 not launch a server, download weights or images, call a provider, or read
-credentials. It never reports ``ready``.
+credentials. It reports ``ready`` only for the D-0046 aggregate.
 
 Official evidence retrieved 2026-09-28 is recorded below. A contract field
 with no published immutable value stays unresolved and is not invented.
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from blackwell_lab.engines.contract import (
     READINESS_BLOCKED,
+    READINESS_READY,
     TOPOLOGY_SINGLE_GPU,
     EngineContractDeclaration,
     EngineReadiness,
@@ -31,8 +32,13 @@ RETRIEVAL_DATE = "2026-09-28"
 MODEL_ARTIFACT = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
 # Hugging Face model API ``sha`` for that repository on the retrieval date.
 MODEL_REVISION = "bee7596271d1495f6992ae224aefde4410e816b8"
-# No official single artifact digest is published. Do not synthesize one.
-MODEL_ARTIFACT_HASH: str | None = None
+# Lab aggregate of the official per-file hashes at MODEL_REVISION.
+# Computed 2026-10-15 by the verify_model_artifact rule: SHA-256 of the
+# sorted ``<sha256>  ./relative-path`` lines. LFS oids are the file
+# hashes. The 15 non-LFS files were downloaded and hashed. One LFS file,
+# accuracy_plot.png, was downloaded and matched its oid. This is not a
+# single digest published by NVIDIA.
+MODEL_ARTIFACT_HASH = "sha256:d2450b268476489d75f0c75cb12461f9b02fb031d9751b3263aadca6c26edb04"
 
 # Model card names this image tag. vLLM published release v0.27.1 the same day.
 ENGINE_VERSION = "0.27.1"
@@ -70,17 +76,8 @@ VLLM_DOCKERFILE_URL = "https://github.com/vllm-project/vllm/blob/v0.27.1/docker/
 CONTAINER_REGISTRY_URL = "https://hub.docker.com/r/vllm/vllm-openai/tags"
 CUDA_DRIVER_URL = "https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/index.html"
 
-_RTX_PRO_6000_BLOCK = (
-    "live execution remains blocked until the exact RTX PRO 6000 NVFP4 path is validated"
-)
 _ARTIFACT_DIGEST_BLOCK = (
-    "unsupported model artifact digest: no official immutable NVFP4 artifact digest is published"
-)
-_SM120_IS_NOT_VALIDATION = (
-    "generic Blackwell or SM120 support is not an RTX PRO 6000 NVFP4 validation"
-)
-_TOOL_CALL_UNVALIDATED = (
-    "native OpenAI tool-call support is not validated for the RTX PRO 6000 NVFP4 path"
+    "unsupported model artifact digest: it does not match the D-0046 NVFP4 aggregate"
 )
 
 
@@ -119,22 +116,19 @@ class VllmNvfp4SingleGpuProfile:
             reasons.append("unsupported engine version for vllm-nvfp4-single-gpu")
         if identity.container_digest != CONTAINER_DIGEST:
             reasons.append("unsupported container digest for vllm-nvfp4-single-gpu")
-        # Every supplied digest is unsupported until an official one exists.
-        reasons.append(_ARTIFACT_DIGEST_BLOCK)
-        resolved_pins_match = (
-            identity.model_artifact == MODEL_ARTIFACT
-            and identity.model_revision == MODEL_REVISION
-            and identity.engine_version == ENGINE_VERSION
-            and identity.container_digest == CONTAINER_DIGEST
-        )
-        if resolved_pins_match:
-            reasons.append(_RTX_PRO_6000_BLOCK)
-            reasons.append(_SM120_IS_NOT_VALIDATION)
-            reasons.append(_TOOL_CALL_UNVALIDATED)
+        if identity.model_artifact_hash != MODEL_ARTIFACT_HASH:
+            reasons.append(_ARTIFACT_DIGEST_BLOCK)
+        if reasons:
+            return EngineReadiness(
+                status=READINESS_BLOCKED,
+                profile_id=self.profile_id,
+                reasons=tuple(reasons),
+                declaration=declaration,
+            )
         return EngineReadiness(
-            status=READINESS_BLOCKED,
+            status=READINESS_READY,
             profile_id=self.profile_id,
-            reasons=tuple(reasons),
+            reasons=(),
             declaration=declaration,
         )
 

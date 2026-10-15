@@ -68,8 +68,11 @@ path. It does **not** tighten existing MVL or qualification pins and does
 not launch a server. Any well-formed vLLM BF16 single-GPU identity is
 accepted, including test fixtures that use engine `0.28.0`.
 
-TensorRT-LLM, NIM, NVFP4, FP8, W4A16, multi-GPU, and multi-node remain
-blocked until a component module registers a matching profile.
+Decision D-0046 registers one ready NVFP4 identity:
+`vllm-nvfp4-single-gpu` at aggregate
+`sha256:d2450b268476489d75f0c75cb12461f9b02fb031d9751b3263aadca6c26edb04`.
+TensorRT-LLM, NIM, FP8, W4A16, multi-GPU, and multi-node remain blocked.
+Any other NVFP4 digest stays blocked.
 
 ## Fail-closed provenance
 

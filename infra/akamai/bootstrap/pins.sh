@@ -177,6 +177,15 @@ validate_env_matches_example() {
   fi
 }
 
+resolve_bootstrap_example() {
+  local script_dir="$1" name="${BWLAB_BOOTSTRAP_EXAMPLE:-bootstrap.env.example}"
+  case "${name}" in
+    bootstrap.env.example|bootstrap.nvfp4.env.example) ;;
+    *) _pin_fail "BWLAB_BOOTSTRAP_EXAMPLE must be bootstrap.env.example or bootstrap.nvfp4.env.example" ;;
+  esac
+  printf '%s/%s' "${script_dir}" "${name}"
+}
+
 load_and_validate_bootstrap_env() {
   local env_file="$1" example_file="$2"
   [ -f "${env_file}" ] || _pin_fail "bootstrap.env not found (copy bootstrap.env.example and fill in pins)"
