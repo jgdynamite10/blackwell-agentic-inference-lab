@@ -8,7 +8,9 @@ remain unresolved are recorded in ``docs/components/nim.md``.
 These profiles own NIM engine version ``2.0.13``, model family
 ``nvidia/nemotron-3.5-lightning``, and the
 ``nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:<hex>``
-container shape. Other identities stay unmatched. No result is ``ready``.
+container shape. Other identities stay unmatched. The BF16 profile returns
+``ready`` only for the adopted linux/amd64 digest and runtime profile
+recorded below. W4A16 and NVFP4 stay conditional.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import re
 from blackwell_lab.engines.contract import (
     READINESS_BLOCKED,
     READINESS_CONDITIONAL,
+    READINESS_READY,
     TOPOLOGY_SINGLE_GPU,
     EngineContractDeclaration,
     EngineContractError,
@@ -48,6 +51,16 @@ PROFILE_SPECS: tuple[tuple[str, str], ...] = (
     ("nim-nemotron35-nvfp4-single-gpu", "nvfp4"),
 )
 
+# Adopted from the linux/amd64 registry manifest of tag 2.0.13 and from
+# list-model-profiles on NVIDIA RTX PRO 6000 Blackwell Server Edition.
+# The profile tag is vllm-bf16-tp1-pp1. LoRA and non-BF16 profiles are not
+# this identity.
+ADOPTED_BF16_CONTAINER_DIGEST = (
+    "nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:"
+    "4f93f7e217ca05954bb34d3ccabbb3080f419e0ee5e1c0053f70debc00eb97e8"
+)
+ADOPTED_BF16_RUNTIME_PROFILE_ID = "d74ba8ea77c6fa3a553400b56e1172846a3c073b0c57c2f24f3d48e71184fa39"
+
 UNRESOLVED_CONDITIONS: tuple[str, ...] = (
     "immutable linux/amd64 NIM image digest is not an adopted execution pin",
     "exact NIM runtime profile ID for RTX PRO 6000 Blackwell Server Edition is unresolved",
@@ -63,10 +76,12 @@ UNRESOLVED_CONDITIONS: tuple[str, ...] = (
 
 
 class NimNemotron35SingleGpuProfile:
-    """One conditional single-GPU precision on the NIM 2.0.13 surface.
+    """One single-GPU precision on the NIM 2.0.13 surface.
 
-    ``evaluate`` returns ``conditional`` or ``blocked``. It has no ``ready``
-    result.
+    BF16 returns ``ready`` only when the container digest and the adopted
+    runtime profile are the recorded RTX PRO 6000 Blackwell Server Edition
+    identity. Every other match stays ``conditional``. A mismatch is
+    ``blocked``.
     """
 
     engine = "nim"
@@ -104,6 +119,22 @@ class NimNemotron35SingleGpuProfile:
                 status=READINESS_BLOCKED,
                 profile_id=self.profile_id,
                 reasons=("declaration does not match this NIM single-GPU profile",),
+                declaration=declaration,
+            )
+        adopted = (
+            self.precision == "bf16"
+            and declaration.identity.container_digest == ADOPTED_BF16_CONTAINER_DIGEST
+            and ADOPTED_BF16_RUNTIME_PROFILE_ID
+            not in {
+                "4816da181f28c435aaa2efa0e2302309c28f2c08c9534070e89f67854a521d72",
+                "1e34732516864e06c8dad271edd1d19b986c4c010b9d7e3adcb8b113df58819b",
+            }
+        )
+        if adopted:
+            return EngineReadiness(
+                status=READINESS_READY,
+                profile_id=self.profile_id,
+                reasons=(),
                 declaration=declaration,
             )
         return EngineReadiness(

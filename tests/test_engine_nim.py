@@ -164,7 +164,13 @@ class TestConditionalCeiling:
                 )
             )
         )
-        assert readiness.status == READINESS_CONDITIONAL
+        if precision == "bf16":
+            assert readiness.status == READINESS_READY
+            assert readiness.reasons == ()
+            require_ready_contract(readiness)
+        else:
+            assert readiness.status == READINESS_CONDITIONAL
+            assert readiness.status != READINESS_READY
         assert readiness.profile_id == _profile_id(precision)
 
     @pytest.mark.parametrize("precision", ["bf16", "w4a16", "nvfp4"])
@@ -180,16 +186,35 @@ class TestConditionalCeiling:
         ]
         for payload in variants:
             readiness = evaluate_engine_contract(declaration_from_mapping(payload))
-            assert readiness.status != READINESS_READY
+            adopted = (
+                precision == "bf16"
+                and payload["identity"]["container_digest"] == _CATALOG_AMD64_DIGEST
+            )
+            if adopted:
+                assert readiness.status == READINESS_READY
+                assert readiness.profile_id == _profile_id("bf16")
+                require_ready_contract(readiness)
+            else:
+                assert readiness.status != READINESS_READY
             assert readiness.profile_id == _profile_id(precision)
 
-    def test_profile_source_has_no_ready_status(self):
+    def test_profile_source_is_ready_only_for_the_adopted_bf16_identity(self):
+        nim = _nim()
         source = NIM_SOURCE.read_text(encoding="utf-8")
         tree = ast.parse(source)
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and node.value == "ready":
-                raise AssertionError("NIM profile source contains status ready")
-        assert "READINESS_READY" not in source
+                raise AssertionError("NIM profile source contains a bare ready status")
+        assert "READINESS_READY" in source
+        assert nim.ADOPTED_BF16_CONTAINER_DIGEST == _CATALOG_AMD64_DIGEST
+        assert nim.ADOPTED_BF16_RUNTIME_PROFILE_ID == (
+            "d74ba8ea77c6fa3a553400b56e1172846a3c073b0c57c2f24f3d48e71184fa39"
+        )
+        forbidden = {
+            "4816da181f28c435aaa2efa0e2302309c28f2c08c9534070e89f67854a521d72",
+            "1e34732516864e06c8dad271edd1d19b986c4c010b9d7e3adcb8b113df58819b",
+        }
+        assert nim.ADOPTED_BF16_RUNTIME_PROFILE_ID not in forbidden
 
     @pytest.mark.parametrize("precision", ["bf16", "w4a16", "nvfp4"])
     def test_ready_and_supported_gates_reject_conditional_nim(self, precision):
@@ -436,8 +461,12 @@ class TestModelContainerBoundary:
             readiness = evaluate_engine_contract(
                 declaration_from_mapping(_declaration(identity=identity))
             )
-            assert readiness.status == READINESS_CONDITIONAL
             assert readiness.profile_id == _profile_id("bf16")
+            if digest == _CATALOG_AMD64_DIGEST:
+                assert readiness.status == READINESS_READY
+                require_ready_contract(readiness)
+                continue
+            assert readiness.status == READINESS_CONDITIONAL
             assert readiness.status != READINESS_READY
             with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
                 require_ready_contract(readiness)
