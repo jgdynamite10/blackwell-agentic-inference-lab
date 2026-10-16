@@ -2746,3 +2746,42 @@ available. That cell is not launched.
 and an unpinned run would not sit beside the cloud table. One pinned
 precision cell is the comparison that can be made. The software factor
 stays open until a NIM or TensorRT-LLM pin exists.
+
+## 2026-10-16 — D-0047: Adopt the Nebius NIM BF16 identity
+
+**Decision.** The owner authorized one Nebius NIM BF16 cell, run tag
+`nebius-nim-20261015a`, on the locked D-0045 host. The first attempt
+deleted the instance before any task because profile selection required
+a per-GPU tag the generic BF16 profile does not carry. That profile is
+now the adopted pin. No measured NIM result predates this entry.
+
+The adopted identity is engine `nim` `2.0.13`, artifact
+`nvidia/nemotron-3.5-lightning`, revision
+`b3caaabed0263651a17dc1f2d4ce97e794f76c44` (NGC tag `hf-b3caaab`),
+artifact digest
+`sha256:d79c70ec33aeb6144fdd74cc54c2f2350cbfffff725c7b82f5637a289759f161`,
+container
+`nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:4f93f7e217ca05954bb34d3ccabbb3080f419e0ee5e1c0053f70debc00eb97e8`,
+and runtime profile
+`d74ba8ea77c6fa3a553400b56e1172846a3c073b0c57c2f24f3d48e71184fa39`
+(`vllm-bf16-tp1-pp1`, 66 GB, no LoRA). On 2026-10-16 that profile was
+compatible and runnable on one NVIDIA RTX PRO 6000 Blackwell Server
+Edition. The support-matrix row for
+`NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition` says all profiles. The
+B200 profile `4816da181f28c435aaa2efa0e2302309c28f2c08c9534070e89f67854a521d72`
+and the H200 profile
+`1e34732516864e06c8dad271edd1d19b986c4c010b9d7e3adcb8b113df58819b` stay
+excluded. W4A16 and NVFP4 stay conditional. A different digest,
+revision, or artifact digest is blocked for BF16.
+
+The cell shape matches the finished W11 freeze except the schedule seed
+`20261027` and engine `nim`. Workload 2.13.0, `workflow-controller-v3`,
+interactive, concurrency 1, 200 measured tasks, one 200-task warmup,
+temperature 0.2, top_p 0.95, generation seed 20260906. `qualify-agent`
+is not the entry point. If native tool calls or the reasoning parser do
+not serve that workload, the cell stops and the instance is deleted.
+
+**Rationale.** The generic BF16 profile is the support-matrix TP=1 row
+for this GPU. Treating a missing `gpu` tag as a mismatch skipped the
+only runnable BF16 profile and kept the two profiles that name other
+GPUs. The pin records the identity that was actually listed.

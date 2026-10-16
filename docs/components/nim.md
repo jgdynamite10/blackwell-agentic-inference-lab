@@ -4,7 +4,8 @@
 public NVIDIA documentation. It is not a benchmark finding, not a measured
 result, and not permission to run a model.
 
-**Live execution blocked.** No NIM profile registered here is `ready`.
+**Live execution blocked.** W4A16 and NVFP4 are not `ready`. The BF16
+profile is `ready` only for the adopted identity in the next section.
 The genuine execution gate accepts only `ready`.
 
 **Conditional does not authorize inference. Conditional never authorizes genuine inference.** A conditional result means the declaration matches the documented surface and unresolved conditions remain. It must not reach client construction, inference, measurement, or result creation.
@@ -33,16 +34,18 @@ precision, and only for this model family and container repository:
   `nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:<64 lowercase hex>`
 
 Any 64-character lowercase hex digest in that repository satisfies the
-shape. No specific digest is an adopted execution pin. The classification
-is `conditional` when that surface matches and required entitlements are
-not failed. It is `blocked` when the model, container repository, version,
-precision, or topology is outside the surface, or when a required
-entitlement is false or unknown. Conditional never authorizes genuine
-inference. No declaration evaluates to `ready`.
+shape. The BF16 profile adopts one linux/amd64 digest, one model
+revision, and one artifact digest. A different digest, revision, or
+artifact digest is `blocked` for BF16. W4A16 and NVFP4 stay
+`conditional` when that surface matches and required entitlements are
+not failed. A profile is `blocked` when the model, container repository,
+version, precision, or topology is outside the surface, or when a
+required entitlement is false or unknown. Conditional never authorizes
+genuine inference.
 
 | Profile ID | Precision | Topology | Engine version | Classification |
 | --- | --- | --- | --- | --- |
-| `nim-nemotron35-bf16-single-gpu` | `bf16` | `single-gpu` | `2.0.13` | conditional, or blocked |
+| `nim-nemotron35-bf16-single-gpu` | `bf16` | `single-gpu` | `2.0.13` | ready only for the adopted identity, otherwise blocked |
 | `nim-nemotron35-w4a16-single-gpu` | `w4a16` | `single-gpu` | `2.0.13` | conditional, or blocked |
 | `nim-nemotron35-nvfp4-single-gpu` | `nvfp4` | `single-gpu` | `2.0.13` | conditional, or blocked |
 
@@ -59,7 +62,7 @@ entitlement.
 | --- | --- | --- |
 | [NIM for LLM and VLM 2.0.13 support matrix](https://docs.nvidia.com/nim/large-language-models/2.0.13/reference/support-matrix.html), `nvidia/nemotron-3.5-lightning` profile table | BF16 TP=1 PP=1 requires 66 GB per GPU, minimum 1 GPU, Ampere or newer (SM 8.0+). W4A16 TP=1 PP=1 requires 32 GB per GPU, minimum 1 GPU, Ampere or newer (SM 8.0+). NVFP4 TP=1 PP=1 requires 30 GB per GPU, minimum 1 GPU, Blackwell or newer (SM 10.0+). The same precisions are also listed at higher tensor-parallel sizes. | A minimum-VRAM floor is not a measurement of this workload's KV cache, concurrency, or context. Empirical single-GPU memory viability stays unresolved. |
 | Same support matrix, verified-GPU table for this model | `NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition` is listed at 96 GB under "Blackwell (SM 10.0) — supports NVFP4, W4A16, BF16" with "All profiles". The page states that only GPUs in the verified tables have been tested end-to-end for this model at this NIM version, and that VRAM floors do not include headroom for large KV caches. | The named SKU row is the hardware evidence for this path. A generic Blackwell, B200, or GB200 row is not that evidence. This repository has not repeated the live check, so RTX PRO 6000 live compatibility stays unresolved. |
-| Same support matrix, optimized deployment profiles | Two optimized IDs are published: NVFP4 TP=1 on `NVIDIA-B200`, profile `4816da181f28c435aaa2efa0e2302309c28f2c08c9534070e89f67854a521d72`; and `NVFP4 (W4A16) + FP8` TP=1 on `NVIDIA-H200`, profile `1e34732516864e06c8dad271edd1d19b986c4c010b9d7e3adcb8b113df58819b`. | Neither ID is an RTX PRO 6000 single-GPU BF16, W4A16, or NVFP4 profile. The exact NIM runtime profile ID for this path is unresolved. Those IDs must not be reused for it. |
+| Same support matrix, optimized deployment profiles | Two optimized IDs are published: NVFP4 TP=1 on `NVIDIA-B200`, profile `4816da181f28c435aaa2efa0e2302309c28f2c08c9534070e89f67854a521d72`; and `NVFP4 (W4A16) + FP8` TP=1 on `NVIDIA-H200`, profile `1e34732516864e06c8dad271edd1d19b986c4c010b9d7e3adcb8b113df58819b`. | Neither ID is the RTX PRO 6000 single-GPU BF16 profile. Those IDs must not be reused for it. The adopted BF16 runtime profile ID is `d74ba8ea77c6fa3a553400b56e1172846a3c073b0c57c2f24f3d48e71184fa39` (`vllm-bf16-tp1-pp1`, 66 GB, no LoRA). On 2026-10-16, `list-model-profiles` marked it compatible and runnable on `NVIDIA RTX PRO 6000 Blackwell Server Edition`. It has no per-GPU tag; the verified-GPU row for `NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition` says all profiles. |
 | [NGC tags for `nemotron-3.5-lightning-30b-a3b`](https://catalog.ngc.nvidia.com/orgs/nim/nvidia/containers/nemotron-3.5-lightning-30b-a3b/latest/tags) | Tag `2.0.13` lists linux/amd64 digest `sha256:4f93f7e217ca05954bb34d3ccabbb3080f419e0ee5e1c0053f70debc00eb97e8` (created 2026-09-17) and a different linux/arm64 digest. Tag `latest` lists the same pair. Tag `2.0.9-variant` lists a different linux/amd64 digest, `sha256:ddb4442fe147ee7ba751861ebb1f8cf9186cc34cfac5ff2c88d3c33ef5a4f2b6`. | The catalog text was not confirmed with a registry manifest request, and no layer was downloaded. `latest` is a floating alias of the same digest on this date. The immutable linux/amd64 digest is not an adopted execution pin. |
 | [NGC container overview](https://catalog.ngc.nvidia.com/orgs/nim/nvidia/containers/nemotron-3.5-lightning-30b-a3b) | The container packages NVIDIA-Nemotron-3.5-Lightning-30B-A3B. The model pull method is "Automatic (embedded in container)". Use is governed by the NVIDIA Software License Agreement and the Product-Specific Terms for AI Products. The page says downloading or using the container agrees to the linked licenses. Operating system: Linux. Multinode support: No. The page also says the container exposes industry-standard OpenAI-compatible APIs. Its stated NGC release date is 08/10/2026, while the tags page dates tag `2.0.13` to 2026-09-17. | No embedded revision or artifact digest is on the page. Account entitlement and license acceptance are not shown. OpenAI-compatible API wording is not proof of native tool-calling for workload 2.4.0. The 08/10/2026 date is not a statement that tag `2.0.13` was published that day. NGC's sentence that container components are ready for commercial or non-commercial use is license wording, not engine-contract status `ready`. |
 | [NIM offerings, documentation set 2.0.13](https://docs.nvidia.com/nim/large-language-models/2.0.13/about-nim-llm/nim-offerings.html) | NIM is available at no charge under the applicable license terms and is not covered by NVIDIA Enterprise support. NIM Certified Production Branch requires an active NVIDIA AI Enterprise subscription. The certified-model list is on the NGC catalog. | The page does not say which offering this image tag belongs to, and it does not show this account's entitlement. A required entitlement that is false or unknown is blocked. |
@@ -81,11 +84,15 @@ claims.
   `nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b` with a
   `sha256:<64 lowercase hex>` digest. A different model artifact, container
   repository, or engine version does not match these profiles.
-- The catalog linux/amd64 digest is recorded as a retrieved fact and is
-  not compared, accepted, or frozen by the profile. Exact digest adoption,
-  the embedded model revision, the embedded artifact digest, account
-  entitlement, the runtime profile ID, workload 2.4.0 native-tool
-  compatibility, and live RTX PRO 6000 behavior remain unresolved.
+- The adopted BF16 identity is container digest
+  `nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:4f93f7e217ca05954bb34d3ccabbb3080f419e0ee5e1c0053f70debc00eb97e8`,
+  model revision `b3caaabed0263651a17dc1f2d4ce97e794f76c44` (NGC tag
+  `hf-b3caaab`), artifact digest
+  `sha256:d79c70ec33aeb6144fdd74cc54c2f2350cbfffff725c7b82f5637a289759f161`,
+  and runtime profile ID
+  `d74ba8ea77c6fa3a553400b56e1172846a3c073b0c57c2f24f3d48e71184fa39`.
+  W4A16 and NVFP4 still have an unresolved runtime profile ID. Workload
+  2.4.0 native-tool compatibility stays unresolved for those precisions.
 - B200, GB200, GB300, and generic "Blackwell or newer" wording do not
   identify this SKU. The verified-GPU row that names
   `NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition` is the hardware fact used

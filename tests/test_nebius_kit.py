@@ -29,7 +29,7 @@ def test_shape_is_one_rtx_pro_6000_in_eu_south1():
     assert 'default     = "gpu-rtx6000-a"' in variables
     assert 'default     = "1gpu-24vcpu-218gb"' in variables
     assert 'default     = "eu-south1"' in variables
-    assert 'default     = "nebius-w11-20261015b"' in variables
+    assert 'default     = "nebius-nim-20261015a"' in variables
     assert "ubuntu24.04-cuda13.0" in main
     family = main.split("source_image_family", 1)[1].split("}", 1)[0]
     assert "parent_id" not in family
@@ -69,14 +69,31 @@ def test_cell_matches_the_freeze_shape():
     assert "qualify-agent" not in source.split('"""', 2)[2]
 
 
+def test_nim_cell_uses_the_adopted_bf16_identity():
+    source = (ROOT / "scripts" / "nebius_nim_bf16_cell.py").read_text(encoding="utf-8")
+    remote = (ROOT / "scripts" / "nebius_nim_bf16_remote.sh").read_text(encoding="utf-8")
+    assert "_SCHEDULE_SEED = 20261027" in source
+    assert '_RUN_LABEL = "nebius-nim-20261015a"' in source
+    assert 'workload_version="2.13.0"' in source
+    assert 'controller="workflow-controller-v3"' in source
+    assert "qualify-agent" not in source.split('"""', 2)[2]
+    assert "d74ba8ea77c6fa3a553400b56e1172846a3c073b0c57c2f24f3d48e71184fa39" in remote
+    assert "4816da181f28c435aaa2efa0e2302309c28f2c08c9534070e89f67854a521d72" not in remote
+    assert "127.0.0.1:8000:8000" in remote
+
+
 def test_operator_blocks_apply_without_the_phrase(monkeypatch):
     operator = _load_operator()
     monkeypatch.delenv("BWLAB_APPROVAL", raising=False)
     assert operator.main(["nebius_w11_operator.py", "apply"]) == 2
     assert operator.gate("plan", None) is None
     assert operator.gate("apply", operator.APPROVAL_PHRASE) is None
-    old = "I approve the Nebius W11 freeze replication for run nebius-w11-20261015a"
-    assert operator.gate("apply", old) is not None
+    for old in (
+        "I approve the Nebius W11 freeze replication for run nebius-w11-20261015a",
+        "I approve the Nebius W11 freeze replication for run nebius-w11-20261015b",
+    ):
+        assert operator.gate("apply", old) is not None
+        assert operator.gate("destroy", old) is not None
 
 
 def test_operator_stops_before_terraform_when_the_token_is_missing(monkeypatch):

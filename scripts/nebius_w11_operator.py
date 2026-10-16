@@ -15,8 +15,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-RUN_TAG = "nebius-w11-20261015b"
-APPROVAL_PHRASE = "I approve the Nebius W11 freeze replication for run nebius-w11-20261015b"
+RUN_TAG = "nebius-nim-20261015a"
+APPROVAL_PHRASE = "I approve the Nebius NIM BF16 cell for run nebius-nim-20261015a"
 MODULE = Path(__file__).resolve().parents[1] / "infra" / "nebius"
 
 
@@ -31,7 +31,7 @@ def gate(command: str, approval: str | None) -> str | None:
     if command == "plan":
         return None
     if approval != APPROVAL_PHRASE:
-        return "BLOCKED: apply and destroy require the D-0045 approval phrase in BWLAB_APPROVAL"
+        return "BLOCKED: apply and destroy require the Nebius NIM approval sentence in BWLAB_APPROVAL"
     return None
 
 

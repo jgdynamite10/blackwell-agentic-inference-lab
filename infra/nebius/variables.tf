@@ -1,11 +1,11 @@
 variable "run_tag" {
   description = "Exact run this configuration may create. Teardown targets only this tag."
   type        = string
-  default     = "nebius-w11-20261015b"
+  default     = "nebius-nim-20261015a"
 
   validation {
-    condition     = var.run_tag == "nebius-w11-20261015b"
-    error_message = "run_tag is locked to the clean D-0045 Nebius cell."
+    condition     = var.run_tag == "nebius-nim-20261015a"
+    error_message = "run_tag is locked to the Nebius NIM BF16 cell."
   }
 }
 

@@ -73,6 +73,17 @@ _CATALOG_AMD64_DIGEST = (
 )
 
 
+def _adopted_identity() -> dict:
+    nim = _nim()
+    return {
+        "model_artifact": nim.SUPPORTED_MODEL_ARTIFACT,
+        "model_revision": nim.ADOPTED_MODEL_REVISION,
+        "model_artifact_hash": nim.ADOPTED_MODEL_ARTIFACT_HASH,
+        "container_digest": nim.ADOPTED_CONTAINER_DIGEST,
+        "engine_version": DOCUMENTED_ENGINE_VERSION,
+    }
+
+
 def _declaration(**overrides) -> dict:
     payload = {
         "engine": "nim",
@@ -138,7 +149,7 @@ class TestDiscovery:
 
 
 class TestConditionalCeiling:
-    @pytest.mark.parametrize("precision", ["bf16", "w4a16", "nvfp4"])
+    @pytest.mark.parametrize("precision", ["w4a16", "nvfp4"])
     def test_evidence_consistent_declaration_is_conditional(self, precision):
         readiness = evaluate_engine_contract(
             declaration_from_mapping(_declaration(precision=precision))
@@ -149,7 +160,23 @@ class TestConditionalCeiling:
         for condition in _nim().UNRESOLVED_CONDITIONS:
             assert condition in readiness.reasons
 
-    @pytest.mark.parametrize("precision", ["bf16", "w4a16", "nvfp4"])
+    def test_unpinned_bf16_declaration_is_blocked(self):
+        readiness = evaluate_engine_contract(
+            declaration_from_mapping(_declaration(precision="bf16"))
+        )
+        assert readiness.status == READINESS_BLOCKED
+        assert readiness.profile_id == _profile_id("bf16")
+        assert readiness.status != READINESS_READY
+
+    def test_adopted_bf16_identity_is_ready(self):
+        readiness = evaluate_engine_contract(
+            declaration_from_mapping(_declaration(precision="bf16", identity=_adopted_identity()))
+        )
+        assert readiness.status == READINESS_READY
+        assert readiness.profile_id == _profile_id("bf16")
+        require_ready_contract(readiness)
+
+    @pytest.mark.parametrize("precision", ["w4a16", "nvfp4"])
     def test_catalog_digest_and_satisfied_entitlement_stay_conditional(self, precision):
         identity = dict(_IDENTITY)
         identity["container_digest"] = _CATALOG_AMD64_DIGEST
@@ -167,8 +194,25 @@ class TestConditionalCeiling:
         assert readiness.status == READINESS_CONDITIONAL
         assert readiness.profile_id == _profile_id(precision)
 
+    def test_catalog_digest_without_the_adopted_revision_is_not_ready(self):
+        identity = dict(_IDENTITY)
+        identity["container_digest"] = _CATALOG_AMD64_DIGEST
+        readiness = evaluate_engine_contract(
+            declaration_from_mapping(
+                _declaration(
+                    precision="bf16",
+                    identity=identity,
+                    entitlements=[
+                        {"name": "ngc-nim-entitlement", "required": True, "satisfied": True}
+                    ],
+                )
+            )
+        )
+        assert readiness.status == READINESS_BLOCKED
+        assert readiness.status != READINESS_READY
+
     @pytest.mark.parametrize("precision", ["bf16", "w4a16", "nvfp4"])
-    def test_no_nim_declaration_is_ready(self, precision):
+    def test_placeholder_identity_is_not_ready(self, precision):
         variants = [
             _declaration(precision=precision),
             _declaration(precision=precision, profile_id=_profile_id(precision)),
@@ -183,15 +227,17 @@ class TestConditionalCeiling:
             assert readiness.status != READINESS_READY
             assert readiness.profile_id == _profile_id(precision)
 
-    def test_profile_source_has_no_ready_status(self):
+    def test_profile_source_pins_the_adopted_bf16_identity(self):
         source = NIM_SOURCE.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and node.value == "ready":
-                raise AssertionError("NIM profile source contains status ready")
-        assert "READINESS_READY" not in source
+        nim = _nim()
+        assert "READINESS_READY" in source
+        assert nim.ADOPTED_CONTAINER_DIGEST.rsplit(":", 1)[-1] in source
+        assert nim.ADOPTED_RUNTIME_PROFILE_ID in source
+        for forbidden in nim.FORBIDDEN_RUNTIME_PROFILE_IDS:
+            assert forbidden in source
+            assert forbidden != nim.ADOPTED_RUNTIME_PROFILE_ID
 
-    @pytest.mark.parametrize("precision", ["bf16", "w4a16", "nvfp4"])
+    @pytest.mark.parametrize("precision", ["w4a16", "nvfp4"])
     def test_ready_and_supported_gates_reject_conditional_nim(self, precision):
         readiness = evaluate_engine_contract(
             declaration_from_mapping(_declaration(precision=precision))
@@ -201,6 +247,13 @@ class TestConditionalCeiling:
         with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
             require_supported_contract(readiness)
 
+    def test_ready_gate_rejects_unpinned_bf16(self):
+        readiness = evaluate_engine_contract(
+            declaration_from_mapping(_declaration(precision="bf16"))
+        )
+        with pytest.raises(EngineContractError, match="adopted NIM BF16 identity"):
+            require_ready_contract(readiness)
+
 
 class TestBlockedDeclarations:
     @pytest.mark.parametrize("satisfied", [False, None])
@@ -208,9 +261,10 @@ class TestBlockedDeclarations:
         readiness = evaluate_engine_contract(
             declaration_from_mapping(
                 _declaration(
+                    identity=_adopted_identity(),
                     entitlements=[
                         {"name": "ngc-nim-entitlement", "required": True, "satisfied": satisfied}
-                    ]
+                    ],
                 )
             )
         )
@@ -322,7 +376,7 @@ class TestBlockedDeclarations:
 
 
 class TestExecutionRefused:
-    @pytest.mark.parametrize("precision", ["bf16", "w4a16", "nvfp4"])
+    @pytest.mark.parametrize("precision", ["w4a16", "nvfp4"])
     def test_real_execution_stops_before_the_spy_client(self, precision):
         class _Spy(DeterministicMockClient):
             def __init__(self):
@@ -378,7 +432,7 @@ class TestExecutionRefused:
         approved["serving"]["container_digest"] = _IDENTITY["container_digest"]
         approved["model"]["artifact"] = _IDENTITY["model_artifact"]
         approved["model"]["precision"] = "bf16"
-        with pytest.raises(ProvenanceError, match="not authorized for genuine inference"):
+        with pytest.raises(ProvenanceError, match="adopted NIM BF16 identity"):
             run_verify(
                 model_dir,
                 approved=approved,
@@ -428,18 +482,18 @@ class TestModelContainerBoundary:
         with pytest.raises(EngineContractError, match="does not match"):
             require_supported_contract(readiness)
 
-    def test_correct_model_and_repository_shape_stays_conditional(self):
+    def test_other_repository_digests_are_not_the_adopted_bf16_identity(self):
         other_digest = "nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:" + "ef" * 32
-        for digest in (_IDENTITY["container_digest"], other_digest, _CATALOG_AMD64_DIGEST):
-            identity = dict(_IDENTITY)
+        for digest in (_IDENTITY["container_digest"], other_digest):
+            identity = dict(_adopted_identity())
             identity["container_digest"] = digest
             readiness = evaluate_engine_contract(
                 declaration_from_mapping(_declaration(identity=identity))
             )
-            assert readiness.status == READINESS_CONDITIONAL
+            assert readiness.status == READINESS_BLOCKED
             assert readiness.profile_id == _profile_id("bf16")
             assert readiness.status != READINESS_READY
-            with pytest.raises(EngineContractError, match="not authorized for genuine inference"):
+            with pytest.raises(EngineContractError, match="adopted NIM BF16 identity"):
                 require_ready_contract(readiness)
 
     def test_wrong_boundary_never_reaches_the_spy_client(self):

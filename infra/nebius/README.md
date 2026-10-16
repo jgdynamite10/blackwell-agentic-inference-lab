@@ -20,15 +20,14 @@ This host is larger than the finished comparison hosts (16 vCPU, 125 GiB
 on AWS and 173 GiB on Akamai). The CPU is Intel Xeon 6776P. Record those
 differences with the result. `us-central1` could not place this preset
 on 2026-10-15. The owner moved the same preset to `eu-south1` on
-platform `gpu-rtx6000-a`. `uk-south2` is not authorized. The clean cell
-uses run tag `nebius-w11-20261015b`. The earlier
-`nebius-w11-20261015a` result had a dirty tree and is not the
-comparison cell.
+platform `gpu-rtx6000-a`. `uk-south2` is not authorized. This plan
+uses run tag `nebius-nim-20261015a`. Do not reuse
+`nebius-w11-20261015a` or `nebius-w11-20261015b`.
 
 ## What stays out of Git
 
 Copy `terraform.tfvars.example` to
-`~/.local/share/blackwell-lab/nebius-w11-20261015b/terraform.tfvars`
+`~/.local/share/blackwell-lab/nebius-nim-20261015a/terraform.tfvars`
 and fill the project, network, and subnet identifiers there. Terraform
 state and plans stay in that same private directory. Genuine results
 stay in `LAB_RESULTS_DIR`, outside this repository.
