@@ -44,3 +44,23 @@ def test_cell_matches_the_akamai_nvfp4_shape() -> None:
     assert "watchdog-disabled" in remote
     assert "bwlab-ttl" not in remote
     assert "aws_w11_nvfp4_cell.py" in remote
+
+
+def test_nim_cell_waits_for_nvfp4_and_uses_the_adopted_bf16_identity() -> None:
+    cell = (ROOT / "scripts/aws_nim_bf16_cell.py").read_text(encoding="utf-8")
+    remote = (ROOT / "scripts/aws_nim_bf16_remote.sh").read_text(encoding="utf-8")
+    body = cell.split('"""', 2)[2]
+    assert "_SCHEDULE_SEED = 20261028" in cell
+    assert "seed=20260906" in cell
+    assert 'provider="aws"' in cell
+    assert '"precision": "bf16"' in cell
+    assert '_RUN_LABEL = "aws-nim-20261016a"' in cell
+    assert "_LIST_PRICE = 3.99816" in cell
+    assert '_INSTANCE_TYPE = "g7e.4xlarge"' in cell
+    assert "qualify-agent" not in body
+    assert "d74ba8ea77c6fa3a553400b56e1172846a3c073b0c57c2f24f3d48e71184fa39" in remote
+    assert "nvfp4-result-missing" in remote
+    assert "vllm-still-running" in remote
+    assert "-e NGC_API_KEY" in remote
+    assert "-e NGC_API_KEY=" not in remote
+    assert "results-export-nim.tar" in remote

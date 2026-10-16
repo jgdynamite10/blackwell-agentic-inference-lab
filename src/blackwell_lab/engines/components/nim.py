@@ -8,7 +8,9 @@ remain unresolved are recorded in ``docs/components/nim.md``.
 These profiles own NIM engine version ``2.0.13``, model family
 ``nvidia/nemotron-3.5-lightning``, and the
 ``nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:<hex>``
-container shape. Other identities stay unmatched. No result is ``ready``.
+container shape. Other identities stay unmatched. The BF16 profile is
+``ready`` only for the adopted RTX PRO 6000 identity below. W4A16 and
+NVFP4 stay conditional.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import re
 from blackwell_lab.engines.contract import (
     READINESS_BLOCKED,
     READINESS_CONDITIONAL,
+    READINESS_READY,
     TOPOLOGY_SINGLE_GPU,
     EngineContractDeclaration,
     EngineContractError,
@@ -31,6 +34,34 @@ SUPPORTED_MODEL_ARTIFACT = "nvidia/nemotron-3.5-lightning"
 CONTAINER_REPOSITORY = "nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b"
 IMPLEMENTATION_ID = "blackwell_lab.engines.components.nim.NimNemotron35SingleGpuProfile"
 _CONTAINER_DIGEST_RE = re.compile(rf"^{re.escape(CONTAINER_REPOSITORY)}@sha256:[0-9a-f]{{64}}$")
+
+# linux/amd64 manifest digest of tag 2.0.13. Not the tag, and not the
+# arm64 digest.
+ADOPTED_CONTAINER_DIGEST = (
+    "nvcr.io/nim/nvidia/nemotron-3.5-lightning-30b-a3b@sha256:"
+    "4f93f7e217ca05954bb34d3ccabbb3080f419e0ee5e1c0053f70debc00eb97e8"
+)
+# NGC version hf-b3caaab on the BF16 profile workspace. That tag is the
+# Hugging Face commit prefix for this revision.
+ADOPTED_MODEL_REVISION = "b3caaabed0263651a17dc1f2d4ce97e794f76c44"
+# SHA-256 of the sorted ``<sha256>  ./relative-path`` lines for the 21
+# files in NIM profile d74ba8ea…, at ADOPTED_MODEL_REVISION. Git LFS oids
+# are the file hashes, including tokenizer.json. The six non-LFS files
+# were downloaded and hashed on 2026-10-16. ``.gitattributes`` is not in
+# that profile.
+ADOPTED_MODEL_ARTIFACT_HASH = (
+    "sha256:d79c70ec33aeb6144fdd74cc54c2f2350cbfffff725c7b82f5637a289759f161"
+)
+# list-model-profiles on one RTX PRO 6000 Blackwell Server Edition marked
+# this BF16 TP=1 profile compatible and runnable. It has no per-GPU tag.
+# The support matrix lists that SKU at 96 GB with all profiles, and the
+# BF16 TP=1 row is the 66 GB profile. The LoRA variant is not this pin.
+ADOPTED_RUNTIME_PROFILE_ID = "d74ba8ea77c6fa3a553400b56e1172846a3c073b0c57c2f24f3d48e71184fa39"
+# Optimized profiles for other GPUs. They are not this BF16 pin.
+FORBIDDEN_RUNTIME_PROFILE_IDS = (
+    "4816da181f28c435aaa2efa0e2302309c28f2c08c9534070e89f67854a521d72",
+    "1e34732516864e06c8dad271edd1d19b986c4c010b9d7e3adcb8b113df58819b",
+)
 
 # Public documentation URLs retrieved on RETRIEVAL_DATE. No digest here is
 # an adopted execution pin.
@@ -63,10 +94,11 @@ UNRESOLVED_CONDITIONS: tuple[str, ...] = (
 
 
 class NimNemotron35SingleGpuProfile:
-    """One conditional single-GPU precision on the NIM 2.0.13 surface.
+    """One single-GPU precision on the NIM 2.0.13 surface.
 
-    ``evaluate`` returns ``conditional`` or ``blocked``. It has no ``ready``
-    result.
+    BF16 is ``ready`` only for the adopted digest, revision, artifact hash,
+    and engine version. W4A16 and NVFP4 return ``conditional`` or
+    ``blocked``.
     """
 
     engine = "nim"
@@ -106,10 +138,32 @@ class NimNemotron35SingleGpuProfile:
                 reasons=("declaration does not match this NIM single-GPU profile",),
                 declaration=declaration,
             )
+        if self.precision != "bf16":
+            return EngineReadiness(
+                status=READINESS_CONDITIONAL,
+                profile_id=self.profile_id,
+                reasons=UNRESOLVED_CONDITIONS,
+                declaration=declaration,
+            )
+        identity = declaration.identity
+        reasons: list[str] = []
+        if identity.model_revision != ADOPTED_MODEL_REVISION:
+            reasons.append("unsupported model revision for the adopted NIM BF16 identity")
+        if identity.model_artifact_hash != ADOPTED_MODEL_ARTIFACT_HASH:
+            reasons.append("unsupported model artifact digest for the adopted NIM BF16 identity")
+        if identity.container_digest != ADOPTED_CONTAINER_DIGEST:
+            reasons.append("unsupported container digest for the adopted NIM BF16 identity")
+        if reasons:
+            return EngineReadiness(
+                status=READINESS_BLOCKED,
+                profile_id=self.profile_id,
+                reasons=tuple(reasons),
+                declaration=declaration,
+            )
         return EngineReadiness(
-            status=READINESS_CONDITIONAL,
+            status=READINESS_READY,
             profile_id=self.profile_id,
-            reasons=UNRESOLVED_CONDITIONS,
+            reasons=(),
             declaration=declaration,
         )
 
