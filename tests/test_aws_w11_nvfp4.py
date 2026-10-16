@@ -63,9 +63,14 @@ def test_nim_cell_waits_for_nvfp4_and_uses_the_adopted_bf16_identity() -> None:
     assert "vllm-still-running" in remote
     assert "-e NGC_API_KEY" in remote
     assert "-e NGC_API_KEY=" not in remote
-    assert "install -d -m 0777 /var/lib/bwlab/nim-cache" in remote
-    assert "chmod 0777 /var/lib/bwlab/nim-cache" in remote
+    assert "install -d -o root -g 0 -m 2770 /var/lib/bwlab/nim-cache" in remote
+    assert "chmod 2770 /var/lib/bwlab/nim-cache" in remote
     assert "install -d -m 0700 /var/lib/bwlab/nim-cache" not in remote
+    assert "nim-already-serving" in remote
+    assert '"tool_choice": "auto"' in remote
+    assert '"tool_choice": "required"' not in remote
+    assert '"stream": True' in remote
+    assert '"max_tokens": 1024' in remote
     assert remote.count('rm -f "${keyfile}"') == 1
     assert remote.index('rm -f "${keyfile}"') > remote.index('print("nim-tools-ok")')
     assert "nim-serve" in remote
