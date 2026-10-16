@@ -67,12 +67,18 @@ case "${phase}" in
     systemctl disable --now bwlab-watchdog.timer >/dev/null 2>&1 || true
     systemctl stop bwlab-watchdog.service >/dev/null 2>&1 || true
     docker rm -f bwlab-nim >/dev/null 2>&1 || true
+    # NIM 2.0.13 does not map tool-choice environment variables onto
+    # vLLM. Flags after the image are the nim-serve arguments. The
+    # first flag selects that default action.
     docker run -d --name bwlab-nim --gpus all --shm-size=16g \
       -p 127.0.0.1:8000:8000 \
       -e NGC_API_KEY \
       -e NIM_MODEL_PROFILE="${PROFILE}" \
       -v /var/lib/bwlab/nim-cache:/opt/nim/.cache \
-      "${IMAGE}"
+      "${IMAGE}" \
+      --enable-auto-tool-choice \
+      --tool-call-parser qwen3_coder \
+      --reasoning-parser nemotron_v3
     unset NGC_API_KEY
     docker logout nvcr.io >/dev/null 2>&1 || true
     ready=0

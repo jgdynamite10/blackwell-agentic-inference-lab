@@ -63,4 +63,8 @@ def test_nim_cell_waits_for_nvfp4_and_uses_the_adopted_bf16_identity() -> None:
     assert "vllm-still-running" in remote
     assert "-e NGC_API_KEY" in remote
     assert "-e NGC_API_KEY=" not in remote
+    assert "--enable-auto-tool-choice" in remote
+    assert "--tool-call-parser qwen3_coder" in remote
+    assert "--reasoning-parser nemotron_v3" in remote
+    assert "NIM_ENABLE_AUTO_TOOL_CHOICE" not in remote
     assert "results-export-nim.tar" in remote
