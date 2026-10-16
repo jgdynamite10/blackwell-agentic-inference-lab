@@ -82,6 +82,7 @@ def test_nim_cell_uses_the_adopted_bf16_identity():
     assert "127.0.0.1:8000:8000" in remote
     assert "-e NGC_API_KEY" in remote
     assert "-e NGC_API_KEY=" not in remote
+    assert "docker login nvcr.io --username '$oauthtoken' --password-stdin" in remote
 
 
 def test_operator_blocks_apply_without_the_phrase(monkeypatch):

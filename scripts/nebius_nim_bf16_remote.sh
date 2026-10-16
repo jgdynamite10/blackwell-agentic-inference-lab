@@ -44,6 +44,9 @@ case "${phase}" in
     set +x
     NGC_API_KEY="$(cat "${keyfile}")"
     export NGC_API_KEY
+    # Registry auth is separate from the container environment. The
+    # username is the NGC literal. The key is read from stdin.
+    printf '%s' "${NGC_API_KEY}" | docker login nvcr.io --username '$oauthtoken' --password-stdin >/dev/null
     install -d -m 0700 /var/lib/bwlab/nim-cache
     date +%s > /var/lib/bwlab-watchdog.last-active || true
     systemctl disable --now bwlab-watchdog.timer >/dev/null 2>&1 || true
@@ -57,6 +60,7 @@ case "${phase}" in
       -v /var/lib/bwlab/nim-cache:/opt/nim/.cache \
       "${IMAGE}"
     unset NGC_API_KEY
+    docker logout nvcr.io >/dev/null 2>&1 || true
     ready=0
     # BF16 profile weights are about 63 GB. Allow 90 minutes, and stop
     # early if the container exits.
