@@ -83,6 +83,7 @@ def test_nim_cell_uses_the_adopted_bf16_identity():
     assert "-e NGC_API_KEY" in remote
     assert "-e NGC_API_KEY=" not in remote
     assert "docker login nvcr.io --username '$oauthtoken' --password-stdin" in remote
+    assert "nim-serve" in remote
     assert "--enable-auto-tool-choice" in remote
     assert "--tool-call-parser qwen3_coder" in remote
     assert "--reasoning-parser nemotron_v3" in remote

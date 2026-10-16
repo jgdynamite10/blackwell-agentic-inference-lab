@@ -54,14 +54,14 @@ case "${phase}" in
     docker rm -f bwlab-nim >/dev/null 2>&1 || true
     # Pass the variable name only. The value stays in the environment.
     # NIM 2.0.13 does not map tool-choice environment variables onto
-    # vLLM. Flags after the image are the nim-serve arguments. The
-    # first flag selects that default action.
+    # vLLM. The documented command is nim-serve plus these arguments.
     docker run -d --name bwlab-nim --gpus all --shm-size=16g \
       -p 127.0.0.1:8000:8000 \
       -e NGC_API_KEY \
       -e NIM_MODEL_PROFILE="${PROFILE}" \
       -v /var/lib/bwlab/nim-cache:/opt/nim/.cache \
       "${IMAGE}" \
+      nim-serve \
       --enable-auto-tool-choice \
       --tool-call-parser qwen3_coder \
       --reasoning-parser nemotron_v3
