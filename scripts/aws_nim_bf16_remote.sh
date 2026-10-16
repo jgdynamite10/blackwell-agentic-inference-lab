@@ -62,7 +62,12 @@ case "${phase}" in
     NGC_API_KEY="$(cat "${keyfile}")"
     export NGC_API_KEY
     printf '%s' "${NGC_API_KEY}" | docker login nvcr.io --username '$oauthtoken' --password-stdin >/dev/null
-    install -d -m 0700 /var/lib/bwlab/nim-cache
+    # NIM 2.0.13 runs as a non-root user. A root-owned 0700 cache is not
+    # writable by that user, and the container exits before it can download
+    # the profile. Mode 0777 matches NVIDIA's cache guidance and still works
+    # if Docker remaps the container uid.
+    install -d -m 0777 /var/lib/bwlab/nim-cache
+    chmod 0777 /var/lib/bwlab/nim-cache
     date +%s > /var/lib/bwlab-watchdog.last-active || true
     systemctl disable --now bwlab-watchdog.timer >/dev/null 2>&1 || true
     systemctl stop bwlab-watchdog.service >/dev/null 2>&1 || true
@@ -91,12 +96,10 @@ case "${phase}" in
       if [ "${running}" != "true" ]; then
         echo "nim-container-exited" >&2
         docker logs --tail 40 bwlab-nim 2>&1 | sed -E 's/nvapi-[A-Za-z0-9_-]+/[redacted]/g' >&2 || true
-        rm -f "${keyfile}"
         exit 1
       fi
       sleep 15
     done
-    rm -f "${keyfile}"
     if [ "${ready}" -ne 1 ]; then
       echo "nim-not-healthy" >&2
       docker logs --tail 40 bwlab-nim 2>&1 | sed -E 's/nvapi-[A-Za-z0-9_-]+/[redacted]/g' >&2 || true
@@ -137,6 +140,7 @@ if not message.get("tool_calls"):
     raise SystemExit("native-tool-calls-missing")
 print("nim-tools-ok")
 PY
+    rm -f "${keyfile}"
     if systemctl is-active bwlab-watchdog.timer >/dev/null 2>&1; then
       echo "watchdog-still-active" >&2
       exit 1
