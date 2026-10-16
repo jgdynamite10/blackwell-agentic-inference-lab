@@ -80,6 +80,8 @@ def test_nim_cell_uses_the_adopted_bf16_identity():
     assert "d74ba8ea77c6fa3a553400b56e1172846a3c073b0c57c2f24f3d48e71184fa39" in remote
     assert "4816da181f28c435aaa2efa0e2302309c28f2c08c9534070e89f67854a521d72" not in remote
     assert "127.0.0.1:8000:8000" in remote
+    assert "-e NGC_API_KEY" in remote
+    assert "-e NGC_API_KEY=" not in remote
 
 
 def test_operator_blocks_apply_without_the_phrase(monkeypatch):

@@ -1,9 +1,11 @@
 #!/bin/bash
 # Host-side phases for the Nebius NIM BF16 cell.
-# The NGC key is copied to /var/lib/bwlab/ngc-api-key only for the image
-# pull, then deleted. This script does not start vLLM bootstrap and does
-# not install the idle-poweroff watchdog. The 10-hour first-boot timer
-# stays. Pack writes results-export-nim.tar.
+# The NGC key stays in /var/lib/bwlab/ngc-api-key until the server is
+# healthy. NIM downloads the BF16 profile into the container at startup,
+# and that download requires the key in the container environment. The
+# key is never printed. This script does not start vLLM bootstrap and
+# does not install the idle-poweroff watchdog. The 10-hour first-boot
+# timer stays. Pack writes results-export-nim.tar.
 set -euo pipefail
 
 phase="${1:-}"
@@ -30,24 +32,52 @@ case "${phase}" in
     /opt/bwlab-venv/bin/pip install -q 'jsonschema[format-nongpl]>=4.21'
     ;;
   serve)
+    if ! command -v docker >/dev/null 2>&1; then
+      echo "docker-missing" >&2
+      exit 1
+    fi
+    keyfile=/var/lib/bwlab/ngc-api-key
+    if [ ! -s "${keyfile}" ]; then
+      echo "ngc key file missing" >&2
+      exit 1
+    fi
+    set +x
+    NGC_API_KEY="$(cat "${keyfile}")"
+    export NGC_API_KEY
+    install -d -m 0700 /var/lib/bwlab/nim-cache
     date +%s > /var/lib/bwlab-watchdog.last-active || true
     systemctl disable --now bwlab-watchdog.timer >/dev/null 2>&1 || true
     systemctl stop bwlab-watchdog.service >/dev/null 2>&1 || true
     docker rm -f bwlab-nim >/dev/null 2>&1 || true
+    # Pass the variable name only. The value stays in the environment.
     docker run -d --name bwlab-nim --gpus all --shm-size=16g \
       -p 127.0.0.1:8000:8000 \
+      -e NGC_API_KEY \
       -e NIM_MODEL_PROFILE="${PROFILE}" \
+      -v /var/lib/bwlab/nim-cache:/opt/nim/.cache \
       "${IMAGE}"
+    unset NGC_API_KEY
     ready=0
-    for _ in $(seq 1 120); do
+    # BF16 profile weights are about 63 GB. Allow 90 minutes, and stop
+    # early if the container exits.
+    for _ in $(seq 1 360); do
       if curl -fsS http://127.0.0.1:8000/v1/models >/tmp/nim-models.json; then
         ready=1
         break
       fi
+      running="$(docker inspect -f '{{.State.Running}}' bwlab-nim 2>/dev/null || echo false)"
+      if [ "${running}" != "true" ]; then
+        echo "nim-container-exited" >&2
+        docker logs --tail 40 bwlab-nim 2>&1 | sed -E 's/nvapi-[A-Za-z0-9_-]+/[redacted]/g' >&2 || true
+        rm -f "${keyfile}"
+        exit 1
+      fi
       sleep 15
     done
+    rm -f "${keyfile}"
     if [ "${ready}" -ne 1 ]; then
       echo "nim-not-healthy" >&2
+      docker logs --tail 40 bwlab-nim 2>&1 | sed -E 's/nvapi-[A-Za-z0-9_-]+/[redacted]/g' >&2 || true
       exit 1
     fi
     python3 - << 'PY'
