@@ -17,7 +17,9 @@ Decomposition:
   task-success rate, and cost per successful task on RTX PRO 6000 Blackwell?
 - **RQ1c — Environment.** Holding GPU model, container, model artifact,
   serving configuration, workload, and measurement contract constant, how much
-  do the three cloud environments differ on the same measures?
+  do the three cloud environments differ on the same measures? The active
+  three, per D-0048, are Akamai Cloud, Nebius, and AWS. Google Cloud remains
+  historical planning context, not an active replication target.
 
 ## Secondary question
 

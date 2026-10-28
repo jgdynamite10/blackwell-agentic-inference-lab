@@ -73,7 +73,7 @@ cost per successful task. The full measurement contract is in
 ## Provider scope
 
 The active provider set is **Akamai Cloud, Nebius AI Cloud, and AWS**.
-Nebius replaces the original Google Cloud replication target (D-0047).
+Nebius replaces the original Google Cloud replication target (D-0048).
 The existing [Nebius replication kit](infra/nebius/README.md) records
 `gpu-rtx6000-a` / `1gpu-24vcpu-218gb` in `eu-south1`. Historical
 decisions and legacy manifest compatibility are preserved. This scope

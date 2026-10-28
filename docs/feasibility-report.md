@@ -1,6 +1,6 @@
 # Feasibility Report
 
-**Provider-scope update, 2026-10-27 (D-0047):** the active providers are
+**Provider-scope update, 2026-10-27 (D-0048):** the active providers are
 Akamai, Nebius, and AWS. Nebius details below are from the repository's
 D-0045 record dated 2026-10-15, not a new account or capacity check. Other
 dated Phase 1 findings retain their original evidence dates.

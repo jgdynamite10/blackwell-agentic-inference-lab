@@ -29,7 +29,7 @@ explicitly revises them in writing.
    and security group were deleted. Task scores stay out of git. Phase
    6, the comparative matrix, remains unauthorized. Any further AWS
    create, resize, start, stop, or delete needs a new owner decision.
-   Google Cloud is outside the active provider scope (D-0047).
+   Google Cloud is outside the active provider scope (D-0048).
 6. Follow the spend controls in [docs/cost-guardrails.md](docs/cost-guardrails.md).
 
 ## 2. Repository publicity and results privacy

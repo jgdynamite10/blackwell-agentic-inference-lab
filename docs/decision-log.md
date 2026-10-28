@@ -2748,18 +2748,24 @@ precision cell is the comparison that can be made. The software factor
 stays open until a NIM or TensorRT-LLM pin exists.
 
 
-## 2026-10-27 — D-0047: Replace the active Google Cloud target with Nebius
+## 2026-10-27 — D-0048: Replace the active Google Cloud target with Nebius
 
 **Decision.** The owner requested that the presentation's GitHub repository
 remove Google Cloud from its active scope and use Nebius. The active
 provider set is Akamai Cloud, Nebius AI Cloud, and AWS. Reuse the existing
 D-0045 Nebius kit and its revised `eu-south1` platform/preset lock.
 
+**Identifier.** This scope change is D-0048. D-0047 remains the identifier
+of the AWS NVFP4 and NIM cell implementation on branch
+`d0047-aws-w11-nvfp4`. That branch is not merged by this decision, and
+this entry does not absorb, renumber, or certify it.
+
 **Scope.** Align the README, charter, roadmap, architecture, experiment
-matrix, feasibility guidance, cost planning, issue-generation template,
-and environment/preflight documentation. Remove the obsolete Google
-preflight script and credential setup. Do not transfer Google machine
-specifications, pricing, quota rules, or billing controls to Nebius.
+matrix, research questions, feasibility guidance, cost planning,
+issue-generation template, and environment/preflight documentation.
+Remove the obsolete Google preflight script and credential setup. Do not
+transfer Google machine specifications, pricing, quota rules, or billing
+controls to Nebius.
 
 **Integrity.** Earlier decision entries and the D-0035 historical runbook
 remain unchanged. The manifest schema and real-run validator retain `gcp`

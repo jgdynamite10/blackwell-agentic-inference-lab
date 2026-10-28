@@ -217,17 +217,17 @@ publication policy are unchanged.
 
 ## Phase 5 — Nebius portability
 
-D-0047 replaces the original Google Cloud target with Nebius. The
+D-0048 replaces the original Google Cloud target with Nebius. The
 [D-0045 kit](../infra/nebius/README.md) already implements the bounded
 provider-native W11 path. The wider plan below is not a claim of completed
 execution or authorization to launch more cells.
 
-Reproduce the frozen Phase 3 baseline on a Nebius single-GPU
-configuration (`gpu-rtx6000-a` / `1gpu-24vcpu-218gb`, `eu-south1`) while
-documenting every material
-environmental difference (CPU architecture, vCPU count, memory, storage,
-networking, virtualization, driver, region). Both controlled-resource and
-provider-native modes are run and reported separately.
+A later authorized Nebius matrix would reproduce the frozen Phase 3
+baseline on `gpu-rtx6000-a` / `1gpu-24vcpu-218gb` in `eu-south1` and
+would document every material environmental difference: CPU architecture,
+vCPU count, memory, storage, networking, virtualization, driver, and
+region. Controlled-resource and provider-native results would stay
+separate. That wider matrix is not the completed W11 comparison.
 
 ## Phase 6 — AWS portability
 
