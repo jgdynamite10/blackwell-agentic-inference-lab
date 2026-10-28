@@ -15,7 +15,6 @@ preflight checks and never receive provider credentials (AGENTS.md, section
 | Script | Provider | Needs credentials? |
 | --- | --- | --- |
 | `check_akamai.py` | Akamai Cloud (Linode API) | `--public-only` catalog mode works unauthenticated; authenticated readiness requires `LINODE_TOKEN` (read-only scope) **and `--region`** for account-level deployability and price decisions |
-| `check_gcp.py` | Google Cloud | Needs `gcloud` with a read-only identity |
 | `check_aws.py` | AWS | Needs `aws` CLI with a read-only identity |
 
 Usage (local machine):
@@ -24,11 +23,21 @@ Usage (local machine):
 python3 scripts/preflight/check_akamai.py --help
 python3 scripts/preflight/check_akamai.py --public-only   # catalog only, no token needed
 python3 scripts/preflight/check_akamai.py --region ca-central   # full check, requires LINODE_TOKEN
-python3 scripts/preflight/check_gcp.py
 python3 scripts/preflight/check_aws.py
 ```
 
-Behavioral guarantees:
+## Nebius readiness
+
+Nebius replaces the former Google Cloud target. Use the existing
+[Nebius W11 runbook](../../infra/nebius/README.md) for the locked host
+shape, private configuration, and local operator workflow. There is no
+standalone Nebius read-only preflight script in this repository. Before any
+separately authorized run, the local operator must verify quota, regional
+capacity, image availability, and current pricing. A Terraform plan does
+not prove live capacity. Do not treat the operator lifecycle script as
+one of the read-only preflight scripts listed above.
+
+## Behavioral guarantees for the listed preflight scripts
 
 - Each script prints a read-only banner and supports `--help`.
 - Exit code 0 means **every requested check completed**. A missing CLI,

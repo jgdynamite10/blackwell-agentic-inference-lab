@@ -2746,3 +2746,29 @@ available. That cell is not launched.
 and an unpinned run would not sit beside the cloud table. One pinned
 precision cell is the comparison that can be made. The software factor
 stays open until a NIM or TensorRT-LLM pin exists.
+
+
+## 2026-10-27 — D-0047: Replace the active Google Cloud target with Nebius
+
+**Decision.** The owner requested that the presentation's GitHub repository
+remove Google Cloud from its active scope and use Nebius. The active
+provider set is Akamai Cloud, Nebius AI Cloud, and AWS. Reuse the existing
+D-0045 Nebius kit and its revised `eu-south1` platform/preset lock.
+
+**Scope.** Align the README, charter, roadmap, architecture, experiment
+matrix, feasibility guidance, cost planning, issue-generation template,
+and environment/preflight documentation. Remove the obsolete Google
+preflight script and credential setup. Do not transfer Google machine
+specifications, pricing, quota rules, or billing controls to Nebius.
+
+**Integrity.** Earlier decision entries and the D-0035 historical runbook
+remain unchanged. The manifest schema and real-run validator retain `gcp`
+for legacy receipt compatibility, not as an active replication target.
+Generic Google credential/endpoint detection tests remain in place.
+The broader historical matrices are not represented as completed runs.
+No results are published or reclassified by this change, and no cloud
+resource operation, new live run, or pricing verification is authorized.
+
+**Rationale.** The existing Nebius kit and the owner's presentation now
+use Nebius as the third provider. Current guidance must match that scope
+while preserving the provenance of earlier planning and private results.

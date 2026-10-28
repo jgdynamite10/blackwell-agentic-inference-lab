@@ -173,8 +173,8 @@ class RealRunSpec:
     #: matching decoded stage. ``None`` for every catalog-driven run.
     sealed_set: SealedSetBinding | None = None
     #: Purchasable cloud recorded in the manifest. Defaults to the historical
-    #: Akamai path. An AWS, GCP, or Nebius host must set this; leaving it as
-    #: Akamai would hide the provider.
+    #: Akamai path. An AWS or Nebius host must set this; leaving it as
+    #: Akamai would hide the provider. Legacy gcp manifests remain readable.
     provider: str = "akamai"
 
 

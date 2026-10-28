@@ -1,4 +1,9 @@
-# Phase 1 Feasibility Report
+# Feasibility Report
+
+**Provider-scope update, 2026-10-27 (D-0047):** the active providers are
+Akamai, Nebius, and AWS. Nebius details below are from the repository's
+D-0045 record dated 2026-10-15, not a new account or capacity check. Other
+dated Phase 1 findings retain their original evidence dates.
 
 **Date:** 2026-09-05
 **Method:** Publicly accessible official documentation and reputable
@@ -32,7 +37,7 @@ budgeting or provisioning decision.
 | Provider / service | Status | Detail |
 | --- | --- | --- |
 | Akamai Cloud (Linode API) | **[VERIFIED] Not available** | No `linode-cli` installed and no `LINODE_TOKEN` in the environment. Account-level plan availability could not be checked. |
-| Google Cloud | **[VERIFIED] Not available** | No `gcloud` installed and no application-default or service-account credentials present. Project quota could not be checked. |
+| Nebius | **[UNRESOLVED — local verification required]** | Use the D-0045 runbook; no new credential, quota, or capacity check was performed for this scope update. |
 | AWS | **[VERIFIED] Not available** | No `aws` CLI installed and no `AWS_*` credentials present. Service quotas and account-level pricing could not be checked. |
 | GitHub | **[VERIFIED] Available (read/limited write)** | Authenticated CLI present; used for repository operations only. |
 | NGC / Hugging Face | **[VERIFIED] Not available** | No `NGC_API_KEY` or `HF_TOKEN` present. Artifact access checks were limited to public pages. |
@@ -43,10 +48,11 @@ must not run credential-dependent preflight scripts
 ([../AGENTS.md](../AGENTS.md), section 3). The account-level checks below are
 therefore performed in the owner's authenticated local environment, directly
 or by an owner-authorized Cursor Agent running on the owner's machine, using
-the read-only preflight scripts in `scripts/preflight/`:
+the read-only preflight scripts in `scripts/preflight/` where available
+and the Nebius readiness checklist in that directory's README:
 (a) Akamai account onboarding/eligibility for the limited-availability RTX
-PRO 6000 plan and per-region deployability, (b) the Google Cloud project's
-`NVIDIA_RTX_PRO_6000_GPUS` regional quota, (c) AWS "Running On-Demand G and VT
+PRO 6000 plan and per-region deployability, (b) Nebius project quota,
+`eu-south1` capacity, and the D-0045 platform/preset, (c) AWS "Running On-Demand G and VT
 instances" vCPU quota and live regional capacity. No credentials are ever
 committed or pasted into chat, issues, PRs, or CI; see
 [../SECURITY.md](../SECURITY.md).
@@ -155,27 +161,23 @@ committed or pasted into chat, issues, PRs, or CI; see
   observations above and the D-0029 `us-sea`, D-0027 `us-iad-2`, and
   D-0030 `us-ord` boundaries stay historical facts.
 
-## 3. Google Cloud — `g4-standard-48`
+## 3. Nebius — D-0045 replication target
 
-- **[VERIFIED]** G4 VMs with RTX PRO 6000 Blackwell are **generally
-  available**; sizes 1/2/4/8 GPUs. Source: [Google Cloud blog](https://cloud.google.com/blog/products/compute/g4-vms-powered-by-nvidia-rtx-6000-blackwell-gpus-are-ga).
-- **[VERIFIED]** G4 constraints from official docs
-  ([Compute Engine GPU docs](https://docs.cloud.google.com/compute/docs/gpus/create-vm-with-gpus)):
-  G4 runs only on **AMD EPYC Turin**; only certain regions/zones; **no
-  Persistent Disk** (Hyperdisk/local SSD instead); no sustained-use or
-  flexible committed-use discounts; capacity only via supported consumption
-  options; GPU quota (`NVIDIA_RTX_PRO_6000_GPUS` per region plus global GPU
-  quota) must be requested — new projects start effectively at zero.
-- **[ASSUMPTION — preliminary, non-authoritative planning estimate]**
-  `g4-standard-48` = 48 vCPU / 180 GB RAM / 1× 96 GB GPU at approximately
-  **$4.50/hr** on-demand (third-party tracker
-  [Thunder Compute](https://www.thundercompute.com/blog/google-cloud-gpu-instances),
-  tracker data dated 2026-08-28, retrieved 2026-09-05). Requires account-level
-  verification in the Google Cloud pricing calculator / billing for the target
-  region, performed in the owner's local environment.
-- **[UNRESOLVED — owner action]** Quota status and consumable regions for the
-  authorized project; whether on-demand (vs Spot/reservation/Flex-start) is
-  available for `g4-standard-48` in the target region.
+- **[REPOSITORY RECORD — 2026-10-15]** The revised D-0045 kit pins
+  `gpu-rtx6000-a` / `1gpu-24vcpu-218gb` in `eu-south1`: one RTX PRO
+  6000 Blackwell Server Edition, 24 vCPU, 218 GiB RAM, Intel Xeon 6776P.
+  See [the runbook](../infra/nebius/README.md) and
+  [decision D-0045](decision-log.md).
+- The recorded GPU rate was **$1.80/GPU-hour**, with the 400 GiB network
+  SSD billed separately. This is a dated repository record, not a current
+  quote or proof of capacity. Reverify locally before any new run.
+- The kit uses image family `ubuntu24.04-cuda13.0` and requires the exact
+  lab driver pin. Do not relax artifact or driver pins to obtain a run.
+- **[UNRESOLVED — local verification]** Verify quota, regional capacity,
+  image availability, and pricing for any newly authorized session. The
+  earlier `us-central1` placement failure does not authorize a fallback.
+- D-0045 contains a bounded provider-native workflow; it is not approval
+  or evidence of completion of the broader comparison matrix.
 
 ## 4. AWS — EC2 G7e
 
@@ -325,7 +327,7 @@ Host inventory across the three single-GPU candidates:
 | Provider | Instance | vCPU | RAM | CPU |
 | --- | --- | --- | --- | --- |
 | Akamai | 1-GPU RTX PRO 6000 plan | 16 (dedicated) | 176 GB | [UNRESOLVED — record in Phase 3] |
-| Google | `g4-standard-48` | 48 | 180 GB | AMD EPYC Turin |
+| Nebius (D-0045 record) | `gpu-rtx6000-a` / `1gpu-24vcpu-218gb` | 24 | 218 GiB | Intel Xeon 6776P |
 | AWS | `g7e.4xlarge` | 16 | 128 GiB | Intel Emerald Rapids |
 
 **Provisional envelope (single definition used project-wide):** the
@@ -339,7 +341,7 @@ with margin.
 
 **D-0017 MVL:** the initial Akamai baseline is provider-native only. The
 joint controlled-resource envelope remains optional future work. CPU
-**architecture** differences (AMD Turin vs Intel Emerald Rapids vs
+**architecture** differences (Intel Granite Rapids vs Intel Emerald Rapids vs
 Akamai's host CPU) cannot be equalized — they are recorded, not hidden.
 
 ## 8. Approximate costs
@@ -355,7 +357,7 @@ verification** in the owner's local environment before budgeting decisions.
 | Phase 3 (Akamai MVL, **D-0017; live execution still requires a separate phrase**) | Same six-hour infrastructure envelope as the D-0014 pilot, at the **$3.00/h** owner-observed Seattle catalog base price (public advertised starting price remains $2.50/h) | six-hour session envelope; canary must project a finish inside remaining time |
 | Phase 3B authorized pilot only | ≤ 6 GPU-h on one `g3-gpu-rtxpro6000-blackwell-1` in `us-sea` | **$25 total ceiling** (six hours × $3.00/h ≈ $18 before incidentals; not authorization of the full Phase 3 estimate) |
 | Phase 4 (optimization, **not authorized**) | ~80–200 GPU-h × **$3.00/h** Seattle observed plan price (same advertised-vs-observed distinction) | **≈ $240–$600** before incidental costs |
-| Phase 5 (Google Cloud) | ~60–140 GPU-h (12 cells: both comparison modes) × ~$4.50/h + Hyperdisk/local SSD | **≈ $280–$650** |
+| Phase 5 (Nebius broader matrix; not authorized) | Recalculate from the approved schedule, locally verified GPU rate, disk, and incidental costs | **Not yet budgeted; see D-0045 for the bounded kit** |
 | Phase 6 (AWS) | ~60–140 GPU-h × ~$4.00/h (4xlarge) or ~$5.27/h (8xlarge) + EBS | **≈ $250–$760** |
 | Storage/network (all) | model artifact downloads (~80 GB/provider), result egress | **≈ $10–$50 total** |
 
@@ -382,7 +384,7 @@ authorized Phase 3B pilot is a separate $25 / six-hour ceiling and does
 **Billing-duration caveat (all providers):** GPU-hour cost accrues for the
 entire life of the *service*, not just active benchmarking. On Akamai,
 powering off a Linode does **not** stop billing — the instance must be
-deleted/removed from the account to stop charges. On AWS and GCP,
+deleted/removed from the account to stop charges. On AWS,
 stopped-instance compute treatment differs from Akamai's, but disks,
 addresses, snapshots, and other attached resources may continue billing while
 the instance is stopped. Estimates above therefore assume prompt deletion of
@@ -403,7 +405,7 @@ sources: [Understanding how billing works](https://techdocs.akamai.com/cloud-com
    service is deleted/removed from the account**.
 3. An in-instance shutdown watchdog **limits active workload but is not an
    Akamai spending backstop** — a powered-off Linode keeps billing.
-4. On AWS and GCP, stopped-instance compute treatment differs from Akamai's,
+4. On AWS, stopped-instance compute treatment differs from Akamai's,
    while disks, addresses, snapshots, and other resources may continue
    billing while an instance is stopped.
 
@@ -414,10 +416,11 @@ Per-provider options:
   the actual spending control is prompt, owner-approved **deletion** of the
   Linode after verified result export, plus a read-only sweep listing GPU
   Linodes older than their TTL tag. [Watchdog approach: ASSUMPTION.]
-- **Google Cloud:** native instance schedules and
-  `max-run-duration`/auto-delete options (Spot and Flex-start); budget alerts
-  via Cloud Billing. Stopped instances still bill for attached Hyperdisk/SSD
-  and reserved addresses. [VERIFIED — documented Compute Engine features.]
+- **Nebius:** D-0045 uses a ten-hour first-boot shutdown timer and
+  `recovery_policy=FAIL`. The runbook records that compute billing stops
+  on shutdown but the boot disk remains billable until deletion. Export
+  results and complete separately approved teardown; verify no run-created
+  billable resources remain. See [the runbook](../infra/nebius/README.md).
 - **AWS:** CloudWatch low-utilization auto-stop, AWS Budgets actions,
   `InstanceInitiatedShutdownBehavior`; stopped instances still bill for EBS
   volumes, Elastic IPs, and snapshots; orphan sweep via read-only
@@ -447,10 +450,11 @@ teardown tooling is implemented or executed in Phase 1.
 
 ## 11. Summary of unresolved questions (blockers and owner actions)
 
-1. Owner-run local preflight checks for Google Cloud and AWS (see
-   section 1): the read-only scripts in `scripts/preflight/` verify
-   account-level availability and pricing from the owner's authenticated
-   local environment. An owner-authorized local Cursor Agent may run them;
+1. Owner-run local readiness checks for Nebius and AWS (see section 1
+   and [the preflight guide](../scripts/preflight/README.md)). The AWS
+   script does not check pricing; Nebius uses the existing runbook and
+   local quota/capacity/image/pricing verification, not a standalone script. An owner-authorized local Cursor Agent may perform
+   these checks;
    remote/hosted Cloud Agents do not receive credentials and do not run these
    checks. Akamai plan, Seattle region, and catalog
    base price for the authorized pilot are recorded in decision D-0014.
@@ -461,7 +465,7 @@ teardown tooling is implemented or executed in Phase 1.
    configuration and planned actions only; it does not prove live capacity.
    Capacity is known when provisioning is accepted and the instance reaches
    the expected running state.
-3. Google Cloud `NVIDIA_RTX_PRO_6000_GPUS` quota and consumable regions.
+3. Nebius quota, `eu-south1` capacity, exact image availability, and current rate.
 4. AWS G-instance vCPU quota and G7e regional capacity.
 5. Whether the NIM path requires a Production Branch model / NVIDIA AI
    Enterprise license for this research.

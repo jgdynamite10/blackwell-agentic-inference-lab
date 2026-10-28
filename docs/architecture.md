@@ -360,5 +360,7 @@ explicitly authorized measurement:
   visibly; genuine output uses `RunMode.REAL` and the external
   `LAB_RESULTS_DIR` guard.
 
-Google Cloud (Phase 5) and AWS (Phase 6) replication reuse this workflow with
-per-provider Terraform modules once those phases are authorized.
+Nebius (Phase 5) and AWS (Phase 6) replication reuse the measurement
+contract. The existing [Nebius kit](../infra/nebius/README.md) provides the
+D-0045 provider-native W11 path. Broader matrices require separate
+authorization; the kit is not evidence that those matrices were completed.

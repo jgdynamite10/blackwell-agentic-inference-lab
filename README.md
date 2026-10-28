@@ -70,12 +70,21 @@ first token, inter-token latency, GPU utilization and power, error rates, and
 cost per successful task. The full measurement contract is in
 [methodology/measurement-contract.md](methodology/measurement-contract.md).
 
+## Provider scope
+
+The active provider set is **Akamai Cloud, Nebius AI Cloud, and AWS**.
+Nebius replaces the original Google Cloud replication target (D-0047).
+The existing [Nebius replication kit](infra/nebius/README.md) records
+`gpu-rtx6000-a` / `1gpu-24vcpu-218gb` in `eu-south1`. Historical
+decisions and legacy manifest compatibility are preserved. This scope
+update does not certify additional completed runs or publish results.
+
 ## Planned technical scope
 
 | Element | Plan |
 | --- | --- |
 | GPU | NVIDIA RTX PRO 6000 Blackwell Server Edition, 96 GB, single GPU |
-| Clouds | Akamai Cloud (baseline), then Google Cloud G4 and Amazon EC2 G7e (replication) |
+| Clouds | Akamai Cloud (baseline), then Nebius AI Cloud and Amazon EC2 G7e (replication) |
 | Model | NVIDIA Nemotron 3.5 Lightning 30B-A3B (BF16 and NVFP4, subject to compatibility) |
 | Serving | vLLM baseline; TensorRT-LLM and NVIDIA NIM as subsequent paths |
 | Telemetry | NVIDIA DCGM, Prometheus, Grafana; selected Nsight Systems profiling |
@@ -99,6 +108,7 @@ src/blackwell_lab/workload/  Synthetic Cloud Ops Agent, simulated tools, evaluat
 src/blackwell_lab/cloud/     Phase 3 readiness: lifecycle, telemetry, preflight, real-bench assembly, CLI
 src/blackwell_lab/engines/   Phase 4A provider-neutral engine/precision contract and profile registry
 infra/akamai/                Akamai Terraform (single GPU instance) and idempotent bootstrap design
+infra/nebius/                Nebius single-GPU Terraform and local W11 replication runbook
 tests/                       Automated tests
 scripts/preflight/           Read-only cloud feasibility checks (run locally by the operator)
 results/                     Placeholder only — genuine results are never committed here
@@ -184,7 +194,7 @@ and decisions D-0014, D-0017, D-0019, and D-0020.
 ## Disclaimer
 
 This is an independent project. The findings and views are the author's own
-and do not represent Akamai Technologies, AWS, Google Cloud, NVIDIA, or any
+and do not represent Akamai Technologies, AWS, Nebius, NVIDIA, or any
 other provider. Product and company names are the property of their respective
 owners. References do not imply sponsorship or endorsement.
 

@@ -21,7 +21,7 @@ plus structural gates), then the D-0017 three-cell baseline (1,800
 measured observations). Stop on a failed gate. Source tests do not prove
 live qualification. See the [D-0035 runbook](d-0035-qualified-baseline.md)
 for separate local approval, custody, budget, teardown, and acceptance
-requirements. AWS/GCP, controlled-resource mode, and engine/precision
+requirements. AWS/Nebius, controlled-resource mode, and engine/precision
 comparisons remain later work; the wider matrices below describe that
 broader historical scope.
 The opt-in W7 measurement instrument uses 1,024 tokens for both profiles
@@ -73,7 +73,7 @@ benchmarks are run.
 Exit criteria: repository clones cleanly with passing tests and linting; the
 complete roadmap, safety rules, and results-privacy design exist; the
 measurement contract and experiment matrix are defined; feasibility findings
-for Akamai Cloud, Google Cloud, and AWS are documented with verified facts
+for the original provider set are documented with verified facts
 separated from assumptions; a pull request is open for owner review.
 
 ## Phase 2 — Synthetic workload and evaluator *(complete)*
@@ -215,10 +215,16 @@ authorized by D-0020. Existing vLLM BF16 single-GPU behavior, C1/C2,
 workload 2.4.0, evaluator 3.1.0, thresholds, lifecycle, Terraform, and
 publication policy are unchanged.
 
-## Phase 5 — Google Cloud portability
+## Phase 5 — Nebius portability
 
-Reproduce the frozen Phase 3 baseline on a Google Cloud **G4** single-GPU
-configuration (`g4-standard-48`) while documenting every material
+D-0047 replaces the original Google Cloud target with Nebius. The
+[D-0045 kit](../infra/nebius/README.md) already implements the bounded
+provider-native W11 path. The wider plan below is not a claim of completed
+execution or authorization to launch more cells.
+
+Reproduce the frozen Phase 3 baseline on a Nebius single-GPU
+configuration (`gpu-rtx6000-a` / `1gpu-24vcpu-218gb`, `eu-south1`) while
+documenting every material
 environmental difference (CPU architecture, vCPU count, memory, storage,
 networking, virtualization, driver, region). Both controlled-resource and
 provider-native modes are run and reported separately.
@@ -278,7 +284,7 @@ unrun. No instance has been created. Live apply is a separate phrase.
 ## Phase 7 — Analysis and publication
 
 Calculate outcome-level performance and economic measures across Akamai Cloud,
-Google Cloud, and AWS; document limitations; sanitize approved results per
+Nebius, and AWS; document limitations; sanitize approved results per
 [publication-governance.md](publication-governance.md); and prepare the
 technical report. Genuine results remain external and private; any release of
 the report or results requires the owner's separate, explicit approval
@@ -292,7 +298,7 @@ and cost. This phase may be skipped entirely.
 
 ## Replication scope guard
 
-Google Cloud and AWS are **later replication providers**. The initial baseline
+Nebius and AWS are **later replication providers**. The initial baseline
 is limited to Akamai Cloud, one GPU, one validated serving configuration, both
 comparison modes, two workload profiles, concurrency 1/4/8, and five measured
 repetitions per cell (12 cells; decision D-0012). The baseline is not expanded

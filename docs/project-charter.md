@@ -11,7 +11,7 @@ GPU across three public clouds.
 
 1. Quantify how much **inference-software optimization** (vLLM vs
    TensorRT-LLM vs NVIDIA NIM), **numerical precision** (BF16 vs NVFP4), and
-   **cloud environment** (Akamai Cloud, Google Cloud, AWS) each affect the
+   **cloud environment** (Akamai Cloud, Nebius, AWS) each affect the
    ability to satisfy production-like agentic-AI service-level objectives.
 2. Identify which aspects of agentic-inference performance are **portable**
    across cloud environments when the GPU, model, workload, container, and

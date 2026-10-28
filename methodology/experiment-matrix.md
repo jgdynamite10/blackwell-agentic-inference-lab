@@ -50,7 +50,7 @@ for the separately labeled cell-level p99 analysis in Phase 7.
 
 | Factor | Levels (planned) | Notes |
 | --- | --- | --- |
-| Provider | Akamai Cloud; Google Cloud; AWS | One single-GPU instance each; phases 3/5/6 |
+| Provider | Akamai Cloud; Nebius; AWS | One single-GPU instance each; phases 3/5/6 |
 | Comparison mode | controlled-resource; provider-native | Never mixed in analysis or reporting |
 | Serving path | vLLM; TensorRT-LLM; NVIDIA NIM | vLLM is the baseline; others added in Phase 4 |
 | Precision | BF16; NVFP4 | Subject to compatibility findings |
@@ -168,7 +168,7 @@ Before any full-baseline measurement, one short owner-approved
   Availability and capacity observations are time-bound and do not
   guarantee future capacity. The same-session P1/P2C and W1/W2 control
   requirements remain. Controlled-resource
-  mode remains optional future work. AWS and GCP later repeat this same
+  mode remains optional future work. AWS and Nebius later repeat this same
   three-cell matrix if quota permits.
 
 ## Phase 4 — optimization (Akamai)
@@ -181,11 +181,11 @@ Adds precision and serving-path factors on the same hardware:
 - Upper bound: 6 configurations × 6 = **36 cells**; infeasible combinations
   documented rather than silently skipped.
 
-## Phases 5–6 — portability (Google Cloud, AWS)
+## Phases 5–6 — portability (Nebius, AWS)
 
 - Reproduce the frozen Phase 3 baseline exactly (same artifact hash, container
   digest, serving config, workload, generation parameters, measurement
-  contract) on `g4-standard-48` and the selected G7e size.
+  contract) on `gpu-rtx6000-a / 1gpu-24vcpu-218gb` and the selected G7e size.
 - Each provider runs both comparison modes — **12 cells per provider**,
   symmetric with the 12 Akamai baseline cells, so every later-provider cell
   has an exact Akamai counterpart in the same mode.
