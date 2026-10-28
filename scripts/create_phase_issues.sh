@@ -20,7 +20,7 @@ declare -a TITLES=(
   "Phase 2: Synthetic workload and evaluator"
   "Phase 3: Akamai Cloud baseline"
   "Phase 4: NVIDIA optimization"
-  "Phase 5: Google Cloud portability"
+  "Phase 5: Nebius portability"
   "Phase 6: AWS portability"
   "Phase 7: Analysis and report preparation"
   "Phase 8: Optional Dynamo extension"
@@ -30,9 +30,9 @@ declare -a BODIES=(
 "Implement the Cloud Operations Agent, simulated tools, deterministic incident scenarios, task-success evaluator, and local benchmark runner without requiring a GPU. Scope: docs/roadmap.md (Phase 2). Requires explicit owner authorization before work begins (AGENTS.md §7)."
 "Run one validated model and serving configuration on one Akamai RTX PRO 6000 Blackwell GPU using two workload profiles and concurrency levels 1, 4, and 8; freeze the baseline. Scope: docs/roadmap.md (Phase 3). Requires explicit owner authorization and per-instance provisioning approval (AGENTS.md §1, §7)."
 "Add approved precision (BF16/NVFP4) and serving-path (vLLM/TensorRT-LLM/NIM) comparisons, operational telemetry (DCGM, Prometheus, Grafana), and selected Nsight profiling. Scope: docs/roadmap.md (Phase 4). Requires explicit owner authorization (AGENTS.md §7)."
-"Reproduce the frozen baseline on a Google Cloud G4 single-GPU configuration (g4-standard-48) while documenting every material environmental difference. Scope: docs/roadmap.md (Phase 5). Requires explicit owner authorization (AGENTS.md §7)."
+"Reproduce the frozen baseline on a Nebius AI Cloud single-GPU configuration (gpu-rtx6000-a / 1gpu-24vcpu-218gb) while documenting every material environmental difference. Scope: docs/roadmap.md (Phase 5). Requires explicit owner authorization (AGENTS.md §7)."
 "Reproduce the frozen baseline on a single-GPU Amazon EC2 G7e configuration (size selected during feasibility analysis) while documenting every material environmental difference. Scope: docs/roadmap.md (Phase 6). AWS mutation is prohibited until this phase is explicitly authorized (AGENTS.md §1.5)."
-"Calculate outcome-level performance and economic measures across Akamai Cloud, Google Cloud, and AWS; document limitations; sanitize approved results; prepare the technical report. Scope: docs/roadmap.md (Phase 7). Genuine results remain external and private; every result release requires separate explicit owner approval identifying the exact files and scope, per docs/publication-governance.md."
+"Calculate outcome-level performance and economic measures across Akamai Cloud, Nebius, and AWS; document limitations; sanitize approved results; prepare the technical report. Scope: docs/roadmap.md (Phase 7). Genuine results remain external and private; every result release requires separate explicit owner approval identifying the exact files and scope, per docs/publication-governance.md."
 "Investigate multi-GPU or disaggregated prefill/decode serving with NVIDIA Dynamo only if single-GPU findings justify the additional complexity and cost. Scope: docs/roadmap.md (Phase 8). Optional; may be skipped. Requires explicit owner authorization (AGENTS.md §7)."
 )
 

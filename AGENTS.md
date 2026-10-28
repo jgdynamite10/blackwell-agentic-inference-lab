@@ -14,7 +14,7 @@ explicitly revises them in writing.
    owner's explicit approval.** `terraform plan` against approved
    configurations is permitted for review purposes only.
 3. Use scoped identities and read-only operations during feasibility checks.
-4. During Phase 1, limit Akamai Cloud, Google Cloud, and AWS access to
+4. For feasibility checks, limit Akamai Cloud, Nebius, and AWS access to
    read-only identity, availability, quota, instance-type, regional-capacity,
    and pricing checks.
 5. Decision D-0042 (`aws-diag-20261014a`) is closed. Decision D-0043
@@ -29,7 +29,7 @@ explicitly revises them in writing.
    and security group were deleted. Task scores stay out of git. Phase
    6, the comparative matrix, remains unauthorized. Any further AWS
    create, resize, start, stop, or delete needs a new owner decision.
-   Google Cloud remains unauthorized.
+   Google Cloud is outside the active provider scope (D-0048).
 6. Follow the spend controls in [docs/cost-guardrails.md](docs/cost-guardrails.md).
 
 ## 2. Repository publicity and results privacy
@@ -59,7 +59,7 @@ explicitly revises them in writing.
 ## 3. Execution boundary (remote agents vs owner-controlled local execution)
 
 1. The hosted Cloud Agent must **not** request, receive, discover, store,
-   print, or use credentials for Akamai Cloud, AWS, Google Cloud, NVIDIA
+   print, or use credentials for Akamai Cloud, AWS, Nebius, NVIDIA
    NGC/NIM, Hugging Face, or any other infrastructure or external service —
    and must not use GitHub credentials beyond the repository access already
    provided.
@@ -87,7 +87,7 @@ explicitly revises them in writing.
    local Cursor Agent receives no waiver from the exact digest-bearing
    approval, plan-freshness, cost, reconciliation, privacy, or phase gates.
 6. This execution-boundary permission applies consistently to Akamai Cloud,
-   Google Cloud, and AWS only when the corresponding provider phase and exact
+   Nebius, and AWS only when the corresponding provider phase and exact
    run are separately authorized. It does not itself authorize a later phase
    or a particular billable run.
 

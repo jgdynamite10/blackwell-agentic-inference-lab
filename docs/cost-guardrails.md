@@ -34,7 +34,7 @@ modified, or deleted without explicit owner approval, regardless of cost.
      retrieved 2026-09-06).
    - An in-instance shutdown watchdog **limits active workload but is not an
      Akamai spending backstop**.
-   - On AWS and GCP, stopped-instance compute treatment differs from
+   - On AWS, stopped-instance compute treatment differs from
      Akamai's, while disks, addresses, snapshots, and other resources may
      continue billing while an instance is stopped.
    - On Nebius, compute for a stopped VM is not charged, and disks are.
@@ -69,7 +69,7 @@ Planning estimates (details and assumptions in
 | 3 — Akamai MVL (D-0017; **live execution still requires a separate phrase**) | Same six-hour infrastructure envelope as D-0014; canary duration must project that the three measured cells finish in the remaining session; normalized cost at the owner-observed Seattle $3.00/h rate | projected duration after the canary exceeds remaining session time |
 | 3B — D-0014 compatibility/headroom pilot (separately named; unchanged) | **$25 total** / six hours maximum on one `us-sea` GPU instance plus its firewall | three elapsed hours (explicit owner decision required to continue) |
 | 4 — NVIDIA optimization (**not authorized**) | ≈ $240–$600 before incidental costs at the same $3.00/h Seattle observed plan price | 75% of estimate consumed |
-| 5 — Google Cloud | ≈ $280–$650 | 75% of estimate consumed |
+| 5 — Nebius broader matrix (not authorized) | Re-estimate from the selected schedule and locally verified Nebius rate; D-0045 has its own bounded controls below | Owner-approved budget required before execution |
 | 6 — AWS comparative matrix (**not authorized**) | ≈ $250–$760 | 75% of estimate consumed |
 | 6 — D-0042 diagnostic (closed 2026-10-14) | One G7e. `g7e.4xlarge` at $3.99816/h had no capacity. The host was `g7e.8xlarge` at $5.26824/h for about 0.83 hours (about $4.40 of compute). The 400 GB volume was deleted with the instance | Terminated after the diagnostic cell |
 | 6 — D-0043 W11 diagnostic (closed 2026-10-14) | One G7e. `g7e.4xlarge` at $3.99816/h had no capacity. The host was `g7e.8xlarge` at $5.26824/h for about 0.47 hours (about $2.46 of compute). The 400 GB volume was deleted with the instance | Terminated after the result directory was copied off the host |
@@ -122,11 +122,12 @@ for Phases 3–6:
    benchmark process). This limits runaway *workload* only — on Akamai a
    powered-off Linode keeps billing, so the watchdog is **not** a spending
    backstop there.
-2. **Provider-native controls where available.** Google Cloud instance
-   schedules / max-run-duration; AWS CloudWatch low-utilization auto-stop and
+2. **Provider-native controls where available.** AWS CloudWatch
+   low-utilization auto-stop and
    AWS Budgets alerts; Akamai has no documented native auto-stop scheduler —
    its spending control is prompt, owner-approved deletion after verified
-   result export.
+   result export. Nebius uses the D-0045 shutdown backstop and separately
+   approved deletion; disks remain billable after shutdown.
 3. **End-of-session orphan report.** A read-only sweep lists all project-tagged
    resources (and any untagged GPU resources) at the end of each session. The
    report goes to the owner; deletions still require explicit approval, and

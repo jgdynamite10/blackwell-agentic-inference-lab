@@ -8,7 +8,7 @@ recorded so they are not implemented as drive-by improvements:
 - Multi-day execution, host-resident systemd runners, and checkpoint/resume
 - A new Terraform lifecycle architecture or session-kind split
 - Dynamo, NIM, TensorRT-LLM, NVFP4, or another model
-- AWS or GCP execution (later phases may repeat the same three-cell MVL
+- AWS or Nebius execution (later phases may repeat the same three-cell MVL
   matrix if quota permits)
 - A frontend
 - Automatic teardown or destroy-plan generation on the GPU host
